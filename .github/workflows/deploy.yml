@@ -24,7 +24,7 @@ concurrency:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 240          # ~5100 titres, couverture ~92% ; marge throttling FMP/SEC
+    timeout-minutes: 330          # ~7000 titres (NASDAQ+NYSE+Canada) ; marge sous limite 6h
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -42,7 +42,7 @@ jobs:
           QUANTBENCH_SEC_UA: ${{ secrets.QUANTBENCH_SEC_UA }}
           PYTHONPATH: ${{ github.workspace }}
           PYTHONUNBUFFERED: "1"          # progression visible en direct dans le log CI
-        run: python scripts/build_site_fmp.py --exchanges NASDAQ,TSX,TSXV --workers 24
+        run: python scripts/build_site_fmp.py --exchanges NASDAQ,NYSE,TSX,TSXV --workers 24
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

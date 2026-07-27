@@ -28,7 +28,10 @@ _PREF_NAME = re.compile(
     r"|PERPETUAL\s+(RED\s+)?PREF|CUM\s+PERP|\bRATE\s+RESET\b|\bRST\s+PFD\b"
     r"|\b(SUB(ORDINATED)?|JR|JUNIOR|SR|SENIOR)\s+(NOTES?|DEBENT)"
     r"|\bDEBENTURES?\b|\bTRUST\s+PREF|\d+(\.\d+)?\s*%\s", re.I)
-_PREF_TICKER = re.compile(r"-P[FR]?[A-Z]\.(TO|V)$", re.I)
+# Privilégiées par ticker : canadiennes (TD-PFA.TO, ENB-PN.TO) ET américaines
+# (FITB-PM, OAK-PB). Motif -P + 1-2 lettres de série. Les actions de CLASSE
+# (BRK-B, BF-B, HEI-A) utilisent -A/-B/-C, jamais -P -> non touchées.
+_PREF_TICKER = re.compile(r"-P[A-Z]{1,2}(\.(TO|V))?$")
 
 
 def _is_preferred(symbol, name):

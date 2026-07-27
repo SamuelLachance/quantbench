@@ -286,7 +286,7 @@ def main(exchanges, years=6, workers=20, with_news=True, with_pdf=True, limit=No
 if __name__ == "__main__":
     args = sys.argv[1:]
     kw = {"years": 6, "workers": 20, "with_news": True, "with_pdf": True, "limit": None}
-    exch = ["NASDAQ", "TSX", "TSXV"]
+    exch = ["NASDAQ", "NYSE", "TSX", "TSXV"]
     while args:
         a = args.pop(0)
         if a == "--exchanges": exch = args.pop(0).split(",")
