@@ -50,7 +50,7 @@ def _mc_stats(eq, mcap, shares):
             "n": int(eq.size)}
 
 
-def run_mc(fund, category, n=1500):
+def run_mc(fund, category, n=10000):
     """Monte Carlo de valorisation (modèle Damodaran) — distribution de la valeur
     d'équité. DCF pour la plupart, excess-return simulé pour les financières."""
     shares, mcap = fund.get("shares"), fund.get("market_cap")
