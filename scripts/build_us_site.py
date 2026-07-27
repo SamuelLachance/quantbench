@@ -238,7 +238,8 @@ def main(tickers, quarters=8, workers=24, with_news=True, with_pdf=True, limit=N
             if (done + fail) % 100 == 0:
                 print(f"  {done+fail}/{len(work)} (ok={done})")
 
-    clean = [r for r in rows if r["upside"] is not None and -0.98 <= r["upside"] <= 3.0]
+    # Bande d'upside crédible (au-delà = quasi toujours du bruit de données micro-cap).
+    clean = [r for r in rows if r["upside"] is not None and -0.95 <= r["upside"] <= 1.5]
     suspects = [r for r in rows if r not in clean]
     clean.sort(key=lambda r: -(r["upside"] or -9))
     (US / "_screener.json").write_text(json.dumps(

@@ -26,11 +26,11 @@
   <div class="pcards">
     <div class="card" style="margin-bottom:0">
       <h2>Sous-valorisées <span class="sub">valeur intrinsèque &gt; cours</span></h2>
-      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Upside</th><th>F</th></tr></thead><tbody id="up"></tbody></table></div>
+      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Cap</th><th>Upside</th><th>F</th></tr></thead><tbody id="up"></tbody></table></div>
     </div>
     <div class="card" style="margin-bottom:0">
       <h2>Richement valorisées <span class="sub">le marché price l'optimisme</span></h2>
-      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Upside</th><th>F</th></tr></thead><tbody id="down"></tbody></table></div>
+      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Cap</th><th>Upside</th><th>F</th></tr></thead><tbody id="down"></tbody></table></div>
     </div>
   </div>
 
@@ -44,6 +44,7 @@ function row(r){
   return `<tr onclick="location.href='stock.html?t=${r.ticker}'">
     <td><span class="tk-cell">${r.ticker}</span></td>
     <td><span class="pill">${(r.sector||'—')}</span></td>
+    <td class="num">${r.market_cap==null?'—':QB.nf0.format(r.market_cap)+' Md'}</td>
     <td class="num ${cls}" style="font-weight:600">${QB.pct(r.upside)}</td>
     <td class="num">${r.piotroski==null?'—':r.piotroski}</td></tr>`;
 }
@@ -59,9 +60,11 @@ function row(r){
     ['Titres couverts',d.n_ok],['Sous-valorisés',`${uv}/${d.n_ok}`],
     ['Upside médian',QB.pct(med)],['MàJ',d.updated||'—']
   ].map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v" style="font-size:${String(v).length>10?'14px':'22px'}">${v}</div></div>`).join('');
-  document.getElementById('up').innerHTML=rows.filter(r=>r.upside!=null).slice(0,15).map(row).join('');
-  document.getElementById('down').innerHTML=rows.filter(r=>r.upside!=null).slice(-12).reverse().map(row).join('');
-  document.getElementById('disc').innerHTML=`${d.n_ok} titres NASDAQ · valorisation routée (Damodaran) + forensique + sentiment · données SEC + marché, USD · éducatif, pas un conseil.`;
+  // Dashboard = opportunités crédibles : plancher de capitalisation (pros).
+  const big=rows.filter(r=>r.upside!=null && (r.market_cap||0)>=5);
+  document.getElementById('up').innerHTML=big.slice(0,15).map(row).join('');
+  document.getElementById('down').innerHTML=big.slice(-12).reverse().map(row).join('');
+  document.getElementById('disc').innerHTML=`${d.n_ok} titres NASDAQ · top opportunités filtrées ≥ 5 Md$ · valorisation routée (Damodaran) + forensique + sentiment · SEC + marché, USD · éducatif, pas un conseil.`;
 })();
 </script>
 </body>
