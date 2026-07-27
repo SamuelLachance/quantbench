@@ -35,21 +35,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Dépendances
-        run: pip install numpy pandas scipy scikit-learn requests yfinance reportlab
-      - name: Mois courant (clé de cache)
-        id: ym
-        run: echo "v=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
-      - name: Cache SEC Data Sets
-        uses: actions/cache@v4
-        with:
-          path: data_cache/sec
-          key: sec-${{ steps.ym.outputs.v }}
-          restore-keys: sec-
-      - name: Régénérer tout le NASDAQ
+        run: pip install numpy pandas scipy scikit-learn requests reportlab
+      - name: Régénérer US + Canada (FMP)
         env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           QUANTBENCH_SEC_UA: ${{ secrets.QUANTBENCH_SEC_UA }}
           PYTHONPATH: ${{ github.workspace }}
-        run: python scripts/build_us_site.py --workers 24
+        run: python scripts/build_site_fmp.py --exchanges NASDAQ,TSX,TSXV --workers 24
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

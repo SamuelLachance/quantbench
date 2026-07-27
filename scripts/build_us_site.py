@@ -42,6 +42,7 @@ from quantbench.valuation.route import value_stock
 from quantbench.valuation.build_universal import project
 from quantbench.news import fetch_and_classify
 from quantbench.reports import financial_summary_pdf
+from quantbench.shortterm.predict import predict as st_predict
 
 warnings.filterwarnings("ignore")
 
@@ -75,61 +76,62 @@ def nasdaq_universe():
     return out
 
 
-def market_quote(ticker):
-    """Marché + activité via yfinance .info (un appel : prix/actions/capi/beta/
-    résumé/industrie), repli fast_info si .info échoue."""
+def batch_prices(symbols, chunk=150):
+    """Prix quotidiens EN LOT via yfinance.download (~1 appel / 150 titres :
+    robuste, peu de risque de throttling). Retourne {sym: {price, hist, beta}}
+    avec l'historique 1 an (pour le signal court terme) et le beta vs SPY."""
+    import numpy as np
     import yfinance as yf
-    from quantbench.data.market import fx_to_usd
-    tk = yf.Ticker(ticker)
-    out = {"price": None, "shares": None, "market_cap": None, "beta": None,
-           "summary": None, "industry": None}
+    out = {}
+    spy_ret = None
     try:
-        info = tk.info or {}
-        cur = (info.get("currency") or "USD").upper()
-        fx = fx_to_usd(cur) or 1.0
-        p = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
-        out["price"] = p * fx if p else None
-        out["shares"] = info.get("sharesOutstanding")
-        mc = info.get("marketCap")
-        out["market_cap"] = mc * fx / 1e9 if mc else None
-        out["beta"] = info.get("beta")
-        s = info.get("longBusinessSummary")
-        out["summary"] = s[:650] if s else None
-        out["industry"] = info.get("industry")
+        spy = yf.download("SPY", period="1y", interval="1d", progress=False,
+                          auto_adjust=True)["Close"]
+        if hasattr(spy, "columns"):                 # (Price,Ticker) -> Series
+            spy = spy.iloc[:, 0]
+        spy_ret = spy.dropna().pct_change().dropna()
     except Exception:
-        pass
-    if out["price"] is None:
+        spy_ret = None
+    for i in range(0, len(symbols), chunk):
+        part = symbols[i:i + chunk]
         try:
-            fi = tk.fast_info
-            cur = (getattr(fi, "currency", None) or "USD").upper()
-            fx = fx_to_usd(cur) or 1.0
-            p = getattr(fi, "last_price", None)
-            out["price"] = p * fx if p else None
-            out["shares"] = getattr(fi, "shares", None)
-            mc = getattr(fi, "market_cap", None)
-            out["market_cap"] = mc * fx / 1e9 if mc else None
+            df = yf.download(part, period="1y", interval="1d", progress=False,
+                             auto_adjust=True, threads=True)
+            closes_all = df["Close"]
         except Exception:
-            pass
+            continue
+        for s in part:
+            try:
+                col = closes_all if not hasattr(closes_all, "columns") else closes_all[s]
+                close = col.dropna()
+                if len(close) < 60:
+                    continue
+                closes = [float(x) for x in close.values]
+            except Exception:
+                continue
+            beta = None
+            try:
+                if spy_ret is not None:
+                    a, b = close.pct_change().dropna().align(spy_ret, join="inner")
+                    if len(a) > 30 and float(b.var()) > 0:
+                        beta = float(np.cov(a, b)[0, 1] / float(b.var()))
+            except Exception:
+                beta = None
+            out[s] = {"price": closes[-1], "hist": closes, "beta": beta}
+        print(f"  prix {min(i+chunk,len(symbols))}/{len(symbols)}")
     return out
 
 
-def _shortterm(price, beta, days=63):
-    """Cône de projection court terme (bandes de probabilité log-normales) —
-    illustratif (méthode quant type Simons : incertitude, pas prédiction)."""
-    import math
-    if not price:
-        return None
-    sigma = 0.22 + 0.12 * max(0.0, (beta or 1.0) - 0.8)      # vol annualisée proxy
-    pts = []
-    for step in range(0, days + 1, 7):
-        tau = step / 252.0
-        drift = -0.5 * sigma * sigma * tau
-        band = 1.2816 * sigma * math.sqrt(tau)
-        pts.append({"d": step,
-                    "p50": round(price * math.exp(drift), 2),
-                    "p10": round(price * math.exp(drift - band), 2),
-                    "p90": round(price * math.exp(drift + band), 2)})
-    return {"days": days, "sigma": round(sigma, 3), "points": pts}
+def fetch_summary(ticker):
+    """Résumé d'activité + industrie via .info (best-effort ; n'affecte PAS la
+    couverture puisque prix/beta viennent du batch)."""
+    import yfinance as yf
+    try:
+        info = yf.Ticker(ticker).info or {}
+        s = info.get("longBusinessSummary")
+        return {"summary": s[:650] if s else None, "industry": info.get("industry")}
+    except Exception:
+        return {"summary": None, "industry": None}
 
 
 def _results_summary(F):
@@ -158,11 +160,12 @@ def _statements(F):
             "total_debt": col("total_debt")}
 
 
-def build_one(ticker, entry, with_news=True, with_pdf=True):
+def build_one(ticker, entry, mkt, with_news=True, with_pdf=True):
+    if not mkt or not mkt.get("price"):
+        return None, None
     F = ds.extract_financials(entry)
-    q = market_quote(ticker)
-    if not q.get("beta"):
-        q["beta"] = SECTOR_BETA.get(sic_to_sector(entry.get("sic")), 1.1)
+    q = {"price": mkt["price"], "shares": None, "market_cap": None,
+         "beta": mkt.get("beta") or SECTOR_BETA.get(sic_to_sector(entry.get("sic")), 1.1)}
     fund = ds.extract_fundamentals(entry, ticker, q)
     if not fund.get("price"):
         return None, None
@@ -170,6 +173,8 @@ def build_one(ticker, entry, with_news=True, with_pdf=True):
     val = value_stock(ticker, fund=fund, forensic=forensic, F=F)
     if not val.get("ok"):
         return None, None
+    signal = st_predict(mkt.get("hist"))            # signal court terme (P hausse/baisse)
+    summ = fetch_summary(ticker) if with_news else {"summary": None, "industry": None}
     news = fetch_and_classify(ticker, limit=8) if with_news else []
     try:
         proj = project(fund, years=20)
@@ -182,15 +187,15 @@ def build_one(ticker, entry, with_news=True, with_pdf=True):
         f"https://www.sec.gov/Archives/edgar/data/{int(entry['cik'])}/{adsh}/" if adsh else None)
     profile = {
         "ticker": ticker, "name": fund.get("name"), "sector": fund.get("sector"),
-        "industry": q.get("industry") or fund.get("industry"), "sic": fund.get("sic"),
-        "summary": q.get("summary"),
+        "industry": summ.get("industry") or fund.get("industry"), "sic": fund.get("sic"),
+        "summary": summ.get("summary"),
         "valuation": val,
         "fundamentals": {k: fund.get(k) for k in (
             "price", "market_cap", "shares", "beta", "revenue", "ebit",
             "net_income", "total_debt", "cash", "book_equity", "operating_margin", "roe")},
         "forensics": forensic, "statements": _statements(F), "news": news,
         "projection": proj, "results_summary": _results_summary(F),
-        "shortterm": _shortterm(fund.get("price"), fund.get("beta")),
+        "shortterm": signal,
         "filing_url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={entry['cik']}&type=10-K",
         "report_url": report_url,
         "ars_pdf_url": ard.get("ars_pdf"),
@@ -211,7 +216,9 @@ def build_one(ticker, entry, with_news=True, with_pdf=True):
            "roe": fund.get("roe"),
            "piotroski": f.get("scores", {}).get("piotroski_f"),
            "beneish_flag": f.get("scores", {}).get("beneish_flag"),
-           "n_flags": len(f.get("flags", []))}
+           "n_flags": len(f.get("flags", [])),
+           "p_up": (signal or {}).get("p_up"), "p_down": (signal or {}).get("p_down"),
+           "bias": (signal or {}).get("bias")}
     return profile, row
 
 
@@ -238,9 +245,14 @@ def main(tickers, quarters=10, workers=24, with_news=True, with_pdf=True, limit=
     work = [(t, e) for t, e in work if e]
     print(f"À valoriser : {len(work)}")
 
+    print("Prix en lot (yfinance.download bulk)…")
+    mkt = batch_prices([t for t, _ in work])
+    print(f"Prix récupérés : {len(mkt)}/{len(work)}")
+
     rows, done, fail = [], 0, 0
     with cf.ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(build_one, t, e, with_news, with_pdf): t for t, e in work}
+        futs = {ex.submit(build_one, t, e, mkt.get(t), with_news, with_pdf): t
+                for t, e in work}
         for fut in cf.as_completed(futs):
             try:
                 _, row = fut.result()
@@ -263,8 +275,15 @@ def main(tickers, quarters=10, workers=24, with_news=True, with_pdf=True, limit=
          "universe": len(tickers), "updated": _now_et(),
          "rows": clean, "suspects": suspects},
         ensure_ascii=False), encoding="utf-8")
+
+    # Classement court terme (P hausse / P baisse)
+    st = [r for r in rows if r.get("p_up") is not None]
+    st.sort(key=lambda r: -(r["p_up"] or 0))
+    (US / "_shortterm.json").write_text(json.dumps(
+        {"n": len(st), "updated": _now_et(), "rows": st}, ensure_ascii=False),
+        encoding="utf-8")
     print(f"\n-> {done} valorisés, {len(suspects)} suspects, {fail} échecs "
-          f"| total {time.time()-t0:.0f}s")
+          f"| court terme {len(st)} | total {time.time()-t0:.0f}s")
 
 
 if __name__ == "__main__":

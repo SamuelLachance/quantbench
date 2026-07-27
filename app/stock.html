@@ -17,6 +17,7 @@
       <datalist id="tickerList"></datalist>
       <a href="index.html">Marché</a>
       <a href="screener.html">Screener</a>
+      <a href="shortterm.html">Court terme</a>
       <button class="toggle" id="themeBtn" type="button">◐</button>
     </div>
   </nav>
@@ -81,9 +82,17 @@ function render(d){
       <div id="projChart"></div>${projTable(d.projection)}
     </div>
 
-    <div class="card"><h2>Projection court terme <span class="sub">bandes de probabilité, 63 j — illustratif</span></h2>
-      <div id="coneChart"></div>
-      <div class="mini">Cône de probabilité (méthode quant type Simons) sur la volatilité — mesure l'incertitude, ne prédit pas la direction.</div>
+    <div class="card"><h2>Signal court terme <span class="sub">~1 mois · inspiré Medallion</span></h2>
+      ${(()=>{const s=d.shortterm||{};if(s.p_up==null)return'<div class="muted" style="font-size:13px">Historique insuffisant.</div>';
+        const pu=Math.round(s.p_up*100),pd=Math.round(s.p_down*100),cls=s.p_up>=0.5?'pos':'neg';
+        return `<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px">
+          <span class="mono ${cls}" style="font-size:32px;font-weight:700">${pu} %</span>
+          <span class="muted">proba de <b>hausse</b> · biais <b>${s.bias||'—'}</b></span></div>
+        <div style="height:10px;border-radius:5px;background:var(--neg-soft);overflow:hidden;display:flex">
+          <i style="width:${pu}%;background:var(--pos)"></i></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--faint);margin:3px 0 6px"><span>baisse ${pd} %</span><span>hausse ${pu} %</span></div>
+        ${kv([['Tendance',s.trend||'—'],['Momentum 6 m',QB.pct(s.momentum_6m)],['Z-score MM20',s.zscore],['Volatilité an.',s.vol_annual==null?'—':Math.round(s.vol_annual*100)+' %']])}`;})()}
+      <div class="mini">Composite mean-reversion + momentum + tendance. Edge directionnel faible (marchés efficients) — probabilité bornée [30-70 %], indicatif.</div>
     </div>
     <div class="card"><h2>Solidité forensique</h2>
       <div class="grid g4" style="grid-template-columns:1fr 1fr;gap:10px">
@@ -114,7 +123,6 @@ function render(d){
   </div>
   <p class="mini" style="margin-top:14px">Éducatif — pas un conseil d'investissement. Valorisation sur cas de base conservateur ; signaux forensiques statistiques à investiguer, jamais une accusation. Données SEC + marché, USD.</p>`;
   QB.bars(document.getElementById('projChart'), d.projection, 'revenue');
-  QB.cone(document.getElementById('coneChart'), d.shortterm);
   document.title='QuantBench — '+(d.name||d.ticker);
 }
 (async()=>{

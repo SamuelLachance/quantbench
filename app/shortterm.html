@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuantBench — Court terme</title>
+<meta name="description" content="Classement court terme : titres avec la plus forte probabilité de hausse ou de baisse (~1 mois).">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="wrap">
+  <nav class="nav">
+    <div class="brand"><span class="mark">Quant<b>Bench</b></span></div>
+    <div class="navlinks">
+      <div class="search"><input id="tickerSearch" list="tickerList" placeholder="ticker…" autocomplete="off" spellcheck="false"><button id="searchGo" type="button">↵</button></div>
+      <datalist id="tickerList"></datalist>
+      <a href="index.html">Marché</a>
+      <a href="screener.html">Screener</a>
+      <a href="shortterm.html" class="active">Court terme</a>
+      <button class="toggle" id="themeBtn" type="button">◐</button>
+    </div>
+  </nav>
+
+  <div class="eyebrow">Signal directionnel ~1 mois · inspiré Medallion</div>
+  <h1>Court terme — hausse vs baisse</h1>
+  <p class="lede">Composite de signaux faibles (mean-reversion, momentum, tendance) sur l'historique de prix.
+    Probabilité bornée [30-70 %] : l'edge directionnel est faible sur des marchés efficients — <b>indicatif</b>.</p>
+
+  <div class="pcards">
+    <div class="card" style="margin-bottom:0"><h2 style="color:var(--pos)">▲ Plus forte proba de hausse</h2>
+      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>P(hausse)</th><th>Tendance</th></tr></thead><tbody id="up"></tbody></table></div></div>
+    <div class="card" style="margin-bottom:0"><h2 style="color:var(--neg)">▼ Plus forte proba de baisse</h2>
+      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>P(baisse)</th><th>Tendance</th></tr></thead><tbody id="down"></tbody></table></div></div>
+  </div>
+  <p class="mini" id="disc" style="margin-top:16px"></p>
+</div>
+
+<script src="assets/app.js"></script>
+<script>
+function rowUp(r){return `<tr onclick="location.href='stock.html?t=${r.ticker}'">
+  <td><span class="tk-cell">${r.ticker}</span></td><td><span class="pill">${r.sector||'—'}</span></td>
+  <td class="num pos" style="font-weight:600">${Math.round((r.p_up||0)*100)} %</td>
+  <td class="num" style="color:var(--muted)">${r.bias||''}</td></tr>`;}
+function rowDown(r){return `<tr onclick="location.href='stock.html?t=${r.ticker}'">
+  <td><span class="tk-cell">${r.ticker}</span></td><td><span class="pill">${r.sector||'—'}</span></td>
+  <td class="num neg" style="font-weight:600">${Math.round((r.p_down||0)*100)} %</td>
+  <td class="num" style="color:var(--muted)">${r.bias||''}</td></tr>`;}
+(async()=>{
+  QB.initTheme(); QB.mountSearch();
+  let d; try{ d=await (await fetch('us/_shortterm.json',{cache:'no-store'})).json(); }
+  catch(e){ document.getElementById('disc').textContent='Données indisponibles.'; return; }
+  const rows=(d.rows||[]).filter(r=>r.p_up!=null && (r.market_cap||0)>=2);   // qualité : cap ≥ 2 Md$
+  document.getElementById('up').innerHTML=rows.slice(0,20).map(rowUp).join('');
+  document.getElementById('down').innerHTML=rows.slice(-20).reverse().map(rowDown).join('');
+  document.getElementById('disc').innerHTML=`${d.n||rows.length} titres · mis à jour ${d.updated||'—'} · signal composite, edge faible, indicatif — pas un conseil.`;
+})();
+</script>
+</body>
+</html>
