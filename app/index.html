@@ -1,511 +1,85 @@
-<style>
-  :root {
-    --bg: #f4f6f8;
-    --surface: #ffffff;
-    --surface-2: #eef1f5;
-    --border: #dde2e9;
-    --ink: #10151c;
-    --muted: #5b6472;
-    --faint: #8a94a3;
-    --accent: #b8892b;          /* laiton/or — reference Medallion */
-    --accent-soft: rgba(184,137,43,.12);
-    --pos: #1f8a5b;             /* sous-valorise / upside */
-    --pos-soft: rgba(31,138,91,.12);
-    --neg: #cf4a41;             /* survalorise / downside */
-    --hist: #b6bfcd;
-    --hist-iqr: #c9a24b;
-    --grid: rgba(90,100,114,.14);
-    --shadow: 0 1px 2px rgba(16,21,28,.04), 0 8px 30px rgba(16,21,28,.06);
-    --mono: ui-monospace, "Cascadia Code", "Segoe UI Mono", "SF Mono", Consolas, monospace;
-    --sans: -apple-system, "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0d1117; --surface: #161b22; --surface-2: #1c232d;
-      --border: #262d38; --ink: #e8ecf2; --muted: #9aa5b4; --faint: #6b7482;
-      --accent: #d0a84e; --accent-soft: rgba(208,168,78,.15);
-      --pos: #3fb880; --pos-soft: rgba(63,184,128,.14); --neg: #e06b62;
-      --hist: #3a4453; --hist-iqr: #c9a24b; --grid: rgba(154,165,180,.13);
-      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 30px rgba(0,0,0,.35);
-    }
-  }
-  :root[data-theme="light"] {
-    --bg: #f4f6f8; --surface: #ffffff; --surface-2: #eef1f5; --border: #dde2e9;
-    --ink: #10151c; --muted: #5b6472; --faint: #8a94a3; --accent: #b8892b;
-    --accent-soft: rgba(184,137,43,.12); --pos: #1f8a5b; --pos-soft: rgba(31,138,91,.12);
-    --neg: #cf4a41; --hist: #b6bfcd; --hist-iqr: #c9a24b; --grid: rgba(90,100,114,.14);
-    --shadow: 0 1px 2px rgba(16,21,28,.04), 0 8px 30px rgba(16,21,28,.06);
-  }
-  :root[data-theme="dark"] {
-    --bg: #0d1117; --surface: #161b22; --surface-2: #1c232d; --border: #262d38;
-    --ink: #e8ecf2; --muted: #9aa5b4; --faint: #6b7482; --accent: #d0a84e;
-    --accent-soft: rgba(208,168,78,.15); --pos: #3fb880; --pos-soft: rgba(63,184,128,.14);
-    --neg: #e06b62; --hist: #3a4453; --hist-iqr: #c9a24b; --grid: rgba(154,165,180,.13);
-    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 30px rgba(0,0,0,.35);
-  }
-
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font-family: var(--sans); line-height: 1.5;
-    -webkit-font-smoothing: antialiased;
-  }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 22px 64px; }
-  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-
-  /* ---- top bar ---- */
-  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
-  .brand { display: flex; align-items: baseline; gap: 10px; }
-  .brand .mark {
-    font-family: var(--mono); font-weight: 700; font-size: 18px; letter-spacing: -.02em;
-    color: var(--ink); padding: 3px 8px; border: 1.5px solid var(--accent); border-radius: 6px;
-  }
-  .brand .mark b { color: var(--accent); }
-  .brand .tag { color: var(--muted); font-size: 13px; }
-  .toggle {
-    font: inherit; font-size: 13px; color: var(--muted); background: var(--surface);
-    border: 1px solid var(--border); border-radius: 999px; padding: 6px 13px; cursor: pointer;
-  }
-  .toggle:hover { color: var(--ink); border-color: var(--accent); }
-  .toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .controls { display: flex; align-items: center; gap: 10px; }
-  .search { display: flex; gap: 6px; }
-  .search input {
-    font: inherit; font-family: var(--mono); font-size: 13px; width: 130px;
-    color: var(--ink); background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; padding: 6px 11px; text-transform: uppercase;
-  }
-  .search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
-  .search button {
-    font: inherit; font-size: 13px; font-weight: 600; color: #fff; background: var(--accent);
-    border: 1px solid var(--accent); border-radius: 8px; padding: 6px 13px; cursor: pointer;
-  }
-  .search button:hover { filter: brightness(1.06); }
-  .search button:disabled { opacity: .55; cursor: default; }
-  .status {
-    font-size: 13px; padding: 10px 14px; border-radius: 10px; margin-bottom: 18px;
-    border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
-  }
-  .status.err { border-color: var(--neg); color: var(--neg); background: var(--neg-soft, rgba(207,74,65,.13)); }
-  .status.ok { border-color: var(--pos); color: var(--pos); background: var(--pos-soft); }
-  @keyframes qbspin { to { transform: rotate(360deg); } }
-  .spin { display: inline-block; width: 12px; height: 12px; margin-right: 7px; vertical-align: -1px;
-    border: 2px solid var(--faint); border-top-color: var(--accent); border-radius: 50%;
-    animation: qbspin .7s linear infinite; }
-  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
-  @media (max-width: 620px) { .search input { width: 96px; } }
-
-  /* ---- company header ---- */
-  .company { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
-  .company h1 { font-size: 27px; letter-spacing: -.02em; margin: 0 0 3px; text-wrap: balance; }
-  .company .sub { color: var(--muted); font-size: 14px; }
-  .company .ticker { color: var(--accent); font-family: var(--mono); font-weight: 700; }
-  .price { text-align: right; }
-  .price .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); }
-  .price .val { font-family: var(--mono); font-size: 24px; font-weight: 600; }
-
-  /* ---- verdict ---- */
-  .verdict {
-    display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 1px;
-    background: var(--border); border: 1px solid var(--border); border-radius: 14px;
-    overflow: hidden; box-shadow: var(--shadow); margin-bottom: 26px;
-  }
-  .vcell { background: var(--surface); padding: 20px 22px; }
-  .vcell .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin-bottom: 8px; }
-  .vcell .big { font-family: var(--mono); font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
-  .vcell .big.pos { color: var(--pos); }
-  .vcell .note { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
-  .range { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 7px; }
-  .probbar { height: 9px; border-radius: 5px; background: var(--surface-2); overflow: hidden; margin-top: 12px; }
-  .probbar > i { display: block; height: 100%; background: var(--pos); border-radius: 5px; }
-
-  /* ---- cards ---- */
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 22px 24px; margin-bottom: 22px; }
-  .card > h2 { font-size: 15px; letter-spacing: -.01em; margin: 0 0 4px; }
-  .card > .desc { color: var(--muted); font-size: 13px; margin: 0 0 16px; max-width: 62ch; }
-  .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--accent); font-weight: 600; margin-bottom: 6px; }
-
-  /* ---- chart ---- */
-  .chartwrap { position: relative; }
-  svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
-  .bar { fill: var(--hist); transition: fill .12s; }
-  .bar.iqr { fill: var(--hist-iqr); fill-opacity: .55; }
-  .bar:hover { fill: var(--accent); fill-opacity: 1; }
-  .axis text { fill: var(--faint); font-family: var(--mono); font-size: 11px; }
-  .gridline { stroke: var(--grid); stroke-width: 1; }
-  .refline { stroke-width: 2; }
-  .refline.market { stroke: var(--ink); stroke-dasharray: 5 4; }
-  .refline.median { stroke: var(--accent); }
-  .reflabel { font-family: var(--mono); font-size: 11px; font-weight: 600; }
-  .legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px; font-size: 12.5px; color: var(--muted); }
-  .legend span { display: inline-flex; align-items: center; gap: 6px; }
-  .swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
-  .tip {
-    position: absolute; pointer-events: none; opacity: 0; transform: translate(-50%,-100%);
-    background: var(--ink); color: var(--bg); font-family: var(--mono); font-size: 11.5px;
-    padding: 6px 9px; border-radius: 7px; white-space: nowrap; transition: opacity .1s; z-index: 3;
-  }
-
-  /* ---- tables ---- */
-  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  th, td { text-align: right; padding: 9px 10px; border-bottom: 1px solid var(--border); }
-  th:first-child, td:first-child { text-align: left; }
-  thead th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); font-weight: 600; }
-  tbody td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-  tbody tr:last-child td { border-bottom: none; }
-  .ladder td.hl { color: var(--accent); font-weight: 600; }
-  .spark { height: 26px; }
-  .spark rect { fill: var(--accent-soft); }
-  .spark rect.on { fill: var(--accent); }
-
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-  .tableScroll { overflow-x: auto; }
-
-  /* ---- fundamentals strip ---- */
-  .fundgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px,1fr));
-    gap: 1px; background: var(--border); border: 1px solid var(--border);
-    border-radius: 10px; overflow: hidden; }
-  .funditem { background: var(--surface); padding: 12px 14px; }
-  .funditem .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); }
-  .funditem .v { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 600; margin-top: 3px; }
-  .funditem .src { font-size: 10px; color: var(--faint); margin-top: 2px; }
-
-  /* ---- method ---- */
-  .method ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
-  .method li { margin-bottom: 6px; }
-  .method b { color: var(--ink); }
-  .flag {
-    display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted);
-    background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 8px; padding: 8px 12px; margin-top: 4px;
-  }
-  .disclaimer { font-size: 12px; color: var(--faint); margin-top: 18px; border-top: 1px solid var(--border); padding-top: 16px; text-wrap: pretty; }
-
-  @media (max-width: 720px) {
-    .verdict { grid-template-columns: 1fr; }
-    .grid2 { grid-template-columns: 1fr; }
-    .company h1 { font-size: 23px; }
-  }
-</style>
-
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuantBench — Valorisation & forensique gratuites</title>
+<meta name="description" content="Valorisation intrinsèque, analyse forensique et sentiment des news — gratuit, pour aider chacun à mieux décider.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
 <div class="wrap">
-  <div class="topbar">
-    <div class="brand">
-      <span class="mark">Quant<b>Bench</b></span>
-      <span class="tag">Valorisation probabiliste · inspiration Medallion</span>
-    </div>
-    <div class="controls">
-      <form class="search" id="searchForm">
-        <input id="tickerInput" class="mono" type="text" placeholder="ticker (ex. NVDA)"
-               autocomplete="off" spellcheck="false" maxlength="8" aria-label="Symbole boursier"/>
-        <button type="submit" id="goBtn">Valoriser</button>
-      </form>
+  <nav class="nav">
+    <div class="brand"><span class="mark">Quant<b>Bench</b></span>
+      <span class="tag">valorisation &amp; forensique · gratuit</span></div>
+    <div class="navlinks">
+      <a href="index.html" class="active">Accueil</a>
+      <a href="screener.html">Screener</a>
       <button class="toggle" id="themeBtn" type="button">Thème</button>
     </div>
-  </div>
+  </nav>
 
-  <div class="status" id="status" hidden></div>
+  <div class="eyebrow">Aide à la décision · marché US</div>
+  <h1>Les actions les plus sous-valorisées du moment, selon nos algorithmes</h1>
+  <p class="lede">Chaque titre est valorisé par la méthode adaptée à sa nature (<b>DCF FCFF</b>,
+    <b>excess-return</b> pour les financières, <b>bénéfices normalisés</b> pour les cycliques —
+    méthode Damodaran), puis passé au crible <b>forensique</b> (Beneish, Altman, Piotroski) et au
+    <b>sentiment des news</b>. Données <b>SEC</b> + marché, converties en USD. Cliquez un titre pour
+    son profil complet.</p>
 
-  <div class="company">
-    <div>
-      <div class="eyebrow">Valorisation long terme · DCF Monte Carlo</div>
-      <h1 id="coName">—</h1>
-      <div class="sub"><span class="ticker" id="coTicker">—</span> · horizon 10 ans · <span id="nScen">—</span> scénarios Monte Carlo · valeurs en <span id="unit">Md$</span></div>
-    </div>
-    <div class="price">
-      <div class="lbl">Cours actuel</div>
-      <div class="val mono" id="curPrice">—</div>
-      <div class="sub mono" id="curCap">—</div>
-    </div>
-  </div>
+  <div class="grid g4" id="stats" style="margin-bottom:22px"></div>
 
-  <!-- VERDICT -->
-  <div class="verdict">
-    <div class="vcell">
-      <div class="lbl">Valeur intrinsèque médiane / action</div>
-      <div class="big pos mono" id="vShare">—</div>
-      <div class="range" id="vShareRange">—</div>
-      <div class="note">Fourchette 10ᵉ–90ᵉ percentile des scénarios</div>
-    </div>
-    <div class="vcell">
-      <div class="lbl">Upside médian vs cours</div>
-      <div class="big pos mono" id="upside">—</div>
-      <div class="note" id="pointNote">—</div>
-    </div>
-    <div class="vcell">
-      <div class="lbl">Probabilité de sous-valorisation</div>
-      <div class="big mono" id="prob">—</div>
-      <div class="probbar"><i id="probFill"></i></div>
-      <div class="note" id="probNote">—</div>
-    </div>
-  </div>
-
-  <!-- FUNDAMENTALS -->
   <div class="card">
-    <h2>Hypothèses dérivées des données <span id="fyLabel" class="mono" style="color:var(--faint);font-weight:400;font-size:13px"></span></h2>
-    <p class="desc">Fondamentaux <b>SEC EDGAR</b>, taux <b>FRED</b>, prix &amp; bêta <b>marché</b> — tout est traçable, rien n'est inventé. Ces valeurs pilotent le cas de base ; le Monte Carlo tire autour d'elles.</p>
-    <div class="fundgrid" id="fundGrid"></div>
+    <div class="eyebrow">Top opportunités</div>
+    <h2>Les plus sous-valorisées (upside le plus élevé)</h2>
+    <p class="desc">Valeur intrinsèque médiane nettement au-dessus du cours. Prudence : « sous-valorisé »
+      selon un cas de base conservateur, pas une recommandation.</p>
+    <div class="opps" id="topUp"></div>
   </div>
 
-  <!-- DISTRIBUTION -->
   <div class="card">
-    <div class="eyebrow">Pièce maîtresse</div>
-    <h2>Distribution de la valeur intrinsèque (équité)</h2>
-    <p class="desc">Chaque scénario tire des hypothèses corrélées (croissance, marge, WACC, bêta…) et revalorise l'entreprise. On lit une <b>plage</b>, pas une fausse précision. La bande dorée = intervalle interquartile (25ᵉ–75ᵉ) ; les repères marquent le cours actuel et la médiane.</p>
-    <div class="chartwrap">
-      <svg class="chart" id="hist" viewBox="0 0 900 380" role="img" aria-label="Distribution Monte Carlo de la valeur intrinsèque"></svg>
-      <div class="tip" id="tip"></div>
-    </div>
-    <div class="legend">
-      <span><i class="swatch" style="background:var(--hist)"></i> Scénarios</span>
-      <span><i class="swatch" style="background:var(--hist-iqr);opacity:.7"></i> Interquartile (P25–P75)</span>
-      <span><i class="swatch" style="background:var(--accent)"></i> Médiane</span>
-      <span><i class="swatch" style="background:var(--ink)"></i> Capitalisation actuelle</span>
-    </div>
+    <div class="eyebrow">Les plus chères</div>
+    <h2>Richement valorisées (le marché price beaucoup d'optimisme)</h2>
+    <div class="opps" id="topDown"></div>
   </div>
 
-  <div class="grid2">
-    <!-- PERCENTILE LADDER -->
-    <div class="card" style="margin-bottom:0">
-      <h2>Échelle de percentiles</h2>
-      <p class="desc">Où se situe le marché dans la distribution.</p>
-      <div class="tableScroll">
-        <table class="ladder">
-          <thead><tr><th>Percentile</th><th>Équité (Md$)</th><th>/ action</th></tr></thead>
-          <tbody id="ladderBody"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- METHOD -->
-    <div class="card method" style="margin-bottom:0">
-      <h2>Méthode &amp; honnêteté</h2>
-      <p class="desc">Ce que le modèle fait — et ne prétend pas faire.</p>
-      <ul>
-        <li><b>FCFF multi-phase</b> à la Damodaran : croissance → marges → réinvestissement → actualisation au WACC + valeur terminale.</li>
-        <li><b>Monte Carlo</b> sur les hypothèses via copule gaussienne (corrélations préservées).</li>
-        <li>Cœur mathématique <b>testé par forme fermée</b> (perpétuité FCFF/WACC exacte).</li>
-      </ul>
-      <div class="flag" id="tvFlag">—</div>
-    </div>
-  </div>
-
-  <!-- PROJECTIONS -->
-  <div class="card" style="margin-top:22px">
-    <h2>Trajectoires projetées (cas de base)</h2>
-    <p class="desc">Chiffre d'affaires et flux de trésorerie disponible (FCFF), avec convergence de la croissance vers le taux terminal et du WACC.</p>
-    <div class="tableScroll">
-      <table>
-        <thead><tr>
-          <th>Année</th><th>Croissance</th><th>CA</th><th>Marge op.</th>
-          <th>FCFF</th><th>WACC</th><th>ROIC</th>
-        </tr></thead>
-        <tbody id="seriesBody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <p class="disclaimer" id="disc">—</p>
+  <p class="disclaimer" id="disc"></p>
 </div>
 
+<script src="assets/app.js"></script>
 <script>
-const DATA = {"ticker": "MSFT", "name": "Microsoft Corp.", "unit": "Md$", "current_market_cap": 2837.2, "shares_outstanding": 7.433166379, "current_price": 381.7, "fiscal_year_end": "2025-06-30", "point_estimate": 1564.8, "terminal_value_share": 0.565, "meta": {"operating_margin": 0.4562, "effective_tax": 0.1763, "sales_to_capital": 0.79, "current_roic": 0.2971, "terminal_roic": 0.1182, "cost_of_debt": 0.068, "risk_free_rate": 0.0471, "levered_beta": 1.136, "unlevered_beta": 1.123, "hist_growth_median": 0.1154, "debt": 43.2, "cash_and_non_operating": 30.2}, "mc": {"n_valid": 20000, "n_total": 20000, "median": 1557.2, "mean": 1572.6, "std": 235.6, "percentiles": {"5": 1215.9, "10": 1284.4, "25": 1407.2, "50": 1557.2, "75": 1721.2, "90": 1881.1, "95": 1982.3}, "prob_undervalued": 0.0001, "median_upside": -0.4511, "value_per_share": {"median": 209.5, "p10": 172.79, "p90": 253.07}}, "histogram": [{"x": 899.4, "y": 10}, {"x": 955.99, "y": 17}, {"x": 1012.58, "y": 44}, {"x": 1069.16, "y": 131}, {"x": 1125.75, "y": 272}, {"x": 1182.33, "y": 465}, {"x": 1238.92, "y": 784}, {"x": 1295.5, "y": 1091}, {"x": 1352.09, "y": 1454}, {"x": 1408.68, "y": 1665}, {"x": 1465.26, "y": 1889}, {"x": 1521.85, "y": 1911}, {"x": 1578.43, "y": 2018}, {"x": 1635.02, "y": 1742}, {"x": 1691.61, "y": 1466}, {"x": 1748.19, "y": 1300}, {"x": 1804.78, "y": 1044}, {"x": 1861.36, "y": 797}, {"x": 1917.95, "y": 606}, {"x": 1974.53, "y": 431}, {"x": 2031.12, "y": 273}, {"x": 2087.71, "y": 207}, {"x": 2144.29, "y": 137}, {"x": 2200.88, "y": 90}, {"x": 2257.46, "y": 62}, {"x": 2314.05, "y": 44}, {"x": 2370.63, "y": 22}, {"x": 2427.22, "y": 7}, {"x": 2483.81, "y": 8}, {"x": 2540.39, "y": 3}, {"x": 2596.98, "y": 3}, {"x": 2653.56, "y": 1}, {"x": 2710.15, "y": 1}, {"x": 2766.74, "y": 1}, {"x": 2823.32, "y": 1}, {"x": 2879.91, "y": 0}, {"x": 2936.49, "y": 2}, {"x": 2993.08, "y": 0}, {"x": 3049.66, "y": 0}, {"x": 3106.25, "y": 1}], "series": {"years": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "revenues": [314.2, 347.1, 379.5, 415.0, 449.6, 482.5, 512.9, 545.2, 570.0, 586.0], "fcff": [72.21, 84.55, 97.71, 106.85, 121.56, 128.22, 133.97, 129.56, 140.14, 153.01], "wacc": [9.75, 9.75, 9.75, 9.75, 9.75, 9.75, 9.75, 9.75, 9.75, 9.75], "margins": [45.6, 45.6, 45.6, 45.6, 45.6, 45.6, 45.6, 45.6, 45.6, 45.6], "roic": [29.4, 29.1, 28.9, 28.8, 28.7, 27.9, 26.9, 25.7, 24.4, 23.3], "growth": [11.5, 10.4, 9.4, 9.4, 8.3, 7.3, 6.3, 6.3, 4.5, 2.8]}};
-
-const nf = new Intl.NumberFormat('fr-FR', {maximumFractionDigits:0});
-const nf1 = new Intl.NumberFormat('fr-FR', {minimumFractionDigits:1, maximumFractionDigits:1});
-const nf2 = new Intl.NumberFormat('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2});
-const pct = (v,d=1)=> (v>=0?'+':'−')+new Intl.NumberFormat('fr-FR',{minimumFractionDigits:d,maximumFractionDigits:d}).format(Math.abs(v*100))+' %';
-
-let CUR = DATA;
-
-function fill() {
-  const d = CUR, mc = d.mc, vps = mc.value_per_share;
-  document.getElementById('coName').textContent = d.name;
-  document.getElementById('coTicker').textContent = d.ticker;
-  document.getElementById('nScen').textContent = new Intl.NumberFormat('fr-FR').format(mc.n_valid);
-  document.getElementById('curPrice').textContent = nf2.format(d.current_price)+' $';
-  document.getElementById('curCap').textContent = 'Cap. '+nf.format(d.current_market_cap)+' Md$';
-
-  document.getElementById('vShare').textContent = nf2.format(vps.median)+' $';
-  document.getElementById('vShareRange').textContent = nf2.format(vps.p10)+' – '+nf2.format(vps.p90)+' $';
-  document.getElementById('upside').textContent = pct(mc.median_upside);
-  document.getElementById('pointNote').textContent = 'Estimation ponctuelle : '+nf.format(d.point_estimate)+' Md$ d’équité';
-  document.getElementById('prob').textContent = new Intl.NumberFormat('fr-FR',{minimumFractionDigits:1,maximumFractionDigits:1}).format(mc.prob_undervalued*100)+' %';
-  document.getElementById('probFill').style.width = (mc.prob_undervalued*100)+'%';
-  document.getElementById('probNote').textContent = 'des '+nf.format(mc.n_valid)+' scénarios placent la valeur au-dessus du cours';
-
-  const up = mc.median_upside >= 0;
-  document.getElementById('upside').classList.toggle('pos', up);
-  document.getElementById('upside').style.color = up ? 'var(--pos)' : 'var(--neg)';
-
-  document.getElementById('tvFlag').innerHTML = '⚠︎ La valeur terminale pèse <b style="color:var(--ink)">&nbsp;'+
-    new Intl.NumberFormat('fr-FR',{maximumFractionDigits:0}).format(d.terminal_value_share*100)+' %</b>&nbsp; de la valeur — sensible aux hypothèses de long terme.';
-
-  // ladder
-  const lb = document.getElementById('ladderBody');
-  const order = ['5','10','25','50','75','90','95'];
-  lb.innerHTML = order.map(p=>{
-    const eq = mc.percentiles[p];
-    const ps = eq / d.shares_outstanding;
-    const hl = p==='50' ? ' hl' : '';
-    return `<tr><td>P${p}${p==='50'?' (médiane)':''}</td>`+
-      `<td class="num${hl}">${nf.format(eq)}</td>`+
-      `<td class="num${hl}">${nf2.format(ps)} $</td></tr>`;
-  }).join('');
-
-  // series
-  const s = d.series;
-  document.getElementById('seriesBody').innerHTML = s.years.map((y,i)=>
-    `<tr><td>${y===s.years.length?'Terminal→':'Année '+y}</td>`+
-    `<td class="num">${nf1.format(s.growth[i])} %</td>`+
-    `<td class="num">${nf1.format(s.revenues[i])}</td>`+
-    `<td class="num">${nf1.format(s.margins[i])} %</td>`+
-    `<td class="num">${nf1.format(s.fcff[i])}</td>`+
-    `<td class="num">${nf2.format(s.wacc[i])} %</td>`+
-    `<td class="num">${nf1.format(s.roic[i])} %</td></tr>`
-  ).join('');
-
-  // fundamentals
-  const m = d.meta || {};
-  if (d.fiscal_year_end) document.getElementById('fyLabel').textContent = '· exercice '+d.fiscal_year_end;
-  const fg = document.getElementById('fundGrid');
-  if (fg && d.meta) {
-    const items = [
-      ['CA base', nf1.format(d.series.revenues[0]/ (1+ (d.series.growth[0]/100)) )+' Md$', 'dernier 10-K'],
-      ['Croissance hist.', pct(m.hist_growth_median,1), 'médiane YoY'],
-      ['Marge opérat.', nf1.format(m.operating_margin*100)+' %', 'SEC'],
-      ['Taux d’impôt eff.', nf1.format(m.effective_tax*100)+' %', 'SEC'],
-      ['ROIC courant', (m.current_roic!=null?nf1.format(m.current_roic*100)+' %':'—'), 'réinvest.'],
-      ['ROIC terminal', (m.terminal_roic!=null?nf1.format(m.terminal_roic*100)+' %':'—'), 'érosion rente'],
-      ['WACC (an 1)', nf2.format(d.series.wacc[0])+' %', 'calculé'],
-      ['Bêta (levé)', nf2.format(m.levered_beta), 'régression 5 a'],
-      ['Taux sans risque', nf2.format(m.risk_free_rate*100)+' %', 'FRED 10 a'],
-      ['Coût de la dette', nf2.format(m.cost_of_debt*100)+' %', 'SEC'],
-      ['Dette', nf1.format(m.debt)+' Md$', 'SEC'],
-      ['Cash & non-op.', nf1.format(m.cash_and_non_operating)+' Md$', 'SEC'],
-      ['Val. terminale', nf1.format(d.terminal_value_share*100)+' %', 'part de la valeur'],
-    ];
-    fg.innerHTML = items.map(([k,v,s])=>
-      `<div class="funditem"><div class="k">${k}</div><div class="v">${v}</div><div class="src">${s}</div></div>`).join('');
-  }
-
+const fmtPct = v => (v>=0?'+':'−')+new Intl.NumberFormat('fr-FR',{maximumFractionDigits:0}).format(Math.abs(v*100))+' %';
+function oppCard(r){
+  const up = r.upside==null ? 'n/a' : fmtPct(r.upside);
+  const cls = (r.upside||0)>=0 ? 'pos':'neg';
+  return `<a class="opp" href="stock.html?t=${r.ticker}">
+    <div class="tk">${r.ticker}</div><div class="nm">${r.name||''}</div>
+    <div class="up ${cls}">${up}</div>
+    <div class="meta">${r.category} · conf. ${r.confidence||'—'}</div></a>`;
+}
+(async ()=>{
+  QB.initTheme();
+  let d;
+  try{ d = await (await fetch('us/_screener.json',{cache:'no-store'})).json(); }
+  catch(e){ document.getElementById('disc').textContent='Données indisponibles.'; return; }
+  const rows = d.rows||[];
+  const undervalued = rows.filter(r=>r.upside>0).length;
+  const meds = rows.map(r=>r.upside).filter(v=>v!=null).sort((a,b)=>a-b);
+  const med = meds.length?meds[Math.floor(meds.length/2)]:0;
+  const stats=[['Titres couverts',d.n_ok],['Sous-valorisés',`${undervalued}/${d.n_ok}`],
+    ['Upside médian',fmtPct(med)],['Données suspectes',d.n_suspect]];
+  document.getElementById('stats').innerHTML = stats.map(([k,v])=>
+    `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  const up = rows.filter(r=>r.upside!=null).slice(0,12);           // déjà trié desc
+  const down = rows.filter(r=>r.upside!=null).slice(-8).reverse();
+  document.getElementById('topUp').innerHTML = up.map(oppCard).join('');
+  document.getElementById('topDown').innerHTML = down.map(oppCard).join('');
   document.getElementById('disc').innerHTML =
-    'Modèle de recherche à but éducatif — <b>ceci n’est pas un conseil d’investissement</b>. '+
-    'Données réelles : fondamentaux <b>SEC EDGAR</b>, taux sans risque <b>FRED</b> (Treasury 10 ans), prix &amp; bêta issus du marché. '+
-    'Le cas de base est volontairement <b>conservateur</b> : la croissance part de la médiane historique et converge vers le taux terminal, '+
-    'et le réinvestissement est calibré sur le ratio ventes/capital. Sur ces hypothèses, le marché price davantage d’optimisme que l’historique — '+
-    'la distribution montre l’incertitude, elle ne la supprime pas. Les leviers les plus sensibles sont la vitesse de décroissance de la croissance et le réinvestissement.';
-}
-
-function drawHist() {
-  const svg = document.getElementById('hist');
-  const W=900, H=380, mL=48, mR=16, mT=24, mB=42;
-  const plotW = W-mL-mR, plotH = H-mT-mB;
-  const h = CUR.histogram, mc = CUR.mc;
-  const xs = h.map(b=>b.x);
-  const binW = xs[1]-xs[0];
-  const xMin = xs[0]-binW/2, xMax = xs[xs.length-1]+binW/2;
-  const yMax = Math.max(...h.map(b=>b.y))*1.08;
-  const X = v => mL + (v-xMin)/(xMax-xMin)*plotW;
-  const Y = v => mT + plotH - (v/yMax)*plotH;
-  const iqrLo = mc.percentiles['25'], iqrHi = mc.percentiles['75'];
-  let els = '';
-
-  // gridlines + y labels
-  const yticks = 4;
-  for (let i=0;i<=yticks;i++){
-    const v = yMax*i/yticks, y = Y(v);
-    els += `<line class="gridline" x1="${mL}" y1="${y.toFixed(1)}" x2="${W-mR}" y2="${y.toFixed(1)}"/>`;
-    els += `<text class="mono" x="${mL-8}" y="${(y+4).toFixed(1)}" text-anchor="end" fill="var(--faint)" font-size="11">${nf.format(v)}</text>`;
-  }
-  // bars
-  const bw = (X(xs[1])-X(xs[0]))*0.86;
-  h.forEach(b=>{
-    if (b.y<=0) return;
-    const x = X(b.x)-bw/2, y = Y(b.y), bh = mT+plotH-y;
-    const inIqr = b.x>=iqrLo && b.x<=iqrHi;
-    els += `<rect class="bar${inIqr?' iqr':''}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${bw.toFixed(2)}" height="${bh.toFixed(2)}" rx="1.5" `+
-      `data-x="${b.x}" data-y="${b.y}" data-bw="${binW}"></rect>`;
-  });
-  // x axis labels
-  const xticks = 6;
-  for (let i=0;i<=xticks;i++){
-    const v = xMin + (xMax-xMin)*i/xticks, x = X(v);
-    els += `<text class="mono" x="${x.toFixed(1)}" y="${H-mB+18}" text-anchor="middle" fill="var(--faint)" font-size="11">${nf.format(v)}</text>`;
-  }
-  els += `<text class="mono" x="${mL+plotW/2}" y="${H-4}" text-anchor="middle" fill="var(--muted)" font-size="11.5">Valeur intrinsèque de l'équité — Md$</text>`;
-
-  // reference lines
-  const xMarket = X(CUR.current_market_cap), xMed = X(mc.median);
-  els += `<line class="refline median" x1="${xMed.toFixed(1)}" y1="${mT}" x2="${xMed.toFixed(1)}" y2="${mT+plotH}"/>`;
-  els += `<text class="reflabel" x="${(xMed+6).toFixed(1)}" y="${mT+13}" fill="var(--accent)">Médiane ${nf.format(mc.median)}</text>`;
-  els += `<line class="refline market" x1="${xMarket.toFixed(1)}" y1="${mT}" x2="${xMarket.toFixed(1)}" y2="${mT+plotH}"/>`;
-  els += `<text class="reflabel" x="${(xMarket-6).toFixed(1)}" y="${mT+13}" text-anchor="end" fill="var(--ink)">Cours ${nf.format(CUR.current_market_cap)}</text>`;
-
-  svg.innerHTML = els;
-
-  // tooltip
-  const tip = document.getElementById('tip');
-  const wrap = svg.parentElement;
-  svg.querySelectorAll('.bar').forEach(bar=>{
-    bar.addEventListener('mousemove', e=>{
-      const x=+bar.dataset.x, y=+bar.dataset.y, bwv=+bar.dataset.bw;
-      const prob = (y/mc.n_valid*100);
-      const r = wrap.getBoundingClientRect();
-      tip.style.left = (e.clientX - r.left)+'px';
-      tip.style.top = (e.clientY - r.top - 8)+'px';
-      tip.style.opacity = 1;
-      tip.innerHTML = `${nf.format(x-bwv/2)}–${nf.format(x+bwv/2)} Md$<br>${nf.format(y)} scénarios · ${nf1.format(prob)} %`;
-    });
-    bar.addEventListener('mouseleave', ()=> tip.style.opacity=0);
-  });
-}
-
-// theme toggle
-document.getElementById('themeBtn').addEventListener('click', ()=>{
-  const root = document.documentElement;
-  const dark = getComputedStyle(root).getPropertyValue('--bg').trim().startsWith('#0');
-  root.setAttribute('data-theme', dark ? 'light' : 'dark');
-});
-
-function render(d) { CUR = d; fill(); drawHist(); }
-
-// --- Recherche live (fonctionne quand la page est servie par le backend) ---
-const statusEl = document.getElementById('status');
-function setStatus(msg, cls) {
-  if (!msg) { statusEl.hidden = true; return; }
-  statusEl.hidden = false;
-  statusEl.className = 'status' + (cls ? ' ' + cls : '');
-  statusEl.innerHTML = msg;
-}
-async function lookup(ticker) {
-  ticker = (ticker || '').trim().toUpperCase();
-  if (!ticker) return;
-  const btn = document.getElementById('goBtn');
-  btn.disabled = true;
-  setStatus('<span class="spin"></span>Valorisation de <b>'+ticker+'</b> — données SEC + Monte Carlo…', '');
-  try {
-    const r = await fetch('/api/value/' + encodeURIComponent(ticker) + '?n=8000');
-    if (!r.ok) {
-      const e = await r.json().catch(()=>({detail:'erreur '+r.status}));
-      throw new Error(e.detail || ('erreur '+r.status));
-    }
-    const data = await r.json();
-    render(data);
-    setStatus('✓ '+ticker+' valorisé (données live).', 'ok');
-    setTimeout(()=>setStatus(null), 2500);
-  } catch (err) {
-    const offline = (err instanceof TypeError);   // fetch bloqué (artifact statique)
-    setStatus(offline
-      ? 'La recherche live nécessite le backend : <span class="mono">uvicorn quantbench.api.app:app --port 8000</span>, puis ouvrez <span class="mono">http://localhost:8000</span>.'
-      : 'Impossible de valoriser ce titre : ' + err.message, 'err');
-  } finally {
-    btn.disabled = false;
-  }
-}
-document.getElementById('searchForm').addEventListener('submit', e => {
-  e.preventDefault();
-  lookup(document.getElementById('tickerInput').value);
-});
-
-render(DATA);
+    'Outil de recherche <b>éducatif — pas un conseil d’investissement</b>. Univers US en expansion vers '+
+    'tout le NASDAQ. Valorisations sur cas de base conservateur ; la plupart des mégacaps ressortent chères. '+
+    'Fondamentaux SEC (Financial Statement Data Sets), prix marché, tout converti en USD.';
+})();
 </script>
+</body>
+</html>

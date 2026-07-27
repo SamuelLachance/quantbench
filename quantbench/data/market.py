@@ -51,6 +51,31 @@ def risk_free_rate() -> float:
     raise RuntimeError("Aucune valeur DGS10 valide dans le flux FRED.")
 
 
+@functools.lru_cache(maxsize=128)
+def fx_to_usd(currency: str):
+    """Taux de conversion : 1 unite de `currency` = X USD. USD -> 1.0.
+
+    Retourne None si la devise est inconnue (le code appelant DOIT alors signaler
+    le titre plutot que de mal le valoriser). Gere les cotations en pence (GBp/GBX).
+    """
+    if not currency:
+        return None
+    c = currency.upper()
+    if c == "USD":
+        return 1.0
+    if c in ("GBX", "GBP."):                     # pence britanniques -> livres
+        gbp = fx_to_usd("GBP")
+        return gbp / 100.0 if gbp else None
+    for sym, invert in ((f"{c}USD=X", False), (f"USD{c}=X", True)):
+        try:
+            v = _chart(sym, "5d", "1d")
+            if v and v[-1] and v[-1] > 0:
+                return (1.0 / float(v[-1])) if invert else float(v[-1])
+        except Exception:
+            continue
+    return None
+
+
 @functools.lru_cache(maxsize=256)
 def split_factor_since(symbol: str, since_iso: str) -> float:
     """Facteur cumule de fractionnement d'actions depuis `since_iso` (YYYY-MM-DD).
@@ -79,6 +104,38 @@ def split_factor_since(symbol: str, since_iso: str) -> float:
             if den > 0:
                 factor *= num / den
     return factor
+
+
+def quote(symbol: str) -> dict:
+    """Donnees de marche legeres via yfinance fast_info : prix, actions,
+    capitalisation, beta — le tout CONVERTI en USD. Complement de la SEC (qui
+    n'a ni prix ni capitalisation)."""
+    import yfinance as yf
+    out = {"price": None, "shares": None, "market_cap": None,
+           "currency": None, "beta": None}
+    try:
+        fi = yf.Ticker(symbol).fast_info
+        cur = (getattr(fi, "currency", None) or "USD").upper()
+        fx = fx_to_usd(cur) or 1.0
+        price = getattr(fi, "last_price", None)
+        shares = getattr(fi, "shares", None)
+        mcap = getattr(fi, "market_cap", None)
+        out["currency"] = cur
+        out["price"] = price * fx if price else None
+        out["shares"] = shares
+        out["market_cap"] = mcap * fx / 1e9 if mcap else None      # Md USD
+    except Exception:
+        pass
+    if out["price"] is None:                       # repli sur le chart
+        try:
+            out["price"] = latest_price(symbol)
+        except Exception:
+            pass
+    try:
+        out["beta"] = levered_beta(symbol)
+    except Exception:
+        out["beta"] = None
+    return out
 
 
 def levered_beta(symbol: str, market: str = "%5EGSPC") -> float:
