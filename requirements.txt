@@ -1,0 +1,7 @@
+numpy>=1.26
+pandas>=2.0
+scipy>=1.11
+requests>=2.31
+fastapi>=0.110
+uvicorn[standard]>=0.27
+# optionnel (tests) : pytest>=8.0
