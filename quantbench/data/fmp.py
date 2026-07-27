@@ -34,6 +34,14 @@ _PREF_TICKER = re.compile(r"-P[FR]?[A-Z]\.(TO|V)$", re.I)
 def _is_preferred(symbol, name):
     return bool(_PREF_TICKER.search(symbol) or (name and _PREF_NAME.search(name)))
 
+
+def _sane_beta(b):
+    """Beta FMP fiable ? Les nano-caps illiquides donnent des betas aberrants
+    (ex. −29) → coût du capital négatif → DCF qui explose. Hors [0.1, 3.5] =
+    régression bidon → on retombe sur le beta de marché (1.1)."""
+    b = _num(b)
+    return b if (b is not None and 0.1 <= b <= 3.5) else 1.1
+
 _BASE = "https://financialmodelingprep.com/stable"
 _TIMEOUT = 120
 
@@ -273,6 +281,14 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
     rev, ebit, ni = g(inc, "revenue"), g(inc, "operatingIncome"), g(inc, "netIncome")
     eq, debt = g(bal, "totalStockholdersEquity"), g(bal, "totalDebt")
     cash = g(bal, "cashAndCashEquivalents")
+    tot_assets = g(bal, "totalAssets")
+    # Garde-fou données FMP corrompues (ex. RDZN cash=6.6e12 pour 55 M$ de CA) :
+    # trésorerie et dette ne peuvent PAS dépasser l'actif total -> on plafonne.
+    if tot_assets and tot_assets > 0:
+        if cash is not None:
+            cash = min(cash, tot_assets)
+        if debt is not None:
+            debt = min(max(debt, 0.0), tot_assets)
     shares = g(inc, "weightedAverageShsOutDil")
     rev_hist = [_num(inc.get(yy, {}).get("revenue")) for yy in sorted(inc)]
     rev_hist = [v * fxs / B for v in rev_hist if v is not None]
@@ -284,7 +300,7 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         "summary": (desc or {}).get("description"),
         "price": price * fxp if price else None,
         "market_cap": mcap * fxp / B if mcap else None,
-        "shares": shares, "beta": sr.get("beta") or 1.1,
+        "shares": shares, "beta": _sane_beta(sr.get("beta")),
         "currency_ok": True, "price_currency": price_cur, "financial_currency": rep_cur,
         "revenue": b(rev), "revenue_history": rev_hist, "ebit": b(ebit), "net_income": b(ni),
         "total_debt": b(debt), "cash": b(cash), "book_equity": b(eq),

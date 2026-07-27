@@ -176,6 +176,11 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     # valorisées sur l'actif net. Il faut juste un prix (pour l'upside).
     if not fund or not fund.get("price"):
         return None, None
+    # Intégrité des données : rejeter les fondamentaux corrompus (nombre d'actions
+    # implausible, cap quasi nulle) qui produisent des valorisations aberrantes.
+    sh, mc0 = fund.get("shares"), fund.get("market_cap")
+    if not sh or sh < 100_000 or not mc0 or mc0 < 0.002:   # <100k actions ou <2 M$
+        return None, None
     forensic = analyze(symbol, financials=F) if F else None
     val = value_stock(symbol, fund=fund, forensic=forensic, F=F)
     if not val.get("ok"):
@@ -187,6 +192,11 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
             val["value_per_share"] = mc["vps"]["p50"]
         val["upside"] = round(mc["median"] / fund["market_cap"] - 1.0, 4)
         val["upside_basis"] = "monte_carlo"
+    # Garde-fou final : un upside démesuré (>500%) révèle une donnée résiduelle non
+    # fiable (aucune société n'est crédiblement sous-évaluée de +5× via un DCF conservateur ;
+    # les vraies sous-évaluations plafonnent ~150-200%).
+    if val.get("upside") is not None and val["upside"] > 5.0:
+        return None, None
     signal = st_predict(fmp.history_closes(symbol))
     news = fmp.news(symbol, limit=8) if with_news else []
     try:
