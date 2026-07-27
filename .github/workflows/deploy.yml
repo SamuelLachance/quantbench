@@ -24,7 +24,7 @@ concurrency:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 120          # build 10k-MC sur tout l'univers dépasse 60 min
+    timeout-minutes: 180          # ~5100 titres ; marge si throttling FMP/SEC
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -41,6 +41,7 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           QUANTBENCH_SEC_UA: ${{ secrets.QUANTBENCH_SEC_UA }}
           PYTHONPATH: ${{ github.workspace }}
+          PYTHONUNBUFFERED: "1"          # progression visible en direct dans le log CI
         run: python scripts/build_site_fmp.py --exchanges NASDAQ,TSX,TSXV --workers 24
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
