@@ -93,15 +93,58 @@ def nearest(hist, target):
     return fmp._num(best.get("price")), best["date"]
 
 
+def cutoff_year(T):
+    """Dernière année fiscale RÉELLEMENT publiée avant T (pas de look-ahead).
+    10-K déposé ~60-90 j après clôture déc. : dispo l'année suivante vers mars."""
+    y, m = int(T[:4]), int(T[5:7])
+    return y - 1 if m >= 4 else y - 2
+
+
+def trailing_beta(hist, spy, T, lookback_days=760):
+    """Beta glissant réel à la date T (régression des rendements quotidiens ~2 ans
+    du titre sur le SPY), au lieu d'un beta figé — évite l'artefact de WACC uniforme."""
+    if not hist or not spy:
+        return None
+    td = date.fromisoformat(T)
+    lo = td - timedelta(days=lookback_days)
+
+    def px(h):
+        out = {}
+        for r in h:
+            p = fmp._num(r.get("price"))
+            if not p or p <= 0:
+                continue
+            try:
+                d = date.fromisoformat(r["date"])
+            except Exception:
+                continue
+            if lo <= d <= td:
+                out[d] = p
+        return out
+
+    a, b = px(hist), px(spy)
+    common = sorted(set(a) & set(b))
+    if len(common) < 60:
+        return None
+    pa = np.array([a[d] for d in common])
+    pb = np.array([b[d] for d in common])
+    ra, rb = pa[1:] / pa[:-1] - 1.0, pb[1:] / pb[:-1] - 1.0
+    var = float(np.var(rb))
+    if var <= 0:
+        return None
+    beta = float(np.cov(ra, rb)[0, 1] / var)
+    return min(max(beta, 0.3), 2.5)                    # borne raisonnable
+
+
 def asof(entry, year):
     return {k: {y: r for y, r in entry[k].items() if y <= year}
             for k in ("income", "balance", "cashflow")}
 
 
-def backtest_one(symbol, T, rf, reasons=None):
+def backtest_one(symbol, T, rf, reasons=None, spy=None):
     reasons = reasons or {}
     entry = fmp.statements(symbol, limit=16)
-    eT = asof(entry, int(T[:4]))
+    eT = asof(entry, cutoff_year(T))                   # <= dernière année publiée avant T
     if len(set(eT["income"]) & set(eT["balance"])) < 2:
         return None
     hist = history(symbol)
@@ -128,8 +171,9 @@ def backtest_one(symbol, T, rf, reasons=None):
     shares = fmp._num(eT["income"][yrs[0]].get("weightedAverageShsOutDil"))
     if not shares or shares <= 0:
         return None
+    beta = trailing_beta(hist, spy, T) or 1.1          # beta réel glissant (sinon défaut)
     srT = {"exchange": "NASDAQ", "price": pT, "market_cap": pT * shares,
-           "beta": 1.1, "sector": None, "industry": None, "name": symbol}
+           "beta": beta, "sector": None, "industry": None, "name": symbol}
     fundT = fmp.fundamentals_from_fmp(symbol, srT, eT, {})
     if not fundT or not fundT.get("revenue"):
         return None
@@ -204,8 +248,9 @@ def report(res, spy_ann, T):
         thr = np.percentile(up, 40)
         flagged = np.mean([r["upside"] <= thr for r in fails]) * 100
         print(f"  Classées dans le bas 40% d'upside (jugées chères) : {flagged:.0f}%")
-        print("  Exemples :", ", ".join(f"{r['ticker']}({r['total']*100:+.0f}%)"
-              for r in sorted(fails, key=lambda r: r["total"])[:6]))
+        print("  Le modèle recommandait (upside jugé → rendement réel) :")
+        for r in sorted(fails, key=lambda r: r["total"])[:8]:
+            print(f"    {r['ticker']:6} upside {r['upside']*100:+5.0f}%  →  réel {r['total']*100:+.0f}%")
 
     winners = sorted(res, key=lambda r: -r["ann"])[:max(10, n // 10)]
     print(f"\n--- Top 10% gagnants : médiane upside {np.median([r['upside'] for r in winners])*100:+.0f}% ---")
@@ -225,7 +270,7 @@ def main(T="2013-07-01", rf=0.025, workers=16):
 
     res = []
     with cf.ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(backtest_one, s, T, rf, reasons): s for s in universe}
+        futs = {ex.submit(backtest_one, s, T, rf, reasons, spy): s for s in universe}
         for i, fut in enumerate(cf.as_completed(futs), 1):
             try:
                 r = fut.result()

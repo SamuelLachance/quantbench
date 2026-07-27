@@ -22,3 +22,6 @@ data_cache/
 
 # PDF générés (déployés via artefact Pages, pas commités)
 app/us/
+
+# sorties de backtest
+scripts/_backtest_*.json
