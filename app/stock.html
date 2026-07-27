@@ -102,9 +102,10 @@ function render(d){
     <div class="card span2"><h2>États financiers <span class="sub">4 exercices, SEC</span></h2>
       ${stmtTable(d.statements)}
       <div class="mini" style="margin-top:10px">
-        ${d.pdf_url?`<a href="us/${d.pdf_url}" download="${d.ticker}_QuantBench.pdf">⬇ Rapport annuel — PDF (téléchargement direct)</a> · `:''}
-        ${d.report_url?`<a href="${d.report_url}" target="_blank" rel="noopener">Dépôt officiel 10-K (SEC) →</a> · `:''}
-        <a href="${d.filing_url}" target="_blank" rel="noopener">Tous les dépôts SEC EDGAR →</a></div>
+        ${d.ars_pdf_url?`<a href="${d.ars_pdf_url}" target="_blank" rel="noopener">📕 Rapport annuel officiel — PDF</a> · `:''}
+        ${d.report_url?`<a href="${d.report_url}" target="_blank" rel="noopener">10-K officiel (SEC) →</a> · `:''}
+        ${d.pdf_url?`<a href="us/${d.pdf_url}" download="${d.ticker}_QuantBench.pdf">⬇ Synthèse QuantBench (PDF)</a> · `:''}
+        <a href="${d.filing_url}" target="_blank" rel="noopener">Tous les dépôts →</a></div>
     </div>
 
     <div class="card span2"><h2>Actualités <span class="sub">classées par sentiment</span></h2>

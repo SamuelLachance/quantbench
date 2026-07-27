@@ -1,25 +1,33 @@
 """
 quantbench.reports.pdf
 ======================
-Genere un PDF de SYNTHESE des etats financiers (4 ans) par titre — notre propre
-document (aucun souci de droits, contrairement a l'hebergement des depots
-officiels). Le profil renvoie aussi vers le depot SEC officiel.
+PDF de synthèse par titre — NOTRE rapport (valorisation + activité + états 4 ans
++ forensique), généré pour CHAQUE titre couvert (fiable, contrairement aux PDF
+glossy des sociétés qui ne sont pas accessibles par une API universelle gratuite).
+Le profil renvoie aussi vers le dépôt officiel SEC.
 """
 
 from __future__ import annotations
 
 import os
 
+_GOLD = "#b8892b"
+_INK = "#10151c"
+_MUT = "#5b6472"
+
+
+def _fmt(v):
+    return "—" if v is None else f"{v:,.1f}".replace(",", " ")
+
 
 def financial_summary_pdf(profile: dict, out_path: str) -> str | None:
-    """Ecrit un PDF de synthese a `out_path`. Retourne le chemin ou None."""
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import mm
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
                                         Paragraph, Spacer)
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     except Exception:
         return None
 
@@ -28,56 +36,105 @@ def financial_summary_pdf(profile: dict, out_path: str) -> str | None:
         return None
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-    styles = getSampleStyleSheet()
-    h = ParagraphStyle("h", parent=styles["Title"], fontSize=15, spaceAfter=2,
-                       textColor=colors.HexColor("#10151c"))
-    sub = ParagraphStyle("s", parent=styles["Normal"], fontSize=9,
-                         textColor=colors.HexColor("#5b6472"))
-    note = ParagraphStyle("n", parent=styles["Normal"], fontSize=7.5,
-                          textColor=colors.HexColor("#8a94a3"), spaceBefore=8)
+    val = profile.get("valuation", {}) or {}
+    fx = (profile.get("forensics") or {}).get("scores", {}) or {}
+    base = getSampleStyleSheet()
+    title = ParagraphStyle("t", parent=base["Title"], fontSize=16, leading=18,
+                           textColor=colors.HexColor(_INK), spaceAfter=0)
+    small = ParagraphStyle("s", parent=base["Normal"], fontSize=8.5,
+                           textColor=colors.HexColor(_MUT))
+    body = ParagraphStyle("b", parent=base["Normal"], fontSize=9, leading=12,
+                          textColor=colors.HexColor(_INK))
+    foot = ParagraphStyle("f", parent=base["Normal"], fontSize=7,
+                          textColor=colors.HexColor("#8a94a3"), spaceBefore=10)
 
-    val = profile.get("valuation", {})
-    years = s["years"]
+    story = []
+
+    # --- Bandeau titre ---
+    banner = Table([[Paragraph(f"<font color='white'><b>QuantBench</b></font>", small),
+                     Paragraph("<font color='white'>Rapport de synthèse</font>",
+                               ParagraphStyle("r", parent=small, alignment=2))]],
+                   colWidths=[90 * mm, 80 * mm])
+    banner.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_GOLD)),
+                                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 8)]))
+    story += [banner, Spacer(1, 8),
+              Paragraph(f"{profile.get('name', profile.get('ticker'))} "
+                        f"<font color='{_GOLD}'>({profile.get('ticker')})</font>", title),
+              Paragraph(f"{profile.get('sector', '')}"
+                        f"{' · ' + profile.get('industry') if profile.get('industry') else ''}", small),
+              Spacer(1, 8)]
+
+    # --- Valorisation ---
+    up = val.get("upside")
+    up_s = "—" if up is None else f"{up * 100:+.0f} %"
+    vbox = Table([["Cours", "Valeur intrinsèque / action", "Upside", "Méthode"],
+                  [_money(val.get("price")), _money(val.get("value_per_share")),
+                   up_s, val.get("method", "—")]],
+                 colWidths=[28 * mm, 48 * mm, 24 * mm, 70 * mm])
+    vbox.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor(_MUT)),
+        ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 1), colors.HexColor("#f4f6f8")),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#dde2e9")),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7)]))
+    story += [vbox, Spacer(1, 10)]
+
+    # --- Activité ---
+    if profile.get("summary"):
+        story += [Paragraph("<b>Activité</b>", body),
+                  Paragraph(profile["summary"][:500], body), Spacer(1, 9)]
+
+    # --- États financiers ---
+    story += [Paragraph("<b>États financiers</b> (Md USD)", body), Spacer(1, 3)]
     lines = [("Chiffre d'affaires", "revenue"), ("Résultat opérationnel", "ebit"),
              ("Résultat net", "net_income"), ("Cash-flow d'exploitation", "cfo"),
              ("Actif total", "total_assets"), ("Capitaux propres", "equity"),
              ("Dette", "total_debt")]
-
-    def cell(v):
-        return "—" if v is None else f"{v:,.1f}".replace(",", " ")
-
-    table_data = [["en Md USD"] + list(years)]
+    tdata = [["Md USD"] + list(s["years"])]
     for lab, k in lines:
-        table_data.append([lab] + [cell(v) for v in (s.get(k) or [])])
-
-    ncols = len(years) + 1
-    t = Table(table_data, colWidths=[55 * mm] + [(115 * mm) / (ncols - 1)] * (ncols - 1))
+        tdata.append([lab] + [_fmt(v) for v in (s.get(k) or [])])
+    n = len(s["years"]) + 1
+    t = Table(tdata, colWidths=[52 * mm] + [(118 * mm) / (n - 1)] * (n - 1))
     t.setStyle(TableStyle([
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#b8892b")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_GOLD)),
         ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f6f8")]),
-        ("LINEBELOW", (0, 0), (-1, -1), 0.4, colors.HexColor("#dde2e9")),
-        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
+        ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor("#dde2e9")),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+    story += [t, Spacer(1, 10)]
 
-    story = [
-        Paragraph(f"{profile.get('name', profile.get('ticker'))} "
-                  f"({profile.get('ticker')})", h),
-        Paragraph(f"{profile.get('sector', '')} · États financiers de synthèse — "
-                  f"QuantBench · valorisation : {val.get('method', '—')}", sub),
-        Spacer(1, 10),
-        t,
-        Paragraph("Source : SEC Financial Statement Data Sets (dépôts 10-K), montants en "
-                  "milliards USD. Document de synthèse QuantBench — outil éducatif, pas un "
-                  "conseil d'investissement. Pour les états officiels complets, consulter "
-                  "SEC EDGAR.", note),
-    ]
-    SimpleDocTemplate(out_path, pagesize=A4,
-                      topMargin=18 * mm, bottomMargin=15 * mm,
+    # --- Forensique ---
+    fparts = []
+    if fx.get("piotroski_f") is not None:
+        fparts.append(f"Piotroski {fx['piotroski_f']}/9")
+    if fx.get("beneish_m") is not None:
+        fparts.append(f"Beneish M {fx['beneish_m']}"
+                      f"{' (à investiguer)' if fx.get('beneish_flag') else ''}")
+    if fx.get("altman_z") is not None:
+        fparts.append(f"Altman Z″ {fx['altman_z']}")
+    if fparts:
+        story += [Paragraph("<b>Forensique</b> — " + " · ".join(fparts), body)]
+        for flag in (profile.get("forensics") or {}).get("flags", [])[:3]:
+            story += [Paragraph("⚠ " + flag, small)]
+
+    story += [Paragraph("Source : SEC Financial Statement Data Sets. Document de synthèse "
+                        "QuantBench — outil éducatif, <b>pas un conseil d'investissement</b>. "
+                        "Valorisation sur cas de base ; signaux forensiques statistiques à "
+                        "investiguer. Rapport officiel complet : SEC EDGAR.", foot)]
+
+    SimpleDocTemplate(out_path, pagesize=A4, topMargin=14 * mm, bottomMargin=12 * mm,
                       leftMargin=18 * mm, rightMargin=18 * mm).build(story)
     return out_path
+
+
+def _money(v):
+    return "—" if v is None else f"{v:,.2f} $".replace(",", " ")
 
 
 __all__ = ["financial_summary_pdf"]

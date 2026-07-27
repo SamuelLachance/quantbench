@@ -34,6 +34,33 @@ def submission_meta(cik: str) -> dict:
             "tickers": j.get("tickers") or []}
 
 
+@functools.lru_cache(maxsize=8192)
+def annual_report_docs(cik: str) -> dict:
+    """Cherche le PDF du rapport annuel glossy (formulaire ARS) et le 10-K sur
+    SEC EDGAR. Retourne {ars_pdf, tenk} (URLs directes) — sources officielles
+    gratuites. ars_pdf est None si la société ne dépose pas d'ARS (ex. AAPL)."""
+    try:
+        padded = str(cik).zfill(10)
+        j = requests.get(f"https://data.sec.gov/submissions/CIK{padded}.json",
+                         headers=_UA, timeout=30).json()
+        rec = j["filings"]["recent"]
+        forms, docs, accs = rec["form"], rec["primaryDocument"], rec["accessionNumber"]
+    except Exception:
+        return {"ars_pdf": None, "tenk": None}
+    ci = int(cik)
+    ars = tenk = None
+    for i in range(len(forms)):
+        a = accs[i].replace("-", "")
+        url = f"https://www.sec.gov/Archives/edgar/data/{ci}/{a}/{docs[i]}"
+        if forms[i] == "ARS" and docs[i].lower().endswith(".pdf") and ars is None:
+            ars = url
+        elif forms[i] == "10-K" and docs[i] and tenk is None:
+            tenk = url
+        if ars and tenk:
+            break
+    return {"ars_pdf": ars, "tenk": tenk}
+
+
 def sic_to_sector(sic) -> str:
     """Mappe un code SIC vers un secteur (chaine reconnue par route.classify)."""
     try:

@@ -82,9 +82,10 @@ def build_facts(quarters, ciks=None, cache_dir: str = _CACHE) -> dict:
                 rd = io.TextIOWrapper(fh, encoding="latin-1")
                 h = rd.readline().rstrip("\n").split("\t")
                 ci = {c: i for i, c in enumerate(h)}
+                _ANNUAL = ("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A")
                 for line in rd:
                     f = line.rstrip("\n").split("\t")
-                    if f[ci["form"]] not in ("10-K", "10-K/A"):
+                    if f[ci["form"]] not in _ANNUAL:
                         continue
                     cik = f[ci["cik"]]
                     if keep and cik not in keep:

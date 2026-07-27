@@ -19,10 +19,24 @@ import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from zoneinfo import ZoneInfo
+    _ET = ZoneInfo("America/New_York")
+except Exception:
+    _ET = timezone.utc
+
+
+def _now_et():
+    try:
+        return datetime.now(_ET).strftime("%Y-%m-%d %H:%M ET")
+    except Exception:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
 import requests
 
 from quantbench.data import edgar, sec_datasets as ds
 from quantbench.data.sec_datasets import sic_to_sector
+from quantbench.data.sec_fundamentals import annual_report_docs
 from quantbench.forensics import analyze
 from quantbench.valuation.route import value_stock
 from quantbench.valuation.build_universal import project
@@ -161,10 +175,11 @@ def build_one(ticker, entry, with_news=True, with_pdf=True):
         proj = project(fund, years=20)
     except Exception:
         proj = None
-    # lien direct vers le dernier 10-K (dossier de dépôt SEC)
+    # Rapport annuel officiel : PDF glossy (formulaire ARS) + 10-K, via SEC EDGAR
+    ard = annual_report_docs(entry["cik"])
     adsh = (entry.get("adsh") or "").replace("-", "")
-    report_url = (f"https://www.sec.gov/Archives/edgar/data/{int(entry['cik'])}/{adsh}/"
-                  if adsh else None)
+    report_url = ard.get("tenk") or (
+        f"https://www.sec.gov/Archives/edgar/data/{int(entry['cik'])}/{adsh}/" if adsh else None)
     profile = {
         "ticker": ticker, "name": fund.get("name"), "sector": fund.get("sector"),
         "industry": q.get("industry") or fund.get("industry"), "sic": fund.get("sic"),
@@ -178,6 +193,7 @@ def build_one(ticker, entry, with_news=True, with_pdf=True):
         "shortterm": _shortterm(fund.get("price"), fund.get("beta")),
         "filing_url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={entry['cik']}&type=10-K",
         "report_url": report_url,
+        "ars_pdf_url": ard.get("ars_pdf"),
         "pdf_url": None,
     }
     if with_pdf:
@@ -199,7 +215,7 @@ def build_one(ticker, entry, with_news=True, with_pdf=True):
     return profile, row
 
 
-def main(tickers, quarters=8, workers=24, with_news=True, with_pdf=True, limit=None):
+def main(tickers, quarters=10, workers=24, with_news=True, with_pdf=True, limit=None):
     US.mkdir(parents=True, exist_ok=True)
     PDF.mkdir(parents=True, exist_ok=True)
     if limit:
@@ -244,8 +260,7 @@ def main(tickers, quarters=8, workers=24, with_news=True, with_pdf=True, limit=N
     clean.sort(key=lambda r: -(r["upside"] or -9))
     (US / "_screener.json").write_text(json.dumps(
         {"n_ok": len(clean), "n_suspect": len(suspects), "n_fail": fail,
-         "universe": len(tickers),
-         "updated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+         "universe": len(tickers), "updated": _now_et(),
          "rows": clean, "suspects": suspects},
         ensure_ascii=False), encoding="utf-8")
     print(f"\n-> {done} valorisés, {len(suspects)} suspects, {fail} échecs "
@@ -254,7 +269,7 @@ def main(tickers, quarters=8, workers=24, with_news=True, with_pdf=True, limit=N
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    kw = {"quarters": 8, "workers": 24, "with_news": True, "with_pdf": True, "limit": None}
+    kw = {"quarters": 10, "workers": 24, "with_news": True, "with_pdf": True, "limit": None}
     tickers = []
     while args:
         a = args.pop(0)
