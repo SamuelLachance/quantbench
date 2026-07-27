@@ -14,8 +14,25 @@ import csv
 import functools
 import io
 import os
+import re
 
 import requests
+
+# Actions privilégiées / notes / débentures émises par banques & sociétés (quasi-
+# obligataire, pas des actions ordinaires) : à exclure de l'univers. Le modèle
+# excess-return les valorise comme des capitaux propres -> upside aberrant.
+# Prudence : NE PAS attraper les ADR ("American Depositary Shares" = ordinaire) ni
+# les sociétés dont le nom contient "Preferred" (ex. Preferred Bank).
+_PREF_NAME = re.compile(
+    r"\bPFD\b|\bPREF(ERRED)?\s+(STOCK|SHARES|SHS|SEC|SERIES|EQUITY)"
+    r"|PERPETUAL\s+(RED\s+)?PREF|CUM\s+PERP|\bRATE\s+RESET\b|\bRST\s+PFD\b"
+    r"|\b(SUB(ORDINATED)?|JR|JUNIOR|SR|SENIOR)\s+(NOTES?|DEBENT)"
+    r"|\bDEBENTURES?\b|\bTRUST\s+PREF|\d+(\.\d+)?\s*%\s", re.I)
+_PREF_TICKER = re.compile(r"-P[FR]?[A-Z]\.(TO|V)$", re.I)
+
+
+def _is_preferred(symbol, name):
+    return bool(_PREF_TICKER.search(symbol) or (name and _PREF_NAME.search(name)))
 
 _BASE = "https://financialmodelingprep.com/stable"
 _TIMEOUT = 120
@@ -115,6 +132,8 @@ def screener(exchanges=("NASDAQ",)):
         for r in rows:
             sym = r.get("symbol")
             if not sym:
+                continue
+            if _is_preferred(sym, r.get("companyName")):   # actions privilégiées / notes : exclues
                 continue
             out[sym] = {"name": r.get("companyName"), "sector": r.get("sector"),
                         "industry": r.get("industry"), "beta": _num(r.get("beta")),
