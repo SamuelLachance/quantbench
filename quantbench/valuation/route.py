@@ -39,6 +39,11 @@ def classify(fund: dict, forensic: dict | None) -> str:
     sec = (fund.get("sector") or "").lower()
     ebit, ni = fund.get("ebit"), fund.get("net_income")
     z = (forensic or {}).get("scores", {}).get("altman_z")
+    rev = fund.get("revenue")
+    if rev is None or rev <= 0:
+        # Pré-revenu (biotech clinique, mineur d'exploration), holding, SPAC :
+        # pas de flux à actualiser -> valeur d'actif net (méthode Damodaran).
+        return "actif_net"
     if "financial" in sec:
         return "financiere"
     if any(s in sec for s in ("energy", "materials")):
@@ -111,6 +116,21 @@ def value_distressed(fund, forensic):
             "confidence": "faible", "p_default": round(pdef, 2)}
 
 
+def value_assetbased(fund):
+    """Sociétés pré-revenu / holdings / SPAC : pas de flux à actualiser. Plancher
+    = valeur d'actif net comptable (capitaux propres), à défaut la trésorerie nette.
+    Conservateur : le pipeline (biotech) ou les gisements (mines) ne sont pas capitalisés."""
+    be = fund.get("book_equity")
+    cash = fund.get("cash") or 0.0
+    debt = fund.get("total_debt") or 0.0
+    nav = be if (be is not None and be > 0) else (cash - debt)
+    if nav is None or nav <= 0:
+        return None
+    return {"equity_value": nav,
+            "method": "Valeur d'actif net (pré-revenu / holding)",
+            "confidence": "faible"}
+
+
 def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
     """Valorise un titre via la methode routee. Retourne un resultat unifie."""
     fund = fund or get_fundamentals(ticker)
@@ -123,7 +143,9 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
     cat = classify(fund, forensic)
 
     try:
-        if cat == "financiere":
+        if cat == "actif_net":
+            r = value_assetbased(fund)
+        elif cat == "financiere":
             r = value_financial(fund)
         elif cat == "cyclique":
             r = value_cyclical(fund, F)
@@ -136,17 +158,28 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
     except Exception:                              # noqa: BLE001
         r = None
 
+    # Repli en cascade si la méthode routée échoue (ex. financière à capitaux
+    # propres négatifs mais rentable : StepStone) — on ne renonce qu'en dernier recours.
     if not r or r.get("equity_value") is None:
+        rev = fund.get("revenue")
+        if rev and rev > 0:                            # 1) DCF standard si CA dispo
+            try:
+                r = _dcf_value(fund, method="DCF FCFF (repli)")
+            except Exception:
+                r = None
+    if not r or r.get("equity_value") is None:         # 2) valeur d'actif net
+        r = value_assetbased(fund)
+    if not r or r.get("equity_value") is None:         # 3) valeur comptable brute
         be = fund.get("book_equity")
         if be and be > 0:
-            r = {"equity_value": be * 2.0, "method": "Repli relatif (P/B ~2×)",
+            r = {"equity_value": be, "method": "Valeur comptable (repli)",
                  "confidence": "très faible"}
         else:
             return {"ticker": ticker.upper(), "ok": False,
                     "reason": "valorisation impossible", "category": cat}
 
     shares, mcap = fund.get("shares"), fund.get("market_cap")
-    eq = r["equity_value"]                          # Md USD
+    eq = max(float(r["equity_value"]), 0.0)         # Md USD — responsabilité limitée : équité ≥ 0
     vps = eq * 1e9 / shares if shares else None
     upside = (eq / mcap - 1.0) if (mcap and mcap > 0) else None
     return {

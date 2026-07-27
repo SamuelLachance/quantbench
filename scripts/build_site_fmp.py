@@ -50,11 +50,29 @@ def _mc_stats(eq, mcap, shares):
             "n": int(eq.size)}
 
 
-def run_mc(fund, category, n=10000, rf=None):
-    """Monte Carlo de valorisation (modèle Damodaran) — distribution de la valeur
-    d'équité. DCF pour la plupart, excess-return simulé pour les financières.
-    `rf` : taux sans risque à imposer (backtest historique) ; sinon FRED courant."""
+def _route_margin(fund, category, F):
+    """Marge opérationnelle normalisée selon la catégorie (miroir de route.py) :
+    cyclique = marge moyenne du cycle ; jeune/déficitaire = marge cible (pas la
+    marge courante négative, sinon valeur nulle à l'infini). Sinon None (marge brute)."""
+    if category == "cyclique" and F:
+        ms = [e / r for e, r in zip(F.get("ebit", []), F.get("revenue", []))
+              if e is not None and r]
+        if ms:
+            return float(np.mean(ms))
+    if category == "jeune/deficitaire":
+        om = fund.get("operating_margin")
+        return om if (om is not None and om > 0.05) else 0.12
+    return None
+
+
+def run_mc(fund, category, F=None, forensic=None, n=10000, rf=None):
+    """Monte Carlo de valorisation COHÉRENT avec le routage Damodaran : marge
+    normalisée (cyclique) ou cible (jeune/déficitaire), pondération survie/défaut,
+    et équité plancher à 0 (responsabilité limitée : une action ne vaut jamais < 0).
+    Excess-return simulé pour les financières. `rf` imposé pour le backtest."""
     shares, mcap = fund.get("shares"), fund.get("market_cap")
+    if category == "actif_net":
+        return None                                # valeur d'actif net = point, pas de MC
     try:
         if category == "financiere":
             be, roe = fund.get("book_equity"), fund.get("roe")
@@ -70,7 +88,8 @@ def run_mc(fund, category, n=10000, rf=None):
             mult = np.clip((roes - ke) / (ke - g), -0.6, 4.0)
             eq = np.maximum(be * (1 + mult), 0.2 * be)
         else:
-            base, _ = build_dcf_from_fundamentals(fund, rf=rf)
+            margin = _route_margin(fund, category, F)
+            base, _ = build_dcf_from_fundamentals(fund, margin_override=margin, rf=rf)
             dists = {
                 "g1_begin": stats.norm(base.g1_begin, max(0.02, abs(base.g1_begin) * 0.35)),
                 "terminal_operating_margin": stats.norm(
@@ -83,6 +102,20 @@ def run_mc(fund, category, n=10000, rf=None):
             }
             eq = monte_carlo_dcf(base, dists, n=n, current_market_cap=mcap,
                                  seed=42)["equity_values"]
+            eq = np.maximum(eq, 0.0)                    # responsabilité limitée : équité ≥ 0
+            # Pondération de la catégorie (miroir de route.value_young/value_distressed)
+            if category == "jeune/deficitaire":
+                ni = fund.get("net_income") or 0.0
+                burn = -ni if ni < 0 else 0.0
+                cash = fund.get("cash") or 0.0
+                surv = min(max(0.3 + 0.15 * (cash / burn), 0.3), 0.9) if burn > 0 else 0.85
+                liq = 0.5 * (fund.get("book_equity") or 0.0)
+                eq = eq * surv + liq * (1.0 - surv)
+            elif category == "detresse":
+                z = (forensic or {}).get("scores", {}).get("altman_z")
+                pdef = 0.5 if z is None else min(max(1.0 - (z - 0.5) / 2.0, 0.05), 0.9)
+                liq = 0.5 * (fund.get("book_equity") or 0.0)
+                eq = eq * (1.0 - pdef) + liq * pdef
     except Exception:
         return None
     return _mc_stats(eq, mcap, shares)
@@ -133,20 +166,22 @@ def _results_summary(F):
 
 def build_one(symbol, sr, with_news=True, with_pdf=True):
     entry = fmp.statements(symbol)                 # 3 appels par-ticker (débit élevé)
-    if len(set(entry["income"]) & set(entry["balance"])) < 2:
+    if len(set(entry["income"]) & set(entry["balance"])) < 1:   # ≥1 an suffit (actif net)
         return None, None
     prof = fmp.profile(symbol)
     desc = {"description": prof.get("description"), "industry": prof.get("industry")}
     F = fmp.financials_from_fmp(entry)
     fund = fmp.fundamentals_from_fmp(symbol, sr, entry, desc)
-    if not fund or not fund.get("price") or not fund.get("revenue"):
+    # Plus d'exigence de CA : les sociétés pré-revenu (biotech, mines, holdings) sont
+    # valorisées sur l'actif net. Il faut juste un prix (pour l'upside).
+    if not fund or not fund.get("price"):
         return None, None
     forensic = analyze(symbol, financials=F) if F else None
     val = value_stock(symbol, fund=fund, forensic=forensic, F=F)
     if not val.get("ok"):
         return None, None
     # Monte Carlo : l'upside affiché est basé sur la MÉDIANE de la simulation
-    mc = run_mc(fund, val.get("category"))
+    mc = run_mc(fund, val.get("category"), F=F, forensic=forensic)
     if mc and fund.get("market_cap"):
         if mc["vps"].get("p50") is not None:
             val["value_per_share"] = mc["vps"]["p50"]
@@ -221,19 +256,21 @@ def main(exchanges, years=6, workers=20, with_news=True, with_pdf=True, limit=No
             if (done + fail) % 200 == 0:
                 print(f"  {done+fail}/{len(work)} (ok={done})")
 
-    clean = [r for r in rows if r["upside"] is not None and -0.95 <= r["upside"] <= 1.5]
-    suspects = [r for r in rows if r not in clean]
-    clean.sort(key=lambda r: -(r["upside"] or -9))
+    # AUCUN filtre arbitraire : on montre tous les titres valorisés. Seule exclusion
+    # = upside non-fini (NaN/inf), qui n'est pas un nombre valide (pas une opinion du modèle).
+    clean = [r for r in rows if r["upside"] is not None and np.isfinite(r["upside"])]
+    invalid = [r for r in rows if r["upside"] is None or not np.isfinite(r["upside"])]
+    clean.sort(key=lambda r: -(r["upside"] if r["upside"] is not None else -9))
     (US / "_screener.json").write_text(json.dumps(
-        {"n_ok": len(clean), "n_suspect": len(suspects), "n_fail": fail,
-         "universe": len(syms), "updated": _now_et(), "rows": clean, "suspects": suspects},
+        {"n_ok": len(clean), "n_suspect": 0, "n_invalid": len(invalid), "n_fail": fail,
+         "universe": len(syms), "updated": _now_et(), "rows": clean, "suspects": []},
         ensure_ascii=False), encoding="utf-8")
     st = [r for r in rows if r.get("p_up") is not None]
     st.sort(key=lambda r: -(r["p_up"] or 0))
     (US / "_shortterm.json").write_text(json.dumps(
         {"n": len(st), "updated": _now_et(), "rows": st}, ensure_ascii=False), encoding="utf-8")
-    print(f"\n-> {done} valorisés, {len(suspects)} suspects, {fail} échecs "
-          f"| court terme {len(st)} | total {time.time()-t0:.0f}s")
+    print(f"\n-> {done} valorisés ({len(clean)} affichés, {len(invalid)} upside non-fini), "
+          f"{fail} sans données | court terme {len(st)} | total {time.time()-t0:.0f}s")
 
 
 if __name__ == "__main__":

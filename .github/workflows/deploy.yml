@@ -24,7 +24,7 @@ concurrency:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 180          # ~5100 titres ; marge si throttling FMP/SEC
+    timeout-minutes: 240          # ~5100 titres, couverture ~92% ; marge throttling FMP/SEC
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
