@@ -78,6 +78,28 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     return x, meta
 
 
+def project(fund, years=20, margin_override=None):
+    """Projection annee par annee sur `years` ans (CA, marge, FCFF, croissance)
+    via le meme moteur DCF. Retourne une liste de points annuels."""
+    from .dcf import value_dcf
+    x, _ = build_dcf_from_fundamentals(fund, margin_override=margin_override)
+    l1 = max(1, years // 4)
+    l3 = max(1, years // 4)
+    l2 = max(1, years - l1 - l3)
+    x.len1, x.len2, x.len3 = l1, l2, l3
+    res = value_dcf(x)
+    out = []
+    for i in range(x.n_years):
+        out.append({
+            "y": i + 1,
+            "revenue": round(float(res["revenues"][i]), 1),
+            "fcff": round(float(res["fcff"][i]), 2),
+            "growth": round(float(res["growth"][i]) * 100, 1),
+            "margin": round(float(res["margins"][i]) * 100, 1),
+        })
+    return out
+
+
 def _safe_div(a, b):
     if a is None or b in (None, 0):
         return None

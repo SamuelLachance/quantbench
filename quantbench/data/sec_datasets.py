@@ -89,8 +89,9 @@ def build_facts(quarters, ciks=None, cache_dir: str = _CACHE) -> dict:
                     cik = f[ci["cik"]]
                     if keep and cik not in keep:
                         continue
-                    sub[f[ci["adsh"]]] = (cik, f[ci["sic"]], f[ci["name"]],
-                                          f[ci["filed"]])
+                    adsh = f[ci["adsh"]]
+                    sub[adsh] = (cik, f[ci["sic"]], f[ci["name"]],
+                                 f[ci["filed"]], adsh)
             if not sub:
                 continue
             # num.txt : faits numeriques (streaming)
@@ -118,16 +119,16 @@ def build_facts(quarters, ciks=None, cache_dir: str = _CACHE) -> dict:
                         val = float(f[iV])
                     except ValueError:
                         continue
-                    cik, sic, name, filed = meta
+                    cik, sic, name, filed, adsh = meta
                     year = int(f[iD][:4])
                     e = data.setdefault(cik, {"cik": cik, "sic": sic, "name": name,
-                                              "dur": {}, "inst": {}, "_f": {}})
+                                              "dur": {}, "inst": {}, "_f": {}, "adsh": adsh})
                     k = (bucket, tag, year)
                     if k not in e["_f"] or filed > e["_f"][k]:
                         e["_f"][k] = filed
                         e[bucket].setdefault(tag, {})[year] = val
                     if filed > e.get("_latest", ""):        # metadonnees du depot le plus recent
-                        e["_latest"], e["sic"], e["name"] = filed, sic, name
+                        e["_latest"], e["sic"], e["name"], e["adsh"] = filed, sic, name, adsh
     return data
 
 

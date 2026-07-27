@@ -3,82 +3,65 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QuantBench — Valorisation & forensique gratuites</title>
-<meta name="description" content="Valorisation intrinsèque, analyse forensique et sentiment des news — gratuit, pour aider chacun à mieux décider.">
+<title>QuantBench — Valorisation intrinsèque du NASDAQ</title>
+<meta name="description" content="Valorisation intrinsèque, forensique et sentiment — screener pro gratuit du NASDAQ.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="wrap">
   <nav class="nav">
-    <div class="brand"><span class="mark">Quant<b>Bench</b></span>
-      <span class="tag">valorisation &amp; forensique · gratuit</span></div>
+    <div class="brand"><span class="mark">Quant<b>Bench</b></span></div>
     <div class="navlinks">
-      <a href="index.html" class="active">Accueil</a>
+      <div class="search"><input id="tickerSearch" list="tickerList" placeholder="ticker…" autocomplete="off" spellcheck="false"><button id="searchGo" type="button">↵</button></div>
+      <datalist id="tickerList"></datalist>
+      <a href="index.html" class="active">Marché</a>
       <a href="screener.html">Screener</a>
-      <button class="toggle" id="themeBtn" type="button">Thème</button>
+      <button class="toggle" id="themeBtn" type="button">◐</button>
     </div>
   </nav>
 
-  <div class="eyebrow">Aide à la décision · marché US</div>
-  <h1>Les actions les plus sous-valorisées du moment, selon nos algorithmes</h1>
-  <p class="lede">Chaque titre est valorisé par la méthode adaptée à sa nature (<b>DCF FCFF</b>,
-    <b>excess-return</b> pour les financières, <b>bénéfices normalisés</b> pour les cycliques —
-    méthode Damodaran), puis passé au crible <b>forensique</b> (Beneish, Altman, Piotroski) et au
-    <b>sentiment des news</b>. Données <b>SEC</b> + marché, converties en USD. Cliquez un titre pour
-    son profil complet.</p>
+  <div class="grid g4" id="stats" style="margin-bottom:18px"></div>
 
-  <div class="grid g4" id="stats" style="margin-bottom:22px"></div>
-
-  <div class="card">
-    <div class="eyebrow">Top opportunités</div>
-    <h2>Les plus sous-valorisées (upside le plus élevé)</h2>
-    <p class="desc">Valeur intrinsèque médiane nettement au-dessus du cours. Prudence : « sous-valorisé »
-      selon un cas de base conservateur, pas une recommandation.</p>
-    <div class="opps" id="topUp"></div>
+  <div class="pcards">
+    <div class="card" style="margin-bottom:0">
+      <h2>Sous-valorisées <span class="sub">valeur intrinsèque &gt; cours</span></h2>
+      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Upside</th><th>F</th></tr></thead><tbody id="up"></tbody></table></div>
+    </div>
+    <div class="card" style="margin-bottom:0">
+      <h2>Richement valorisées <span class="sub">le marché price l'optimisme</span></h2>
+      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Upside</th><th>F</th></tr></thead><tbody id="down"></tbody></table></div>
+    </div>
   </div>
 
-  <div class="card">
-    <div class="eyebrow">Les plus chères</div>
-    <h2>Richement valorisées (le marché price beaucoup d'optimisme)</h2>
-    <div class="opps" id="topDown"></div>
-  </div>
-
-  <p class="disclaimer" id="disc"></p>
+  <p class="mini" id="disc" style="margin-top:16px"></p>
 </div>
 
 <script src="assets/app.js"></script>
 <script>
-const fmtPct = v => (v>=0?'+':'−')+new Intl.NumberFormat('fr-FR',{maximumFractionDigits:0}).format(Math.abs(v*100))+' %';
-function oppCard(r){
-  const up = r.upside==null ? 'n/a' : fmtPct(r.upside);
-  const cls = (r.upside||0)>=0 ? 'pos':'neg';
-  return `<a class="opp" href="stock.html?t=${r.ticker}">
-    <div class="tk">${r.ticker}</div><div class="nm">${r.name||''}</div>
-    <div class="up ${cls}">${up}</div>
-    <div class="meta">${r.category} · conf. ${r.confidence||'—'}</div></a>`;
+function row(r){
+  const cls=(r.upside||0)>=0?'pos':'neg';
+  return `<tr onclick="location.href='stock.html?t=${r.ticker}'">
+    <td><span class="tk-cell">${r.ticker}</span></td>
+    <td><span class="pill">${(r.sector||'—')}</span></td>
+    <td class="num ${cls}" style="font-weight:600">${QB.pct(r.upside)}</td>
+    <td class="num">${r.piotroski==null?'—':r.piotroski}</td></tr>`;
 }
-(async ()=>{
-  QB.initTheme();
-  let d;
-  try{ d = await (await fetch('us/_screener.json',{cache:'no-store'})).json(); }
+(async()=>{
+  QB.initTheme(); QB.mountSearch();
+  let d; try{ d=await (await fetch('us/_screener.json',{cache:'no-store'})).json(); }
   catch(e){ document.getElementById('disc').textContent='Données indisponibles.'; return; }
-  const rows = d.rows||[];
-  const undervalued = rows.filter(r=>r.upside>0).length;
-  const meds = rows.map(r=>r.upside).filter(v=>v!=null).sort((a,b)=>a-b);
-  const med = meds.length?meds[Math.floor(meds.length/2)]:0;
-  const stats=[['Titres couverts',d.n_ok],['Sous-valorisés',`${undervalued}/${d.n_ok}`],
-    ['Upside médian',fmtPct(med)],['Données suspectes',d.n_suspect]];
-  document.getElementById('stats').innerHTML = stats.map(([k,v])=>
-    `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
-  const up = rows.filter(r=>r.upside!=null).slice(0,12);           // déjà trié desc
-  const down = rows.filter(r=>r.upside!=null).slice(-8).reverse();
-  document.getElementById('topUp').innerHTML = up.map(oppCard).join('');
-  document.getElementById('topDown').innerHTML = down.map(oppCard).join('');
-  document.getElementById('disc').innerHTML =
-    'Outil de recherche <b>éducatif — pas un conseil d’investissement</b>. Univers US en expansion vers '+
-    'tout le NASDAQ. Valorisations sur cas de base conservateur ; la plupart des mégacaps ressortent chères. '+
-    'Fondamentaux SEC (Financial Statement Data Sets), prix marché, tout converti en USD.';
+  const rows=d.rows||[];
+  const uv=rows.filter(r=>r.upside>0).length;
+  const meds=rows.map(r=>r.upside).filter(v=>v!=null).sort((a,b)=>a-b);
+  const med=meds.length?meds[Math.floor(meds.length/2)]:0;
+  document.getElementById('stats').innerHTML=[
+    ['Titres couverts',d.n_ok],['Sous-valorisés',`${uv}/${d.n_ok}`],
+    ['Upside médian',QB.pct(med)],['MàJ',d.updated||'—']
+  ].map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v" style="font-size:${String(v).length>10?'14px':'22px'}">${v}</div></div>`).join('');
+  document.getElementById('up').innerHTML=rows.filter(r=>r.upside!=null).slice(0,15).map(row).join('');
+  document.getElementById('down').innerHTML=rows.filter(r=>r.upside!=null).slice(-12).reverse().map(row).join('');
+  document.getElementById('disc').innerHTML=`${d.n_ok} titres NASDAQ · valorisation routée (Damodaran) + forensique + sentiment · données SEC + marché, USD · éducatif, pas un conseil.`;
 })();
 </script>
 </body>

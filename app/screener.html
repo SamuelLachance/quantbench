@@ -11,21 +11,17 @@
 <body>
 <div class="wrap">
   <nav class="nav">
-    <div class="brand"><span class="mark">Quant<b>Bench</b></span>
-      <span class="tag">screener personnalisable</span></div>
+    <div class="brand"><span class="mark">Quant<b>Bench</b></span></div>
     <div class="navlinks">
-      <a href="index.html">Accueil</a>
+      <div class="search"><input id="tickerSearch" list="tickerList" placeholder="ticker…" autocomplete="off" spellcheck="false"><button id="searchGo" type="button">↵</button></div>
+      <datalist id="tickerList"></datalist>
+      <a href="index.html">Marché</a>
       <a href="screener.html" class="active">Screener</a>
-      <button class="toggle" id="themeBtn" type="button">Thème</button>
+      <button class="toggle" id="themeBtn" type="button">◐</button>
     </div>
   </nav>
 
-  <div class="eyebrow">Gratuit · sans compte · comme les outils payants</div>
-  <h1>Screener personnalisable</h1>
-  <p class="lede">Filtrez l'univers par secteur, catégorie de valorisation, upside, qualité
-    fondamentale (F-Score) et signaux forensiques. Cliquez un en-tête pour trier, une ligne pour le profil.</p>
-
-  <div class="card">
+  <div class="card" style="margin-top:4px">
     <div class="filters" id="filters">
       <div class="field"><label>Recherche</label><input id="q" type="text" placeholder="ticker ou nom"></div>
       <div class="field"><label>Secteur</label><select id="sector"></select></div>
@@ -101,7 +97,7 @@ function renderHead(){
     renderHead(); apply();});
 }
 (async()=>{
-  QB.initTheme();
+  QB.initTheme(); QB.mountSearch();
   let d; try{ d=await (await fetch('us/_screener.json',{cache:'no-store'})).json(); }
   catch(e){ document.getElementById('disc').textContent='Données indisponibles.'; return; }
   ROWS=d.rows||[];

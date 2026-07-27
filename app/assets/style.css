@@ -123,3 +123,29 @@ td.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .loading{color:var(--muted);font-size:14px;padding:40px 0;text-align:center}
 .spark{display:block}
 .confbadge{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+
+/* recherche dans la nav */
+.search{display:flex;align-items:center;gap:0;background:var(--surface);border:1px solid var(--border);border-radius:9px;overflow:hidden}
+.search:focus-within{border-color:var(--accent)}
+.search input{font:inherit;font-size:13px;font-family:var(--mono);width:150px;padding:7px 10px;border:0;background:transparent;color:var(--ink);text-transform:uppercase}
+.search input:focus{outline:none}
+.search button{border:0;background:var(--accent-soft);color:var(--accent);padding:7px 11px;cursor:pointer;font-size:13px}
+.search button:hover{background:var(--accent);color:#fff}
+@media(max-width:620px){.search input{width:96px}}
+
+/* graphiques */
+svg.chart{width:100%;height:auto;display:block}
+.chart .ax{fill:var(--faint);font-size:10px;font-family:var(--mono)}
+.muted{color:var(--muted)}
+
+/* grille de cartes profil (pro, dense) */
+.pcards{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:820px){.pcards{grid-template-columns:1fr}}
+.pcards .card{margin-bottom:0}
+.card.span2{grid-column:1/-1}
+.kv{display:grid;grid-template-columns:1fr auto;gap:4px 14px;font-size:13px}
+.kv .lbl{color:var(--muted)}
+.kv .val{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.summary{font-size:13px;color:var(--muted);line-height:1.55}
+.mini{font-size:11px;color:var(--faint);margin-top:8px}
+h2 .sub{font-weight:400;color:var(--faint);font-size:12px;letter-spacing:0;text-transform:none}

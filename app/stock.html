@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>QuantBench — Profil</title>
-<meta name="description" content="Profil complet : valorisation intrinsèque, analyse forensique, états financiers et news.">
+<meta name="description" content="Profil pro : valorisation, projection 20 ans, forensique, résultats, news.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
 <link rel="stylesheet" href="assets/style.css">
 </head>
@@ -13,9 +13,11 @@
   <nav class="nav">
     <div class="brand"><span class="mark">Quant<b>Bench</b></span></div>
     <div class="navlinks">
-      <a href="index.html">Accueil</a>
+      <div class="search"><input id="tickerSearch" list="tickerList" placeholder="ticker…" autocomplete="off" spellcheck="false"><button id="searchGo" type="button">↵</button></div>
+      <datalist id="tickerList"></datalist>
+      <a href="index.html">Marché</a>
       <a href="screener.html">Screener</a>
-      <button class="toggle" id="themeBtn" type="button">Thème</button>
+      <button class="toggle" id="themeBtn" type="button">◐</button>
     </div>
   </nav>
   <div id="app"><div class="loading">Chargement…</div></div>
@@ -23,97 +25,98 @@
 
 <script src="assets/app.js"></script>
 <script>
-const P = QB.pct.bind(QB), U = QB.usd.bind(QB);
-function badge(l){const m={positive:'positive',negative:'negative',neutral:'neutral'};
-  const txt={positive:'positif',negative:'négatif',neutral:'neutre'};
-  return `<span class="badge ${m[l]||'neutral'}">${txt[l]||'neutre'}</span>`;}
+const P=QB.pct.bind(QB), U=QB.usd.bind(QB), BN=QB.bn.bind(QB);
+const badge=l=>{const t={positive:'positif',negative:'négatif',neutral:'neutre'};return `<span class="badge ${l||'neutral'}">${t[l]||'neutre'}</span>`;};
 
-function statementsTable(s){
-  if(!s||!s.years)return'';
-  const rows=[['Chiffre d\'affaires','revenue'],['Résultat opérationnel','ebit'],
-    ['Résultat net','net_income'],['Cash-flow d\'exploitation','cfo'],
-    ['Actif total','total_assets'],['Capitaux propres','equity'],['Dette','total_debt']];
-  const head='<tr><th>Md USD</th>'+s.years.map(y=>`<th>${y}</th>`).join('')+'</tr>';
-  const body=rows.map(([lab,k])=>`<tr><td>${lab}</td>`+
-    (s[k]||[]).map(v=>`<td class="num">${v==null?'—':QB.nf1.format(v)}</td>`).join('')+'</tr>').join('');
+function kv(pairs){return '<div class="kv">'+pairs.map(([k,v])=>`<div class="lbl">${k}</div><div class="val">${v}</div>`).join('')+'</div>';}
+
+function projTable(proj){
+  if(!proj||!proj.length)return'';
+  const pick=[0,4,9,14,19].filter(i=>i<proj.length);
+  const head='<tr><th>Année</th><th>CA (Md$)</th><th>Croiss.</th><th>Marge</th><th>FCFF</th></tr>';
+  const body=pick.map(i=>{const p=proj[i];return `<tr><td>An ${p.y}</td><td class="num">${QB.nf0.format(p.revenue)}</td><td class="num">${QB.nf1.format(p.growth)} %</td><td class="num">${QB.nf1.format(p.margin)} %</td><td class="num">${QB.nf1.format(p.fcff)}</td></tr>`;}).join('');
   return `<div class="tableScroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+function stmtTable(s){
+  if(!s||!s.years)return'<div class="muted">—</div>';
+  const rows=[['CA','revenue'],['Rés. opér.','ebit'],['Rés. net','net_income'],['Cash-flow op.','cfo'],['Actif','total_assets'],['Capitaux propres','equity'],['Dette','total_debt']];
+  return `<div class="tableScroll"><table><thead><tr><th>Md$</th>${s.years.map(y=>`<th>${y}</th>`).join('')}</tr></thead><tbody>`+
+    rows.map(([l,k])=>`<tr><td>${l}</td>${(s[k]||[]).map(v=>`<td class="num">${v==null?'—':QB.nf1.format(v)}</td>`).join('')}</tr>`).join('')+'</tbody></table></div>';
 }
 
 function render(d){
-  const v=d.valuation||{}, f=d.forensics, fu=d.fundamentals||{}, sc=(f&&f.scores)||{};
-  const up=v.upside, upcls=(up||0)>=0?'pos':'neg';
-  const scoreTile=(k,val,note)=>`<div class="tile"><div class="k">${k}</div><div class="v">${val}</div><div class="s">${note||''}</div></div>`;
-  const html=`
+  const v=d.valuation||{}, f=d.forensics, sc=(f&&f.scores)||{}, rs=d.results_summary||{};
+  const upcls=(v.upside||0)>=0?'pos':'neg';
+  const tile=(k,val,note)=>`<div class="tile"><div class="k">${k}</div><div class="v">${val}</div><div class="s">${note||''}</div></div>`;
+  document.getElementById('app').innerHTML=`
   <div class="phead">
-    <div>
-      <div class="eyebrow">${d.sector||''}${d.industry?' · '+d.industry:''}</div>
-      <h1>${d.name||d.ticker} <span class="mono" style="color:var(--accent)">${d.ticker}</span></h1>
-      <div style="color:var(--muted);font-size:13px">Méthode : ${v.method||'—'} · confiance ${v.confidence||'—'}</div>
-    </div>
-    <div class="px">
-      <div class="tile" style="border:none;box-shadow:none;padding:0">
-        <div class="k">Cours</div><div class="v">${U(v.price)}</div>
-        <div class="s">Cap. ${QB.bn(v.market_cap)}</div></div>
-    </div>
+    <div><div class="eyebrow">${d.sector||''}${d.industry?' · '+d.industry:''}</div>
+      <h1>${d.name||d.ticker} <span class="mono" style="color:var(--accent)">${d.ticker}</span></h1></div>
+    <div class="px"><div class="k" style="font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em">Cours</div>
+      <div class="mono" style="font-size:24px;font-weight:700">${U(v.price)}</div>
+      <div class="mono" style="font-size:12px;color:var(--muted)">Cap. ${BN(v.market_cap)}</div></div>
   </div>
 
   <div class="verdict">
-    <div class="vcell"><div class="k">Valeur intrinsèque / action</div>
-      <div class="big ${upcls}">${U(v.value_per_share)}</div>
-      <div class="note">vs cours ${U(v.price)}</div></div>
-    <div class="vcell"><div class="k">Upside vs cours</div>
-      <div class="big ${upcls}">${P(up)}</div>
-      <div class="note">${v.category||''}</div></div>
-    <div class="vcell"><div class="k">Signaux forensiques</div>
-      <div class="big">${f?((f.positives||[]).length):0}<span style="color:var(--pos);font-size:16px"> +</span> / ${f?((f.flags||[]).length):0}<span style="color:var(--neg);font-size:16px"> ⚠</span></div>
-      <div class="note">points positifs / alertes</div></div>
+    <div class="vcell"><div class="k">Valeur intrinsèque / action</div><div class="big ${upcls}">${U(v.value_per_share)}</div><div class="note">${v.method||''}</div></div>
+    <div class="vcell"><div class="k">Upside</div><div class="big ${upcls}">${P(v.upside)}</div><div class="note">confiance ${v.confidence||'—'}</div></div>
+    <div class="vcell"><div class="k">Forensique</div><div class="big">${f?(f.positives||[]).length:0}<span style="color:var(--pos);font-size:15px">+</span> / ${f?(f.flags||[]).length:0}<span style="color:var(--neg);font-size:15px">⚠</span></div><div class="note">points positifs / alertes</div></div>
   </div>
 
-  ${f?`<div class="card">
-    <div class="eyebrow">Analyse forensique</div>
-    <h2>Qualité des comptes &amp; solidité</h2>
-    <p class="desc">Signaux statistiques à investiguer — <b>pas</b> une preuve. Modèles : Beneish, Altman, Piotroski, accruals.</p>
-    <div class="grid g4" style="margin-bottom:14px">
-      ${scoreTile('Piotroski F', sc.piotroski_f==null?'—':sc.piotroski_f+'/9','fondamentaux')}
-      ${scoreTile('Beneish M', sc.beneish_m==null?'—':sc.beneish_m, sc.beneish_flag?'zone à investiguer':'ok')}
-      ${scoreTile('Altman Z″', sc.altman_z==null?'—':sc.altman_z, sc.altman_z==null?'':(sc.altman_z<1.1?'détresse':sc.altman_z>2.6?'sain':'gris'))}
-      ${scoreTile('Accruals', sc.accruals_ratio==null?'—':(sc.accruals_ratio*100).toFixed(1)+'%','qualité résultat')}
+  <div class="pcards">
+    <div class="card"><h2>Activité</h2>
+      <div class="summary">${d.summary||'Description non disponible.'}</div>
+      ${kv([['Secteur',d.sector||'—'],['Industrie',d.industry||'—'],['Bêta',QB.nf2.format(d.fundamentals.beta||0)],['Actions',d.fundamentals.shares?QB.nf1.format(d.fundamentals.shares/1e9)+' Md':'—']])}
     </div>
-    ${(f.positives&&f.positives.length)?'<div style="margin-bottom:10px">'+f.positives.map(p=>`<div class="flagitem"><span class="pill good">+</span><span>${p}</span></div>`).join('')+'</div>':''}
-    ${(f.flags&&f.flags.length)?f.flags.map(x=>`<div class="flagitem"><span class="pill flag">⚠</span><span>${x}</span></div>`).join(''):'<div style="color:var(--muted);font-size:13px">Aucune alerte détectée.</div>'}
-  </div>`:''}
+    <div class="card"><h2>Derniers résultats <span class="sub">exercice ${rs.fiscal_year||'—'}</span></h2>
+      ${kv([['Chiffre d’affaires',BN(rs.revenue)],['Croissance a/a',P(rs.rev_growth)],['Résultat net',BN(rs.net_income)],['Marge nette',rs.net_margin==null?'—':QB.pct(rs.net_margin,0)],['ROE',d.fundamentals.roe==null?'—':QB.pct(d.fundamentals.roe,0)],['Marge opér.',d.fundamentals.operating_margin==null?'—':QB.pct(d.fundamentals.operating_margin,0)]])}
+    </div>
 
-  <div class="card">
-    <div class="eyebrow">États financiers</div>
-    <h2>4 derniers exercices</h2>
-    ${statementsTable(d.statements)}
-    <p class="desc" style="margin-top:12px">Source : SEC Financial Statement Data Sets (dépôts 10-K).
-      ${d.pdf_url?`<a href="us/${d.pdf_url}" target="_blank" rel="noopener">📄 Télécharger la synthèse PDF (4 ans)</a> · `:''}
-      <a href="${d.filing_url}" target="_blank" rel="noopener">Dépôts officiels SEC EDGAR →</a></p>
-  </div>
+    <div class="card span2"><h2>Projection 20 ans <span class="sub">chiffre d'affaires (Md$), méthode ${v.category||'DCF'}</span></h2>
+      <div id="projChart"></div>${projTable(d.projection)}
+    </div>
 
-  <div class="card">
-    <div class="eyebrow">Actualités</div>
-    <h2>Dernières news, classées par sentiment</h2>
-    <div class="newslist">
-      ${(d.news&&d.news.length)?d.news.map(n=>`<div class="newsitem">${badge(n.label)}
-        <div><div class="t">${n.url?`<a href="${n.url}" target="_blank" rel="noopener">${n.title}</a>`:n.title}</div>
-        <div class="src">${n.publisher||''}</div></div></div>`).join(''):'<div style="color:var(--muted);font-size:13px">Pas d\'actualité récente.</div>'}
+    <div class="card"><h2>Projection court terme <span class="sub">bandes de probabilité, 63 j — illustratif</span></h2>
+      <div id="coneChart"></div>
+      <div class="mini">Cône de probabilité (méthode quant type Simons) sur la volatilité — mesure l'incertitude, ne prédit pas la direction.</div>
+    </div>
+    <div class="card"><h2>Solidité forensique</h2>
+      <div class="grid g4" style="grid-template-columns:1fr 1fr;gap:10px">
+        ${tile('Piotroski',sc.piotroski_f==null?'—':sc.piotroski_f+'/9','')}
+        ${tile('Beneish M',sc.beneish_m==null?'—':sc.beneish_m,sc.beneish_flag?'à investiguer':'ok')}
+        ${tile('Altman Z″',sc.altman_z==null?'—':sc.altman_z,sc.altman_z==null?'':(sc.altman_z<1.1?'détresse':sc.altman_z>2.6?'sain':'gris'))}
+        ${tile('Accruals',sc.accruals_ratio==null?'—':(sc.accruals_ratio*100).toFixed(1)+'%','')}
+      </div>
+      <div style="margin-top:10px">
+      ${f&&f.positives?f.positives.map(p=>`<div class="flagitem"><span class="pill good">+</span><span>${p}</span></div>`).join(''):''}
+      ${f&&f.flags?f.flags.map(x=>`<div class="flagitem"><span class="pill flag">⚠</span><span>${x}</span></div>`).join(''):''}
+      ${(!f||((f.positives||[]).length+(f.flags||[]).length===0))?'<div class="muted" style="font-size:13px">Pas de signal.</div>':''}
+      </div>
+    </div>
+
+    <div class="card span2"><h2>États financiers <span class="sub">4 exercices, SEC</span></h2>
+      ${stmtTable(d.statements)}
+      <div class="mini" style="margin-top:10px">
+        ${d.pdf_url?`<a href="us/${d.pdf_url}" target="_blank" rel="noopener">📄 Synthèse PDF (4 ans)</a> · `:''}
+        ${d.report_url?`<a href="${d.report_url}" target="_blank" rel="noopener">⬇ Dernier rapport annuel (10-K)</a> · `:''}
+        <a href="${d.filing_url}" target="_blank" rel="noopener">Tous les dépôts SEC EDGAR →</a></div>
+    </div>
+
+    <div class="card span2"><h2>Actualités <span class="sub">classées par sentiment</span></h2>
+      <div class="newslist">${(d.news&&d.news.length)?d.news.map(n=>`<div class="newsitem">${badge(n.label)}<div><div class="t">${n.url?`<a href="${n.url}" target="_blank" rel="noopener">${n.title}</a>`:n.title}</div><div class="src">${n.publisher||''}</div></div></div>`).join(''):'<div class="muted" style="font-size:13px">Pas d’actualité.</div>'}</div>
     </div>
   </div>
-
-  <p class="disclaimer">Outil de recherche <b>éducatif — pas un conseil d’investissement</b>. Valorisation sur
-    cas de base conservateur ; les signaux forensiques sont statistiques et à investiguer, jamais une accusation.
-    Fondamentaux SEC, prix marché, en USD.</p>`;
-  document.getElementById('app').innerHTML=html;
+  <p class="mini" style="margin-top:14px">Éducatif — pas un conseil d'investissement. Valorisation sur cas de base conservateur ; signaux forensiques statistiques à investiguer, jamais une accusation. Données SEC + marché, USD.</p>`;
+  QB.bars(document.getElementById('projChart'), d.projection, 'revenue');
+  QB.cone(document.getElementById('coneChart'), d.shortterm);
   document.title='QuantBench — '+(d.name||d.ticker);
 }
 (async()=>{
-  QB.initTheme();
+  QB.initTheme(); QB.mountSearch();
   const t=(QB.qs('t')||'').toUpperCase();
-  if(!t){document.getElementById('app').innerHTML='<div class="loading">Aucun titre spécifié. <a href="screener.html">Ouvrir le screener</a>.</div>';return;}
-  try{ const d=await (await fetch('us/'+t+'.json',{cache:'no-store'})).json(); render(d); }
-  catch(e){ document.getElementById('app').innerHTML=`<div class="loading">Profil indisponible pour <b>${t}</b>. <a href="screener.html">Retour au screener</a>.</div>`; }
+  if(!t){document.getElementById('app').innerHTML='<div class="loading">Aucun titre. <a href="screener.html">Screener</a>.</div>';return;}
+  try{ render(await (await fetch('us/'+t+'.json',{cache:'no-store'})).json()); }
+  catch(e){ document.getElementById('app').innerHTML=`<div class="loading">Profil indisponible pour <b>${t}</b> (hors univers couvert). <a href="screener.html">Screener</a>.</div>`; }
 })();
 </script>
 </body>

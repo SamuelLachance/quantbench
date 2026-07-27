@@ -21,4 +21,4 @@ Thumbs.db
 data_cache/
 
 # PDF générés (déployés via artefact Pages, pas commités)
-app/us/pdf/
+app/us/

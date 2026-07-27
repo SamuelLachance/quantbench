@@ -25,6 +25,7 @@ from quantbench.data import edgar, sec_datasets as ds
 from quantbench.data.sec_datasets import sic_to_sector
 from quantbench.forensics import analyze
 from quantbench.valuation.route import value_stock
+from quantbench.valuation.build_universal import project
 from quantbench.news import fetch_and_classify
 from quantbench.reports import financial_summary_pdf
 
@@ -61,20 +62,75 @@ def nasdaq_universe():
 
 
 def market_quote(ticker):
-    """Prix / actions / capitalisation via yfinance fast_info (léger, threadable)."""
+    """Marché + activité via yfinance .info (un appel : prix/actions/capi/beta/
+    résumé/industrie), repli fast_info si .info échoue."""
     import yfinance as yf
     from quantbench.data.market import fx_to_usd
+    tk = yf.Ticker(ticker)
+    out = {"price": None, "shares": None, "market_cap": None, "beta": None,
+           "summary": None, "industry": None}
     try:
-        fi = yf.Ticker(ticker).fast_info
-        cur = (getattr(fi, "currency", None) or "USD").upper()
+        info = tk.info or {}
+        cur = (info.get("currency") or "USD").upper()
         fx = fx_to_usd(cur) or 1.0
-        price = getattr(fi, "last_price", None)
-        shares = getattr(fi, "shares", None)
-        mcap = getattr(fi, "market_cap", None)
-        return {"price": price * fx if price else None, "shares": shares,
-                "market_cap": mcap * fx / 1e9 if mcap else None, "currency": cur}
+        p = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
+        out["price"] = p * fx if p else None
+        out["shares"] = info.get("sharesOutstanding")
+        mc = info.get("marketCap")
+        out["market_cap"] = mc * fx / 1e9 if mc else None
+        out["beta"] = info.get("beta")
+        s = info.get("longBusinessSummary")
+        out["summary"] = s[:650] if s else None
+        out["industry"] = info.get("industry")
     except Exception:
-        return {"price": None, "shares": None, "market_cap": None, "currency": None}
+        pass
+    if out["price"] is None:
+        try:
+            fi = tk.fast_info
+            cur = (getattr(fi, "currency", None) or "USD").upper()
+            fx = fx_to_usd(cur) or 1.0
+            p = getattr(fi, "last_price", None)
+            out["price"] = p * fx if p else None
+            out["shares"] = getattr(fi, "shares", None)
+            mc = getattr(fi, "market_cap", None)
+            out["market_cap"] = mc * fx / 1e9 if mc else None
+        except Exception:
+            pass
+    return out
+
+
+def _shortterm(price, beta, days=63):
+    """Cône de projection court terme (bandes de probabilité log-normales) —
+    illustratif (méthode quant type Simons : incertitude, pas prédiction)."""
+    import math
+    if not price:
+        return None
+    sigma = 0.22 + 0.12 * max(0.0, (beta or 1.0) - 0.8)      # vol annualisée proxy
+    pts = []
+    for step in range(0, days + 1, 7):
+        tau = step / 252.0
+        drift = -0.5 * sigma * sigma * tau
+        band = 1.2816 * sigma * math.sqrt(tau)
+        pts.append({"d": step,
+                    "p50": round(price * math.exp(drift), 2),
+                    "p10": round(price * math.exp(drift - band), 2),
+                    "p90": round(price * math.exp(drift + band), 2)})
+    return {"days": days, "sigma": round(sigma, 3), "points": pts}
+
+
+def _results_summary(F):
+    if not F:
+        return None
+    B = 1e9
+    rev, ni = F.get("revenue"), F.get("net_income")
+    r0 = rev[0] if rev and rev[0] is not None else None
+    r1 = rev[1] if rev and len(rev) > 1 and rev[1] is not None else None
+    n0 = ni[0] if ni and ni[0] is not None else None
+    return {"fiscal_year": F["years"][0],
+            "revenue": round(r0 / B, 1) if r0 else None,
+            "rev_growth": round(r0 / r1 - 1, 4) if (r0 and r1) else None,
+            "net_income": round(n0 / B, 1) if n0 else None,
+            "net_margin": round(n0 / r0, 4) if (n0 and r0) else None}
 
 
 def _statements(F):
@@ -91,7 +147,8 @@ def _statements(F):
 def build_one(ticker, entry, with_news=True, with_pdf=True):
     F = ds.extract_financials(entry)
     q = market_quote(ticker)
-    q["beta"] = SECTOR_BETA.get(sic_to_sector(entry.get("sic")), 1.1)
+    if not q.get("beta"):
+        q["beta"] = SECTOR_BETA.get(sic_to_sector(entry.get("sic")), 1.1)
     fund = ds.extract_fundamentals(entry, ticker, q)
     if not fund.get("price"):
         return None, None
@@ -100,15 +157,27 @@ def build_one(ticker, entry, with_news=True, with_pdf=True):
     if not val.get("ok"):
         return None, None
     news = fetch_and_classify(ticker, limit=8) if with_news else []
+    try:
+        proj = project(fund, years=20)
+    except Exception:
+        proj = None
+    # lien direct vers le dernier 10-K (dossier de dépôt SEC)
+    adsh = (entry.get("adsh") or "").replace("-", "")
+    report_url = (f"https://www.sec.gov/Archives/edgar/data/{int(entry['cik'])}/{adsh}/"
+                  if adsh else None)
     profile = {
         "ticker": ticker, "name": fund.get("name"), "sector": fund.get("sector"),
-        "industry": fund.get("industry"), "sic": fund.get("sic"),
+        "industry": q.get("industry") or fund.get("industry"), "sic": fund.get("sic"),
+        "summary": q.get("summary"),
         "valuation": val,
         "fundamentals": {k: fund.get(k) for k in (
             "price", "market_cap", "shares", "beta", "revenue", "ebit",
             "net_income", "total_debt", "cash", "book_equity", "operating_margin", "roe")},
         "forensics": forensic, "statements": _statements(F), "news": news,
+        "projection": proj, "results_summary": _results_summary(F),
+        "shortterm": _shortterm(fund.get("price"), fund.get("beta")),
         "filing_url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={entry['cik']}&type=10-K",
+        "report_url": report_url,
         "pdf_url": None,
     }
     if with_pdf:
