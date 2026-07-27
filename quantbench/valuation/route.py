@@ -66,7 +66,10 @@ def value_financial(fund):
     ke, rf = _coe(fund)
     g = min(rf, 0.03)
     ke = max(ke, g + 0.01)
-    val = be + be * (roe - ke) / (ke - g)      # residual income / excess return
+    # Excess-return / residual income, avec multiplicateur BORNE (le spread ROE-Ke
+    # ne persiste pas a l'infini : atténuation implicite, évite l'explosion en taux bas).
+    mult = max(-0.6, min((roe - ke) / (ke - g), 4.0))
+    val = be * (1 + mult)
     return {"equity_value": max(val, 0.2 * be),
             "method": "Excess-return (capitaux propres — Damodaran financières)",
             "confidence": "moyenne"}

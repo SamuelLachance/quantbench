@@ -204,8 +204,13 @@ def value_dcf(x: DcfInputs) -> dict:
         if np.isnan(x.current_roic) or np.isnan(x.terminal_roic):
             raise ValueError("reinvestment_mode='roic' exige current_roic et terminal_roic.")
         roic_path = converge_path(x.current_roic, x.terminal_roic, n, x.roic_converge_start)
+        # Damodaran : taux de reinvestissement = croissance de l'EBIT APRES IMPOT / ROIC
+        # (pas la croissance du CA — elles different quand marge/impot varient).
+        cur_ebi = x.revenue_base * x.current_operating_margin * (1 - x.current_tax_rate)
+        ebi_prev = np.concatenate([[cur_ebi], ebit_after_tax[:-1]])
         with np.errstate(divide="ignore", invalid="ignore"):
-            reinv_rate = np.where(roic_path > 0, g / roic_path, 0.0)
+            g_ebi = np.where(ebi_prev > 0, ebit_after_tax / ebi_prev - 1.0, g)
+            reinv_rate = np.where(roic_path > 0, g_ebi / roic_path, 0.0)
         reinv_rate = np.clip(reinv_rate, 0.0, 0.95)
         reinvestment = ebit_after_tax * reinv_rate
     else:
@@ -227,7 +232,9 @@ def value_dcf(x: DcfInputs) -> dict:
             f"WACC terminal ({wacc_t:.4f}) <= croissance terminale "
             f"({terminal_growth:.4f}) : valeur terminale non definie.")
     if x.reinvestment_mode == "roic" and not np.isnan(x.terminal_roic):
-        roic_t = x.terminal_roic
+        # Pas de rente excessive en perpetuite : ROIC terminal plafonne a WACC + 2%
+        # (Damodaran : en regime permanent, ROIC tend vers le cout du capital).
+        roic_t = min(x.terminal_roic, wacc_t + 0.02)
     else:
         roic_t = wacc_t + x.additional_roic_in_perpetuity
     if terminal_growth <= 0 or roic_t == 0:
