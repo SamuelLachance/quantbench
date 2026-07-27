@@ -18,7 +18,7 @@ _DEFAULT_ERP = 0.045
 
 
 def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = None,
-                                erp: float = _DEFAULT_ERP):
+                                erp: float = _DEFAULT_ERP, rf: float | None = None):
     """Retourne (DcfInputs, meta) depuis un dict de fondamentaux universal.get_fundamentals.
     margin_override : force la marge operationnelle (ex. marge normalisee pour un cyclique)."""
     rev = fund.get("revenue")
@@ -46,7 +46,7 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     nopat = op_margin * rev * 0.75
     cur_roic = _clamp(_safe_div(nopat, invested) or 0.12, 0.02, 0.60)
 
-    rf = market.risk_free_rate()
+    rf = rf if rf is not None else market.risk_free_rate()
     lev_beta = fund.get("beta") or 1.1
     de = _safe_div(debt, market_cap) or 0.0
     unlev = lev_beta / (1 + (1 - 0.25) * de) if de >= 0 else lev_beta

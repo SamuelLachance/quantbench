@@ -50,9 +50,10 @@ def _mc_stats(eq, mcap, shares):
             "n": int(eq.size)}
 
 
-def run_mc(fund, category, n=10000):
+def run_mc(fund, category, n=10000, rf=None):
     """Monte Carlo de valorisation (modèle Damodaran) — distribution de la valeur
-    d'équité. DCF pour la plupart, excess-return simulé pour les financières."""
+    d'équité. DCF pour la plupart, excess-return simulé pour les financières.
+    `rf` : taux sans risque à imposer (backtest historique) ; sinon FRED courant."""
     shares, mcap = fund.get("shares"), fund.get("market_cap")
     try:
         if category == "financiere":
@@ -60,7 +61,7 @@ def run_mc(fund, category, n=10000):
             beta = fund.get("beta") or 1.1
             if not be or be <= 0 or roe is None:
                 return None
-            rf = risk_free_rate()
+            rf = rf if rf is not None else risk_free_rate()
             g = min(rf, 0.03)
             rng = np.random.default_rng(42)
             roes = rng.normal(roe, max(0.02, abs(roe) * 0.2), n)
@@ -69,7 +70,7 @@ def run_mc(fund, category, n=10000):
             mult = np.clip((roes - ke) / (ke - g), -0.6, 4.0)
             eq = np.maximum(be * (1 + mult), 0.2 * be)
         else:
-            base, _ = build_dcf_from_fundamentals(fund)
+            base, _ = build_dcf_from_fundamentals(fund, rf=rf)
             dists = {
                 "g1_begin": stats.norm(base.g1_begin, max(0.02, abs(base.g1_begin) * 0.35)),
                 "terminal_operating_margin": stats.norm(

@@ -9,7 +9,7 @@ on:
     paths:
       - "app/**"
       - "quantbench/**"
-      - "scripts/build_us_site.py"
+      - "scripts/build_site_fmp.py"
       - ".github/workflows/deploy.yml"
 
 permissions:
@@ -24,7 +24,7 @@ concurrency:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120          # build 10k-MC sur tout l'univers dépasse 60 min
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
