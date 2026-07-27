@@ -79,8 +79,11 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
 
 
 def project(fund, years=20, margin_override=None):
-    """Projection annee par annee sur `years` ans (CA, marge, FCFF, croissance)
-    via le meme moteur DCF. Retourne une liste de points annuels."""
+    """Projection COMPLETE année par année (toutes les colonnes du DCF Damodaran)
+    via le moteur value_dcf. Chaque enregistrement contient : CA, croissance, marge,
+    EBIT, taux d'impôt, EBI (EBIT après impôt), réinvestissement, FCFF, ROIC, capital
+    investi, WACC, coût des FP, facteur d'actualisation, valeur actualisée."""
+    import numpy as np
     from .dcf import value_dcf
     x, _ = build_dcf_from_fundamentals(fund, margin_override=margin_override)
     l1 = max(1, years // 4)
@@ -88,14 +91,33 @@ def project(fund, years=20, margin_override=None):
     l2 = max(1, years - l1 - l3)
     x.len1, x.len2, x.len3 = l1, l2, l3
     res = value_dcf(x)
+    rev, g, m = res["revenues"], res["growth"], res["margins"]
+    eat, reinv, fcff = res["ebit_after_tax"], res["reinvestment"], res["fcff"]
+    wacc, coe, roic, ic = res["wacc"], res["cost_of_equity"], res["roic"], res["invested_capital"]
+    disc = np.cumprod(1.0 + np.asarray(wacc, dtype=float))
+    fin = lambda v: (v == v and v is not None)          # non-NaN
+
     out = []
     for i in range(x.n_years):
+        ebit = float(rev[i] * m[i])
+        eati = float(eat[i])
+        tax = (1 - eati / ebit) if ebit else None
         out.append({
-            "y": i + 1,
-            "revenue": round(float(res["revenues"][i]), 1),
-            "fcff": round(float(res["fcff"][i]), 2),
-            "growth": round(float(res["growth"][i]) * 100, 1),
-            "margin": round(float(res["margins"][i]) * 100, 1),
+            "year": i + 1,
+            "revenue": round(float(rev[i]), 2),
+            "revenue_growth_pct": round(float(g[i]) * 100, 2),
+            "operating_margin_pct": round(float(m[i]) * 100, 2),
+            "ebit": round(ebit, 2),
+            "tax_rate_pct": round(tax * 100, 2) if tax is not None else None,
+            "ebit_after_tax": round(eati, 2),
+            "reinvestment": round(float(reinv[i]), 2),
+            "fcff": round(float(fcff[i]), 2),
+            "roic_pct": round(float(roic[i]) * 100, 2) if fin(roic[i]) else None,
+            "invested_capital": round(float(ic[i]), 2) if fin(ic[i]) else None,
+            "wacc_pct": round(float(wacc[i]) * 100, 2),
+            "cost_of_equity_pct": round(float(coe[i]) * 100, 2),
+            "discount_factor": round(float(disc[i]), 4),
+            "pv_fcff": round(float(fcff[i] / disc[i]), 2),
         })
     return out
 

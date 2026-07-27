@@ -47,6 +47,26 @@ const QB = {
     if (btn) btn.addEventListener('click', go);
   },
 
+  downloadCSV(rows, filename) {
+    if (!rows || !rows.length) return;
+    const cols = Object.keys(rows[0]);
+    const esc = v => {
+      if (v == null) return '';
+      const s = String(v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const csv = [cols.join(',')].concat(
+      rows.map(r => cols.map(c => esc(r[c])).join(','))).join('\n');
+    const blob = new Blob(['﻿' + csv], {type: 'text/csv;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+
   /* ---- graphiques SVG (sans dépendance) ---- */
   _scale(vals, lo, hi) { const mn = Math.min(...vals), mx = Math.max(...vals); const r = (mx - mn) || 1;
     return v => hi - (v - mn) / r * (hi - lo); },
@@ -69,6 +89,21 @@ const QB = {
       <text x="${xf(xs[xs.length-1]).toFixed(0)}" y="${y(P[P.length-1].p90).toFixed(0)}" text-anchor="end" class="ax">${QB.usd(P[P.length-1].p90,0)}</text>
       <text x="${xf(xs[xs.length-1]).toFixed(0)}" y="${(y(P[P.length-1].p10)+10).toFixed(0)}" text-anchor="end" class="ax">${QB.usd(P[P.length-1].p10,0)}</text>
     </svg>`;
+  },
+
+  histogram(el, bins, refx, medx) {           // histogramme Monte Carlo
+    if (!el || !bins || !bins.length) { if (el) el.innerHTML = ''; return; }
+    const W = 640, H = 190, pad = 8, mB = 16;
+    const xs = bins.map(b => b.x), ys = bins.map(b => b.y);
+    const xmin = xs[0], xmax = xs[xs.length - 1], ymax = Math.max(...ys) || 1;
+    const X = v => pad + (v - xmin) / ((xmax - xmin) || 1) * (W - 2 * pad);
+    const bw = (W - 2 * pad) / bins.length * 0.92;
+    let s = bins.map(b => { const h = b.y / ymax * (H - mB - 6), x = X(b.x) - bw / 2, y = H - mB - h;
+      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="1" fill="var(--accent)" opacity="0.45"/>`; }).join('');
+    const line = (v, c, lbl, anc) => (v == null || v < xmin || v > xmax) ? '' :
+      `<line x1="${X(v).toFixed(1)}" y1="0" x2="${X(v).toFixed(1)}" y2="${H - mB}" stroke="${c}" stroke-width="2" stroke-dasharray="4 3"/><text x="${(X(v) + (anc === 'end' ? -4 : 4)).toFixed(1)}" y="11" text-anchor="${anc || 'start'}" class="ax" fill="${c}">${lbl}</text>`;
+    s += line(medx, 'var(--accent)', 'médiane') + line(refx, 'var(--ink)', 'cours', 'end');
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="chart">${s}</svg>`;
   },
 
   bars(el, proj, key, color) {                // barres de projection (ex. revenue)

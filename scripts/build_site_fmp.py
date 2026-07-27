@@ -18,13 +18,73 @@ import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
+from scipy import stats
+
 from quantbench.data import fmp
 from quantbench.data.sec_fundamentals import annual_report_docs
+from quantbench.data.market import risk_free_rate
 from quantbench.forensics import analyze
+from quantbench.valuation import monte_carlo_dcf
 from quantbench.valuation.route import value_stock
-from quantbench.valuation.build_universal import project
+from quantbench.valuation.build_universal import project, build_dcf_from_fundamentals
 from quantbench.shortterm.predict import predict as st_predict
 from quantbench.reports import financial_summary_pdf
+
+
+def _mc_stats(eq, mcap, shares):
+    eq = np.asarray([v for v in eq if v == v and np.isfinite(v)], dtype=float)
+    if eq.size < 50:
+        return None
+    perc = {str(p): round(float(np.percentile(eq, p)), 1)
+            for p in (5, 10, 25, 50, 75, 90, 95)}
+    counts, edges = np.histogram(eq, bins=30)
+    hist = [{"x": round(float((edges[i] + edges[i + 1]) / 2), 1), "y": int(counts[i])}
+            for i in range(len(counts))]
+    vps = lambda q: round(float(np.percentile(eq, q)) * 1e9 / shares, 2) if shares else None
+    return {"median": round(float(np.median(eq)), 1),
+            "mean": round(float(eq.mean()), 1), "std": round(float(eq.std()), 1),
+            "percentiles": perc, "histogram": hist,
+            "vps": {"p10": vps(10), "p50": vps(50), "p90": vps(90)},
+            "prob_undervalued": round(float((eq > mcap).mean()), 4) if mcap else None,
+            "n": int(eq.size)}
+
+
+def run_mc(fund, category, n=1500):
+    """Monte Carlo de valorisation (modèle Damodaran) — distribution de la valeur
+    d'équité. DCF pour la plupart, excess-return simulé pour les financières."""
+    shares, mcap = fund.get("shares"), fund.get("market_cap")
+    try:
+        if category == "financiere":
+            be, roe = fund.get("book_equity"), fund.get("roe")
+            beta = fund.get("beta") or 1.1
+            if not be or be <= 0 or roe is None:
+                return None
+            rf = risk_free_rate()
+            g = min(rf, 0.03)
+            rng = np.random.default_rng(42)
+            roes = rng.normal(roe, max(0.02, abs(roe) * 0.2), n)
+            betas = rng.normal(beta, 0.15, n)
+            ke = np.maximum(rf + betas * 0.045, g + 0.01)
+            mult = np.clip((roes - ke) / (ke - g), -0.6, 4.0)
+            eq = np.maximum(be * (1 + mult), 0.2 * be)
+        else:
+            base, _ = build_dcf_from_fundamentals(fund)
+            dists = {
+                "g1_begin": stats.norm(base.g1_begin, max(0.02, abs(base.g1_begin) * 0.35)),
+                "terminal_operating_margin": stats.norm(
+                    base.terminal_operating_margin, max(0.015, abs(base.terminal_operating_margin) * 0.15)),
+                "erp": stats.norm(base.erp, 0.005),
+                "unlevered_beta": stats.norm(base.unlevered_beta, 0.15),
+                "current_roic": stats.norm(base.current_roic, max(0.03, abs(base.current_roic) * 0.2)),
+                "terminal_roic": stats.norm(base.terminal_roic, 0.01),
+                "g3_end": stats.norm(base.g3_end, 0.003),
+            }
+            eq = monte_carlo_dcf(base, dists, n=n, current_market_cap=mcap,
+                                 seed=42)["equity_values"]
+    except Exception:
+        return None
+    return _mc_stats(eq, mcap, shares)
 
 warnings.filterwarnings("ignore")
 
@@ -84,6 +144,13 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     val = value_stock(symbol, fund=fund, forensic=forensic, F=F)
     if not val.get("ok"):
         return None, None
+    # Monte Carlo : l'upside affiché est basé sur la MÉDIANE de la simulation
+    mc = run_mc(fund, val.get("category"))
+    if mc and fund.get("market_cap"):
+        if mc["vps"].get("p50") is not None:
+            val["value_per_share"] = mc["vps"]["p50"]
+        val["upside"] = round(mc["median"] / fund["market_cap"] - 1.0, 4)
+        val["upside_basis"] = "monte_carlo"
     signal = st_predict(fmp.history_closes(symbol))
     news = fmp.news(symbol, limit=8) if with_news else []
     try:
@@ -91,7 +158,7 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     except Exception:
         proj = None
     cik = fund.get("cik")
-    ard = annual_report_docs(cik) if cik else {"ars_pdf": None, "tenk": None}
+    ard = annual_report_docs(cik) if cik else {"ars_pdf": None, "tenk": None, "documents": []}
     filing = (f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=10-K"
               if cik else None)
     profile = {
@@ -103,6 +170,7 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
             "total_debt", "cash", "book_equity", "operating_margin", "roe")},
         "forensics": forensic, "statements": _statements(F), "news": news,
         "projection": proj, "results_summary": _results_summary(F), "shortterm": signal,
+        "montecarlo": mc, "documents": ard.get("documents", []),
         "report_url": ard.get("tenk"), "ars_pdf_url": ard.get("ars_pdf"),
         "filing_url": filing, "pdf_url": None,
     }

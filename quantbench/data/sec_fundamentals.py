@@ -34,31 +34,45 @@ def submission_meta(cik: str) -> dict:
             "tickers": j.get("tickers") or []}
 
 
+_FORM_LABEL = {"10-K": "Rapport annuel (10-K)", "10-K/A": "Rapport annuel (10-K/A)",
+               "10-Q": "Rapport trimestriel (10-Q)", "8-K": "Communiqué (8-K)",
+               "DEF 14A": "Circulaire de procuration", "ARS": "Rapport annuel (glossy)",
+               "20-F": "Rapport annuel (20-F)", "40-F": "Rapport annuel (40-F)",
+               "6-K": "Rapport intermédiaire (6-K)"}
+_DOC_FORMS = tuple(_FORM_LABEL)
+
+
 @functools.lru_cache(maxsize=8192)
 def annual_report_docs(cik: str) -> dict:
-    """Cherche le PDF du rapport annuel glossy (formulaire ARS) et le 10-K sur
-    SEC EDGAR. Retourne {ars_pdf, tenk} (URLs directes) — sources officielles
-    gratuites. ars_pdf est None si la société ne dépose pas d'ARS (ex. AAPL)."""
+    """Via SEC EDGAR (un seul appel) : PDF du rapport annuel glossy (ARS), 10-K,
+    et la liste des DERNIERS documents investisseurs (rapports, communiqués)."""
     try:
         padded = str(cik).zfill(10)
         j = requests.get(f"https://data.sec.gov/submissions/CIK{padded}.json",
                          headers=_UA, timeout=30).json()
         rec = j["filings"]["recent"]
         forms, docs, accs = rec["form"], rec["primaryDocument"], rec["accessionNumber"]
+        dates = rec.get("filingDate", [""] * len(forms))
     except Exception:
-        return {"ars_pdf": None, "tenk": None}
+        return {"ars_pdf": None, "tenk": None, "documents": []}
     ci = int(cik)
     ars = tenk = None
+    documents = []
     for i in range(len(forms)):
+        form, doc = forms[i], docs[i]
+        if not doc:
+            continue
         a = accs[i].replace("-", "")
-        url = f"https://www.sec.gov/Archives/edgar/data/{ci}/{a}/{docs[i]}"
-        if forms[i] == "ARS" and docs[i].lower().endswith(".pdf") and ars is None:
+        url = f"https://www.sec.gov/Archives/edgar/data/{ci}/{a}/{doc}"
+        if form == "ARS" and doc.lower().endswith(".pdf") and ars is None:
             ars = url
-        elif forms[i] == "10-K" and docs[i] and tenk is None:
+        if form == "10-K" and tenk is None:
             tenk = url
-        if ars and tenk:
-            break
-    return {"ars_pdf": ars, "tenk": tenk}
+        if form in _DOC_FORMS and len(documents) < 8:
+            documents.append({"form": form, "label": _FORM_LABEL.get(form, form),
+                              "date": dates[i], "url": url,
+                              "is_pdf": doc.lower().endswith(".pdf")})
+    return {"ars_pdf": ars, "tenk": tenk, "documents": documents}
 
 
 def sic_to_sector(sic) -> str:

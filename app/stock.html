@@ -11,7 +11,7 @@
 <body>
 <div class="wrap">
   <nav class="nav">
-    <div class="brand"><span class="mark">Quant<b>Bench</b></span></div>
+    <div class="brand"><a href="index.html" style="text-decoration:none"><span class="mark">Quant<b>Bench</b></span></a></div>
     <div class="navlinks">
       <div class="search"><input id="tickerSearch" list="tickerList" placeholder="ticker…" autocomplete="off" spellcheck="false"><button id="searchGo" type="button">↵</button></div>
       <datalist id="tickerList"></datalist>
@@ -34,8 +34,9 @@ function kv(pairs){return '<div class="kv">'+pairs.map(([k,v])=>`<div class="lbl
 function projTable(proj){
   if(!proj||!proj.length)return'';
   const pick=[0,4,9,14,19].filter(i=>i<proj.length);
-  const head='<tr><th>Année</th><th>CA (Md$)</th><th>Croiss.</th><th>Marge</th><th>FCFF</th></tr>';
-  const body=pick.map(i=>{const p=proj[i];return `<tr><td>An ${p.y}</td><td class="num">${QB.nf0.format(p.revenue)}</td><td class="num">${QB.nf1.format(p.growth)} %</td><td class="num">${QB.nf1.format(p.margin)} %</td><td class="num">${QB.nf1.format(p.fcff)}</td></tr>`;}).join('');
+  const head='<tr><th>Année</th><th>CA</th><th>Croiss.</th><th>Marge</th><th>EBI</th><th>Réinvest.</th><th>FCFF</th><th>WACC</th><th>VA(FCFF)</th></tr>';
+  const N=(v,d=1)=>v==null?'—':(d===0?QB.nf0:QB.nf1).format(v);
+  const body=pick.map(i=>{const p=proj[i];return `<tr><td>An ${p.year}</td><td class="num">${N(p.revenue)}</td><td class="num">${N(p.revenue_growth_pct)} %</td><td class="num">${N(p.operating_margin_pct)} %</td><td class="num">${N(p.ebit_after_tax)}</td><td class="num">${N(p.reinvestment)}</td><td class="num">${N(p.fcff)}</td><td class="num">${N(p.wacc_pct)} %</td><td class="num">${N(p.pv_fcff)}</td></tr>`;}).join('');
   return `<div class="tableScroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 function stmtTable(s){
@@ -45,7 +46,36 @@ function stmtTable(s){
     rows.map(([l,k])=>`<tr><td>${l}</td>${(s[k]||[]).map(v=>`<td class="num">${v==null?'—':QB.nf1.format(v)}</td>`).join('')}</tr>`).join('')+'</tbody></table></div>';
 }
 
+function mcCard(d){
+  const m=d.montecarlo; if(!m)return'';
+  const sh=d.fundamentals.shares;
+  const vps=eq=>sh?QB.nf2.format(eq*1e9/sh)+' $':'—';
+  const tile=(k,v,s)=>`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s||''}</div></div>`;
+  const body=['5','10','25','50','75','90','95'].map(p=>`<tr><td>P${p}${p==='50'?' (méd.)':''}</td><td class="num">${QB.nf1.format(m.percentiles[p])}</td><td class="num">${vps(m.percentiles[p])}</td></tr>`).join('');
+  return `<div class="card span2"><h2>Simulation Monte Carlo <span class="sub">${m.n} scénarios · modèle Damodaran</span></h2>
+    <div class="grid g4" style="margin-bottom:10px">
+      ${tile('Valeur médiane',QB.bn(m.median),'équité')}
+      ${tile('Valeur/action méd.',m.vps.p50==null?'—':QB.nf2.format(m.vps.p50)+' $','')}
+      ${tile('P(sous-valorisé)',m.prob_undervalued==null?'—':Math.round(m.prob_undervalued*100)+' %','vs cours')}
+      ${tile('Écart-type',QB.bn(m.std),'')}
+    </div>
+    <div id="mcHist"></div>
+    <div class="tableScroll"><table><thead><tr><th>Percentile</th><th>Équité (Md$)</th><th>Valeur/action</th></tr></thead><tbody>${body}</tbody></table></div>
+    <div class="mini">Chaque scénario tire des hypothèses corrélées (croissance, marge, ROIC, bêta, ERP…) et revalorise par DCF. La bande montre l'incertitude ; l'upside affiché est fondé sur la médiane.</div>
+  </div>`;
+}
+function docsCard(d){
+  const docs=d.documents||[]; if(!docs.length && !d.ars_pdf_url)return'';
+  const items=[];
+  if(d.ars_pdf_url) items.push(`<div class="flagitem"><span class="pill good">PDF</span><span><a href="${d.ars_pdf_url}" target="_blank" rel="noopener"><b>Rapport annuel (glossy)</b></a> — officiel SEC</span></div>`);
+  docs.forEach(x=>items.push(`<div class="flagitem"><span class="pill${x.is_pdf?' good':''}">${x.is_pdf?'PDF':'HTML'}</span><span><a href="${x.url}" target="_blank" rel="noopener">${x.label}</a> <span class="muted" style="font-size:11px">${x.date||''}</span></span></div>`));
+  if(d.pdf_url) items.push(`<div class="flagitem"><span class="pill good">PDF</span><span><a href="us/${d.pdf_url}" download="${d.ticker}_QuantBench.pdf">Synthèse QuantBench</a> — notre document</span></div>`);
+  return `<div class="card span2"><h2>Documents investisseurs <span class="sub">derniers dépôts officiels</span></h2>
+    ${items.join('')}
+    <div class="mini">Rapports partagés aux investisseurs (SEC EDGAR). Les 10-K/10-Q/8-K sont au format HTML côté SEC ; le rapport annuel glossy (ARS) et notre synthèse sont en PDF téléchargeable.</div></div>`;
+}
 function render(d){
+  window.__P=d;
   const v=d.valuation||{}, f=d.forensics, sc=(f&&f.scores)||{}, rs=d.results_summary||{};
   const upcls=(v.upside||0)>=0?'pos':'neg';
   const pj=d.projection||[];
@@ -75,12 +105,19 @@ function render(d){
       ${kv([['Chiffre d’affaires',BN(rs.revenue)],['Croissance a/a',P(rs.rev_growth)],['Résultat net',BN(rs.net_income)],['Marge nette',rs.net_margin==null?'—':QB.pct(rs.net_margin,0)],['ROE',d.fundamentals.roe==null?'—':QB.pct(d.fundamentals.roe,0)],['Marge opér.',d.fundamentals.operating_margin==null?'—':QB.pct(d.fundamentals.operating_margin,0)]])}
     </div>
 
-    <div class="card span2"><h2>Projection 20 ans <span class="sub">DCF Damodaran · ${v.category||'DCF'}</span></h2>
-      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
+    <div class="card span2">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <h2>Projection 20 ans <span class="sub">DCF Damodaran · ${v.category||'DCF'}</span></h2>
+        <button class="search" onclick="QB.downloadCSV(window.__P.projection, window.__P.ticker+'_projection_20ans_damodaran.csv')" style="border:1px solid var(--accent);color:var(--accent);background:var(--accent-soft);border-radius:8px;padding:6px 12px;font:inherit;font-size:12.5px;cursor:pointer;font-weight:600">⬇ Projection complète (CSV)</button>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin:2px 0 6px">
         <span class="mono ${(cagr20||0)>=0?'pos':'neg'}" style="font-size:22px;font-weight:700">${P(cagr20)}</span>
         <span class="muted" style="font-size:12px">CAGR du chiffre d'affaires sur 20 ans (méthode Damodaran)</span></div>
       <div id="projChart"></div>${projTable(d.projection)}
+      <div class="mini">CSV : 15 colonnes (CA, croissance, marge, EBIT, impôt, EBI, réinvestissement, FCFF, ROIC, capital investi, WACC, coût des FP, facteur d'actualisation, valeur actualisée).</div>
     </div>
+
+    ${mcCard(d)}
 
     <div class="card"><h2>Signal court terme <span class="sub">~1 mois · inspiré Medallion</span></h2>
       ${(()=>{const s=d.shortterm||{};if(s.p_up==null)return'<div class="muted" style="font-size:13px">Historique insuffisant.</div>';
@@ -117,12 +154,15 @@ function render(d){
         <a href="${d.filing_url}" target="_blank" rel="noopener">Tous les dépôts →</a></div>
     </div>
 
+    ${docsCard(d)}
+
     <div class="card span2"><h2>Actualités <span class="sub">classées par sentiment</span></h2>
       <div class="newslist">${(d.news&&d.news.length)?d.news.map(n=>`<div class="newsitem">${badge(n.label)}<div><div class="t">${n.url?`<a href="${n.url}" target="_blank" rel="noopener">${n.title}</a>`:n.title}</div><div class="src">${n.publisher||''}</div></div></div>`).join(''):'<div class="muted" style="font-size:13px">Pas d’actualité.</div>'}</div>
     </div>
   </div>
   <p class="mini" style="margin-top:14px">Éducatif — pas un conseil d'investissement. Valorisation sur cas de base conservateur ; signaux forensiques statistiques à investiguer, jamais une accusation. Données SEC + marché, USD.</p>`;
   QB.bars(document.getElementById('projChart'), d.projection, 'revenue');
+  if(d.montecarlo)QB.histogram(document.getElementById('mcHist'), d.montecarlo.histogram, d.valuation.market_cap, d.montecarlo.median);
   document.title='QuantBench — '+(d.name||d.ticker);
 }
 (async()=>{
