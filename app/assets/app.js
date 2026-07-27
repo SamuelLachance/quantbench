@@ -61,6 +61,7 @@ const QB = {
     const dn = P.slice().reverse().map(p => `${xf(p.d).toFixed(1)},${y(p.p10).toFixed(1)}`).join(' ');
     const mid = P.map(p => `${xf(p.d).toFixed(1)},${y(p.p50).toFixed(1)}`).join(' ');
     el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="chart">
+      <text x="${(W/2).toFixed(0)}" y="11" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="700" font-family="var(--mono)">80 % de probabilité</text>
       <polygon points="${up} ${dn}" fill="var(--accent-soft)"/>
       <polyline points="${mid}" fill="none" stroke="var(--accent)" stroke-width="2"/>
       <text x="${pad}" y="${H - 6}" class="ax">aujourd'hui</text>

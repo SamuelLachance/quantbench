@@ -47,6 +47,8 @@ function stmtTable(s){
 function render(d){
   const v=d.valuation||{}, f=d.forensics, sc=(f&&f.scores)||{}, rs=d.results_summary||{};
   const upcls=(v.upside||0)>=0?'pos':'neg';
+  const pj=d.projection||[];
+  const cagr20=(pj.length && d.fundamentals.revenue)?Math.pow(pj[pj.length-1].revenue/d.fundamentals.revenue,1/pj.length)-1:null;
   const tile=(k,val,note)=>`<div class="tile"><div class="k">${k}</div><div class="v">${val}</div><div class="s">${note||''}</div></div>`;
   document.getElementById('app').innerHTML=`
   <div class="phead">
@@ -72,7 +74,10 @@ function render(d){
       ${kv([['Chiffre d’affaires',BN(rs.revenue)],['Croissance a/a',P(rs.rev_growth)],['Résultat net',BN(rs.net_income)],['Marge nette',rs.net_margin==null?'—':QB.pct(rs.net_margin,0)],['ROE',d.fundamentals.roe==null?'—':QB.pct(d.fundamentals.roe,0)],['Marge opér.',d.fundamentals.operating_margin==null?'—':QB.pct(d.fundamentals.operating_margin,0)]])}
     </div>
 
-    <div class="card span2"><h2>Projection 20 ans <span class="sub">chiffre d'affaires (Md$), méthode ${v.category||'DCF'}</span></h2>
+    <div class="card span2"><h2>Projection 20 ans <span class="sub">DCF Damodaran · ${v.category||'DCF'}</span></h2>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
+        <span class="mono ${(cagr20||0)>=0?'pos':'neg'}" style="font-size:22px;font-weight:700">${P(cagr20)}</span>
+        <span class="muted" style="font-size:12px">CAGR du chiffre d'affaires sur 20 ans (méthode Damodaran)</span></div>
       <div id="projChart"></div>${projTable(d.projection)}
     </div>
 
@@ -97,8 +102,8 @@ function render(d){
     <div class="card span2"><h2>États financiers <span class="sub">4 exercices, SEC</span></h2>
       ${stmtTable(d.statements)}
       <div class="mini" style="margin-top:10px">
-        ${d.pdf_url?`<a href="us/${d.pdf_url}" target="_blank" rel="noopener">📄 Synthèse PDF (4 ans)</a> · `:''}
-        ${d.report_url?`<a href="${d.report_url}" target="_blank" rel="noopener">⬇ Dernier rapport annuel (10-K)</a> · `:''}
+        ${d.pdf_url?`<a href="us/${d.pdf_url}" download="${d.ticker}_QuantBench.pdf">⬇ Rapport annuel — PDF (téléchargement direct)</a> · `:''}
+        ${d.report_url?`<a href="${d.report_url}" target="_blank" rel="noopener">Dépôt officiel 10-K (SEC) →</a> · `:''}
         <a href="${d.filing_url}" target="_blank" rel="noopener">Tous les dépôts SEC EDGAR →</a></div>
     </div>
 
