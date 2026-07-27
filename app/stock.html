@@ -88,7 +88,8 @@ function render(d){
     <h2>4 derniers exercices</h2>
     ${statementsTable(d.statements)}
     <p class="desc" style="margin-top:12px">Source : SEC Financial Statement Data Sets (dépôts 10-K).
-      <a href="${d.filing_url}" target="_blank" rel="noopener">Voir les dépôts officiels sur SEC EDGAR →</a></p>
+      ${d.pdf_url?`<a href="us/${d.pdf_url}" target="_blank" rel="noopener">📄 Télécharger la synthèse PDF (4 ans)</a> · `:''}
+      <a href="${d.filing_url}" target="_blank" rel="noopener">Dépôts officiels SEC EDGAR →</a></p>
   </div>
 
   <div class="card">

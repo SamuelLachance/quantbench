@@ -19,3 +19,6 @@ Thumbs.db
 # Données volumineuses / cache local (les .json de démo sont conservés)
 *.parquet
 data_cache/
+
+# PDF générés (déployés via artefact Pages, pas commités)
+app/us/pdf/

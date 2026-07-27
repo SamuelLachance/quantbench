@@ -1,12 +1,16 @@
-name: Déploiement GitHub Pages
+name: Build & Deploy (NASDAQ, quotidien)
 
 on:
+  schedule:
+    - cron: "0 6 * * *"          # 06:00 UTC chaque jour
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
       - "app/**"
+      - "quantbench/**"
+      - "scripts/build_us_site.py"
       - ".github/workflows/deploy.yml"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,13 +22,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  build-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Dépendances
+        run: pip install numpy pandas scipy scikit-learn requests yfinance reportlab
+      - name: Mois courant (clé de cache)
+        id: ym
+        run: echo "v=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Cache SEC Data Sets
+        uses: actions/cache@v4
+        with:
+          path: data_cache/sec
+          key: sec-${{ steps.ym.outputs.v }}
+          restore-keys: sec-
+      - name: Régénérer tout le NASDAQ
+        env:
+          QUANTBENCH_SEC_UA: ${{ secrets.QUANTBENCH_SEC_UA }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/build_us_site.py --workers 24
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
