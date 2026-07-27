@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 430" font-family="-apple-system,Segoe UI,Roboto,sans-serif">
+  <rect x="0" y="0" width="920" height="430" rx="16" fill="#f7f8fa"/>
+  <rect x="0.5" y="0.5" width="919" height="429" rx="16" fill="none" stroke="#dde2e9"/>
+  <text x="28" y="40" font-size="20" font-weight="700" fill="#10151c">QuantBench — flux de données</text>
+  <text x="28" y="62" font-size="13" fill="#5b6472">Sources gratuites → moteur → évaluation honnête → interfaces</text>
+
+  <!-- Sources -->
+  <text x="28" y="98" font-size="11" letter-spacing="1" fill="#b8892b" font-weight="700">SOURCES (GRATUITES, SANS CLÉ)</text>
+  <g font-size="13" fill="#10151c">
+    <rect x="28" y="110" width="150" height="44" rx="9" fill="#fff" stroke="#dde2e9"/>
+    <text x="103" y="132" text-anchor="middle" font-weight="600">SEC EDGAR</text>
+    <text x="103" y="147" text-anchor="middle" font-size="10.5" fill="#5b6472">fondamentaux XBRL</text>
+    <rect x="28" y="164" width="150" height="44" rx="9" fill="#fff" stroke="#dde2e9"/>
+    <text x="103" y="186" text-anchor="middle" font-weight="600">FRED</text>
+    <text x="103" y="201" text-anchor="middle" font-size="10.5" fill="#5b6472">taux sans risque</text>
+    <rect x="28" y="218" width="150" height="44" rx="9" fill="#fff" stroke="#dde2e9"/>
+    <text x="103" y="240" text-anchor="middle" font-weight="600">Yahoo chart</text>
+    <text x="103" y="255" text-anchor="middle" font-size="10.5" fill="#5b6472">prix · bêta · splits</text>
+  </g>
+
+  <!-- arrows to data layer -->
+  <g stroke="#b8892b" stroke-width="2" fill="none" marker-end="url(#a)">
+    <path d="M178 132 H 228"/>
+    <path d="M178 186 H 228"/>
+    <path d="M178 240 H 228"/>
+  </g>
+
+  <!-- Data layer -->
+  <rect x="228" y="110" width="150" height="152" rx="9" fill="#fff" stroke="#b8892b"/>
+  <text x="303" y="176" text-anchor="middle" font-size="14" font-weight="700" fill="#10151c">data/</text>
+  <text x="303" y="196" text-anchor="middle" font-size="11" fill="#5b6472">assemblage +</text>
+  <text x="303" y="210" text-anchor="middle" font-size="11" fill="#5b6472">calibration</text>
+
+  <!-- two engines -->
+  <g marker-end="url(#a)" stroke="#b8892b" stroke-width="2" fill="none">
+    <path d="M378 160 H 428"/>
+    <path d="M378 212 H 428"/>
+  </g>
+  <rect x="428" y="120" width="180" height="52" rx="9" fill="#fff" stroke="#dde2e9"/>
+  <text x="518" y="141" text-anchor="middle" font-size="13" font-weight="600" fill="#10151c">valuation/</text>
+  <text x="518" y="158" text-anchor="middle" font-size="10.5" fill="#5b6472">DCF FCFF + Monte Carlo</text>
+  <rect x="428" y="186" width="180" height="52" rx="9" fill="#fff" stroke="#dde2e9"/>
+  <text x="518" y="207" text-anchor="middle" font-size="13" font-weight="600" fill="#10151c">shortterm/</text>
+  <text x="518" y="224" text-anchor="middle" font-size="10.5" fill="#5b6472">mean-reversion + régimes</text>
+
+  <!-- eval -->
+  <g marker-end="url(#a)" stroke="#b8892b" stroke-width="2" fill="none">
+    <path d="M608 146 H 658"/>
+    <path d="M608 212 H 658"/>
+  </g>
+  <rect x="658" y="120" width="234" height="118" rx="9" fill="#fff" stroke="#1f8a5b"/>
+  <text x="775" y="150" text-anchor="middle" font-size="14" font-weight="700" fill="#1f8a5b">eval/ — honnêteté</text>
+  <text x="775" y="174" text-anchor="middle" font-size="12" fill="#10151c">Deflated Sharpe Ratio</text>
+  <text x="775" y="194" text-anchor="middle" font-size="12" fill="#10151c">PBO (surajustement)</text>
+  <text x="775" y="216" text-anchor="middle" font-size="10.5" fill="#5b6472">backtest sans look-ahead + coûts</text>
+
+  <!-- outputs -->
+  <text x="28" y="312" font-size="11" letter-spacing="1" fill="#b8892b" font-weight="700">INTERFACES</text>
+  <g font-size="12.5" fill="#10151c">
+    <rect x="228" y="322" width="200" height="70" rx="9" fill="#fff" stroke="#dde2e9"/>
+    <text x="328" y="350" text-anchor="middle" font-weight="600">api/ (FastAPI)</text>
+    <text x="328" y="369" text-anchor="middle" font-size="10.5" fill="#5b6472">/api/value/{ticker} live</text>
+    <text x="328" y="383" text-anchor="middle" font-size="10.5" fill="#5b6472">/api/screener</text>
+    <rect x="444" y="322" width="200" height="70" rx="9" fill="#fff" stroke="#dde2e9"/>
+    <text x="544" y="350" text-anchor="middle" font-weight="600">app/ (dashboards)</text>
+    <text x="544" y="369" text-anchor="middle" font-size="10.5" fill="#5b6472">page ticker + recherche</text>
+    <text x="544" y="383" text-anchor="middle" font-size="10.5" fill="#5b6472">screener NASDAQ</text>
+    <rect x="660" y="322" width="200" height="70" rx="9" fill="#fff" stroke="#dde2e9"/>
+    <text x="760" y="350" text-anchor="middle" font-weight="600">tests/ (pytest)</text>
+    <text x="760" y="369" text-anchor="middle" font-size="10.5" fill="#5b6472">18 tests · forme fermée</text>
+    <text x="760" y="383" text-anchor="middle" font-size="10.5" fill="#5b6472">E[max Sharpe]=3,26</text>
+  </g>
+  <g marker-end="url(#a)" stroke="#b8892b" stroke-width="2" fill="none">
+    <path d="M775 238 V 300 H 544 V 322"/>
+    <path d="M544 300 H 328 V 322"/>
+    <path d="M544 300 H 760 V 322"/>
+  </g>
+
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="#b8892b"/>
+    </marker>
+  </defs>
+</svg>
