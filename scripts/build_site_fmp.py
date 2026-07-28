@@ -288,6 +288,13 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     be0 = fund.get("book_equity")
     if be0 and mc0 and be0 > 200 * mc0:
         return None, None
+    # Un SERVICE PUBLIC REGULE se traite entre 1 et 2,5 fois ses fonds propres :
+    # sa rentabilite est FIXEE par le regulateur. Un titre "de service public" cote
+    # au quart de ses capitaux propres n'est donc pas une action ordinaire mais une
+    # OBLIGATION COTEE de filiale -- Entergy Mississippi "1M BD 66" et Entergy New
+    # Orleans cotent ~20 $ avec un coupon FIXE de 1,22 $, soit 6,1 % de rendement.
+    if (fund.get("sector") or "").lower().startswith("utilit") and be0 and mc0 and be0 > 3 * mc0:
+        return None, None
     forensic = analyze(symbol, financials=F) if F else None
     val = value_stock(symbol, fund=fund, forensic=forensic, F=F)
     if not val.get("ok"):
