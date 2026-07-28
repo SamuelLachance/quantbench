@@ -218,9 +218,20 @@ def profile_descriptions(symbols, max_parts=6):
 # Historique de prix (signal court terme) + news (par ticker)
 # --------------------------------------------------------------------------- #
 def history_closes(symbol, days=400):
+    """Cours de cloture AJUSTES des splits et dividendes (adjClose). Les cours
+    bruts creent de faux signaux : un split 4:1 apparait comme une chute de 75 %
+    et un detachement de dividende comme une baisse."""
     try:
+        j = _json(f"historical-price-eod/dividend-adjusted?symbol={symbol}")
+        closes = [_num(d.get("adjClose")) for d in j][::-1]   # ancien -> recent
+        out = [c for c in closes if c][-days:]
+        if out:
+            return out
+    except Exception:
+        pass
+    try:                                                      # repli : cours brut
         j = _json(f"historical-price-eod/light?symbol={symbol}")
-        closes = [_num(d.get("price")) for d in j][::-1]      # ancien -> récent
+        closes = [_num(d.get("price")) for d in j][::-1]
         return [c for c in closes if c][-days:]
     except Exception:
         return []

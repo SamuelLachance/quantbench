@@ -1,58 +1,131 @@
 """
 quantbench.shortterm.predict
 ============================
-Signal directionnel court terme (horizon ~1 mois) inspiré de la discipline
-Medallion : COMBINER plusieurs signaux faibles plutôt qu'un gros. Ici, sur
-l'historique de prix quotidien :
-  * retour à la moyenne court terme (z-score prix vs MM20 : survendu -> hausse)
-  * momentum moyen terme (6 mois)
-  * tendance (prix vs MM200)
-  * repli récent (1 mois)
+Signal directionnel court terme (~21 jours de bourse), CALIBRE EMPIRIQUEMENT.
 
-Le score composite est mappé sur une PROBABILITÉ DE HAUSSE, volontairement
-BORNÉE à [0,30 ; 0,70] : sur données gratuites et marchés efficients, l'edge
-directionnel est faible — on l'affiche honnêtement, sans fausse certitude.
+Principe non negociable : une probabilite affichee doit etre CALIBREE — si le
+modele annonce 60 %, l'evenement doit survenir 60 % du temps. Ce module ne publie
+donc `p_up` QUE si des coefficients estimes hors echantillon existent
+(shortterm_calibration.json, produit par scripts/calibrate_shortterm.py) ET que
+la calibration a demontre un pouvoir predictif. Sinon il ne renvoie que le SCORE
+et ses composantes — jamais un pourcentage invente.
+
+Caracteristiques mesurees sur des fenetres DISJOINTES (condition necessaire pour
+qu'elles portent une information distincte, et non le meme mouvement compte deux
+fois) :
+  * renversement (t-20 -> t) : ecart du cours a sa moyenne 20 jours, standardise
+    par la volatilite des RENDEMENTS -- et non par celle des niveaux, contaminee
+    par la derive, qui bornait mecaniquement l'ancien z-score a +/-1,65 ;
+  * momentum 6-1 (t-126 -> t-21) : EXCLUT le dernier mois, precisement celui que
+    mesure le renversement ;
+  * volatilite (EWMA RiskMetrics, lambda = 0,94) : anomalie de faible volatilite.
+
+Le signal vise le rendement RELATIF au marche : une prevision de sur/sous-
+performance, et non un pari deguise sur la direction de l'indice.
 """
 
 from __future__ import annotations
 
+import json
+import math
+import os
+
 import numpy as np
+
+_CALIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "shortterm_calibration.json")
+
+
+def _load_calibration():
+    try:
+        with open(_CALIB_PATH, encoding="utf-8") as f:
+            c = json.load(f)
+        return c if c.get("calibrated") else None
+    except Exception:
+        return None
+
+
+_CALIB = _load_calibration()
+FEATURES = ("reversal", "momentum", "lowvol")
+
+
+def ewma_vol(ret, lam: float = 0.94, n: int = 250):
+    """Volatilite quotidienne EWMA (RiskMetrics). Bien plus stable qu'un
+    ecart-type sur 21 points (erreur-type divisee par ~3) tout en restant reactif."""
+    r = np.asarray(ret[-n:], dtype=float)
+    if r.size < 20:
+        return None
+    w = lam ** np.arange(r.size)[::-1]
+    var = float(np.sum(w * r ** 2) / np.sum(w))
+    return math.sqrt(var) if var > 0 else None
+
+
+def features(prices) -> dict | None:
+    """Caracteristiques brutes standardisees. None si l'historique complet
+    (200 seances) n'est pas disponible : pas de repli silencieux sur une fenetre
+    plus courte, qui donnerait au meme titre un signal different selon la
+    profondeur de son historique."""
+    p = np.asarray([x for x in (list(prices) if prices is not None else [])
+                    if x and x == x and x > 0], dtype=float)
+    if p.size < 200:
+        return None
+    logp = np.log(p)
+    ret = np.diff(logp)
+    sd = ewma_vol(ret)
+    if not sd:
+        return None
+
+    # Renversement : ecart a la moyenne 20 j, en unites d'ecart-type de l'ecart.
+    # n_eff = (n+1)/3 pour une moyenne mobile simple. Signe : positif = SURVENDU.
+    ma20 = float(p[-20:].mean())
+    n_eff = (20.0 + 1.0) / 3.0
+    reversal = -float(logp[-1] - math.log(ma20)) / (sd * math.sqrt(n_eff))
+
+    # Momentum 6-1 : de t-126 a t-21, fenetre DISJOINTE du renversement.
+    momentum = float(logp[-21] - logp[-126]) / (sd * math.sqrt(105.0))
+
+    vol_annual = sd * math.sqrt(252.0)
+    return {"reversal": float(np.clip(reversal, -5, 5)),
+            "momentum": float(np.clip(momentum, -5, 5)),
+            "lowvol": float(np.clip(-vol_annual, -3, 0)),
+            "vol_annual": vol_annual}
 
 
 def predict(prices, horizon: int = 21) -> dict | None:
-    p = np.asarray([x for x in (prices or []) if x and x == x], dtype=float)
-    if p.size < 60:
+    f = features(prices)
+    if f is None:
         return None
-    last = float(p[-1])
-    ma = lambda n: float(p[-n:].mean()) if p.size >= n else float(p.mean())
-    ma20, ma200 = ma(20), ma(200)
-    sd20 = float(p[-20:].std()) or 1.0
-    z = (last - ma20) / sd20                        # >0 sur-acheté, <0 sur-vendu
-    mom6 = last / float(p[-126]) - 1 if p.size >= 126 else last / float(p[0]) - 1
-    mom1 = last / float(p[-21]) - 1 if p.size >= 21 else 0.0
-    ret = np.diff(np.log(p))
-    vol = float(ret[-21:].std() * np.sqrt(252)) if ret.size >= 21 else float(ret.std() * np.sqrt(252))
-    trend = 1.0 if last > ma200 else -1.0
+    out = {"reversal": round(f["reversal"], 3),
+           "momentum": round(f["momentum"], 3),
+           "vol_annual": round(f["vol_annual"], 3),
+           "horizon_days": horizon,
+           "trend": "haussier" if f["momentum"] > 0 else "baissier"}
 
-    # Composite de signaux faibles (poids modérés).
-    score = (-0.60 * np.tanh(z / 1.5)          # mean-reversion court terme
-             + 0.45 * np.tanh(mom6 * 3.0)      # momentum 6 mois
-             + 0.25 * trend                    # tendance de fond
-             - 0.20 * np.tanh(mom1 * 5.0))     # repli/anti-momentum très court
+    if not _CALIB:
+        # Aucune calibration validee : on publie le score BRUT (utilisable pour un
+        # classement relatif) et AUCUNE probabilite. Mieux vaut pas de chiffre
+        # qu'un chiffre faux.
+        out["score"] = round(f["reversal"] * 0.5 + f["momentum"] * 0.5, 3)
+        out["p_up"] = None
+        out["p_down"] = None
+        out["bias"] = "non calibre"
+        out["calibrated"] = False
+        return out
 
-    p_up = 1.0 / (1.0 + np.exp(-1.2 * score))
-    p_up = min(max(p_up, 0.30), 0.70)           # borne l'edge (honnêteté)
-    return {
-        "p_up": round(float(p_up), 3),
-        "p_down": round(float(1 - p_up), 3),
-        "score": round(float(score), 3),
-        "horizon_days": horizon,
-        "bias": "hausse" if p_up >= 0.53 else ("baisse" if p_up <= 0.47 else "neutre"),
-        "momentum_6m": round(float(mom6), 4),
-        "zscore": round(float(z), 2),
-        "trend": "haussier" if trend > 0 else "baissier",
-        "vol_annual": round(float(vol), 3),
-    }
+    b = _CALIB["coefficients"]
+    z = float(b.get("intercept", 0.0)) + sum(float(b.get(k, 0.0)) * f[k] for k in FEATURES)
+    # Echelle temporelle : la derive attendue croit en racine de l'horizon.
+    z *= math.sqrt(horizon / float(_CALIB.get("horizon_days", 21)))
+    p_up = 1.0 / (1.0 + math.exp(-max(-10.0, min(10.0, z))))
+    out.update({
+        "score": round(z, 3),
+        "p_up": round(p_up, 4),
+        "p_down": round(1.0 - p_up, 4),
+        "bias": "hausse" if p_up >= 0.52 else ("baisse" if p_up <= 0.48 else "neutre"),
+        "calibrated": True,
+        "calibration": _CALIB.get("metrics"),
+    })
+    return out
 
 
-__all__ = ["predict"]
+__all__ = ["predict", "features", "ewma_vol", "FEATURES"]

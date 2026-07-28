@@ -23,38 +23,54 @@
     </div>
   </nav>
 
-  <div class="eyebrow">Signal directionnel ~1 mois · inspiré Medallion</div>
-  <h1>Court terme — hausse vs baisse</h1>
-  <p class="lede">Composite de signaux faibles (mean-reversion, momentum, tendance) sur l'historique de prix.
-    Probabilité bornée [30-70 %] : l'edge directionnel est faible sur des marchés efficients — <b>indicatif</b>.</p>
+  <div class="eyebrow">Signal composite ~21 séances · renversement + momentum 6-1</div>
+  <h1>Court terme — classement du signal</h1>
+  <p class="lede">Deux composantes sur <b>fenêtres disjointes</b> : renversement (écart à la moyenne 20 j, standardisé
+    par la volatilité des rendements) et momentum 6-1 (t−126 → t−21, hors dernier mois). Cible : la
+    <b>sur/sous-performance</b> relative au marché, pas la direction de l'indice.</p>
+
+  <div class="card" id="calibCard" style="margin-bottom:18px"></div>
 
   <div class="pcards">
-    <div class="card" style="margin-bottom:0"><h2 style="color:var(--pos)">▲ Plus forte proba de hausse</h2>
-      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>P(hausse)</th><th>Tendance</th></tr></thead><tbody id="up"></tbody></table></div></div>
-    <div class="card" style="margin-bottom:0"><h2 style="color:var(--neg)">▼ Plus forte proba de baisse</h2>
-      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>P(baisse)</th><th>Tendance</th></tr></thead><tbody id="down"></tbody></table></div></div>
+    <div class="card" style="margin-bottom:0"><h2 style="color:var(--pos)">▲ Signal le plus favorable</h2>
+      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Score</th><th>Renvers.</th><th>Momentum</th><th>Vol.</th></tr></thead><tbody id="up"></tbody></table></div></div>
+    <div class="card" style="margin-bottom:0"><h2 style="color:var(--neg)">▼ Signal le plus défavorable</h2>
+      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Score</th><th>Renvers.</th><th>Momentum</th><th>Vol.</th></tr></thead><tbody id="down"></tbody></table></div></div>
   </div>
   <p class="mini" id="disc" style="margin-top:16px"></p>
 </div>
 
 <script src="assets/app.js"></script>
 <script>
-function rowUp(r){return `<tr onclick="location.href='stock.html?t=${r.ticker}'">
+const N2=v=>v==null?'—':(v>=0?'+':'−')+Math.abs(v).toFixed(2);
+function row(r,cls){return `<tr onclick="location.href='stock.html?t=${r.ticker}'">
   <td><span class="tk-cell">${r.ticker}</span></td><td><span class="pill">${r.sector||'—'}</span></td>
-  <td class="num pos" style="font-weight:600">${Math.round((r.p_up||0)*100)} %</td>
-  <td class="num" style="color:var(--muted)">${r.bias||''}</td></tr>`;}
-function rowDown(r){return `<tr onclick="location.href='stock.html?t=${r.ticker}'">
-  <td><span class="tk-cell">${r.ticker}</span></td><td><span class="pill">${r.sector||'—'}</span></td>
-  <td class="num neg" style="font-weight:600">${Math.round((r.p_down||0)*100)} %</td>
-  <td class="num" style="color:var(--muted)">${r.bias||''}</td></tr>`;}
+  <td class="num ${cls}" style="font-weight:600">${N2(r.st_score)}</td>
+  <td class="num" style="color:var(--muted)">${N2(r.reversal)}</td>
+  <td class="num" style="color:var(--muted)">${N2(r.momentum)}</td>
+  <td class="num" style="color:var(--muted)">${r.vol_annual!=null?Math.round(r.vol_annual*100)+' %':'—'}</td></tr>`;}
 (async()=>{
   QB.initTheme(); QB.mountSearch();
   let d; try{ d=await (await fetch('us/_shortterm.json',{cache:'no-store'})).json(); }
   catch(e){ document.getElementById('disc').textContent='Données indisponibles.'; return; }
-  const rows=(d.rows||[]).filter(r=>r.p_up!=null && (r.market_cap||0)>=2);   // qualité : cap ≥ 2 Md$
-  document.getElementById('up').innerHTML=rows.slice(0,20).map(rowUp).join('');
-  document.getElementById('down').innerHTML=rows.slice(-20).reverse().map(rowDown).join('');
-  document.getElementById('disc').innerHTML=`${d.n||rows.length} titres · mis à jour ${d.updated||'—'} · signal composite, edge faible, indicatif — pas un conseil.`;
+  const rows=(d.rows||[]).filter(r=>r.st_score!=null && (r.market_cap||0)>=2);   // cap ≥ 2 Md$
+  document.getElementById('up').innerHTML=rows.slice(0,20).map(r=>row(r,'pos')).join('');
+  document.getElementById('down').innerHTML=rows.slice(-20).reverse().map(r=>row(r,'neg')).join('');
+
+  // Résultat de la calibration hors échantillon — publié tel quel, y compris négatif.
+  const c=d.calibration||{}, ok=d.calibrated;
+  document.getElementById('calibCard').innerHTML = ok
+    ? `<h2>Calibration hors échantillon — <span style="color:var(--pos)">pouvoir prédictif retenu</span></h2>
+       <p class="mini">Brier ${c.brier} vs naïf ${c.brier_naif} (gain ${c.gain_vs_naif_pct} %) · AUC ${c.auc} ·
+       ${c.n_test} observations de test postérieures au ${c.coupure}.</p>`
+    : `<h2>Calibration hors échantillon — <span style="color:var(--neg)">aucun pouvoir prédictif détecté</span></h2>
+       <p class="mini">Panel point-in-time de <b>${(c.n_apprentissage||0)+(c.n_test||0)}</b> observations
+       (apprentissage jusqu'au ${c.coupure||'—'}, test sur ${c.n_test||0} observations postérieures) :
+       score de Brier <b>${c.brier??'—'}</b> contre <b>${c.brier_naif??'—'}</b> pour la prévision naïve du taux de base
+       (gain <b>${c.gain_vs_naif_pct??'—'} %</b>), AUC <b>${c.auc??'—'}</b> — soit aucune discrimination.
+       <b>Nous n'affichons donc aucune probabilité</b> : seul le classement du score brut est publié, à titre indicatif.
+       Afficher un pourcentage non calibré donnerait une fausse impression de certitude.</p>`;
+  document.getElementById('disc').innerHTML=`${rows.length} titres classés (cap ≥ 2 Md$) sur ${d.n||0} · mis à jour ${d.updated||'—'} · score standardisé en écarts-types — éducatif, pas un conseil.`;
 })();
 </script>
 </body>

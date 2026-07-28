@@ -120,17 +120,23 @@ function render(d){
 
     ${mcCard(d)}
 
-    <div class="card"><h2>Signal court terme <span class="sub">~1 mois · inspiré Medallion</span></h2>
-      ${(()=>{const s=d.shortterm||{};if(s.p_up==null)return'<div class="muted" style="font-size:13px">Historique insuffisant.</div>';
-        const pu=Math.round(s.p_up*100),pd=Math.round(s.p_down*100),cls=s.p_up>=0.5?'pos':'neg';
-        return `<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px">
-          <span class="mono ${cls}" style="font-size:32px;font-weight:700">${pu} %</span>
-          <span class="muted">proba de <b>hausse</b> · biais <b>${s.bias||'—'}</b></span></div>
-        <div style="height:10px;border-radius:5px;background:var(--neg-soft);overflow:hidden;display:flex">
-          <i style="width:${pu}%;background:var(--pos)"></i></div>
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--faint);margin:3px 0 6px"><span>baisse ${pd} %</span><span>hausse ${pu} %</span></div>
-        ${kv([['Tendance',s.trend||'—'],['Momentum 6 m',QB.pct(s.momentum_6m)],['Z-score MM20',s.zscore],['Volatilité an.',s.vol_annual==null?'—':Math.round(s.vol_annual*100)+' %']])}`;})()}
-      <div class="mini">Composite mean-reversion + momentum + tendance. Edge directionnel faible (marchés efficients) — probabilité bornée [30-70 %], indicatif.</div>
+    <div class="card"><h2>Signal court terme <span class="sub">~21 séances · relatif au marché</span></h2>
+      ${(()=>{const s=d.shortterm||{};
+        if(s.score==null)return'<div class="muted" style="font-size:13px">Historique insuffisant (200 séances requises).</div>';
+        const cal=s.calibrated===true, cls=s.score>=0?'pos':'neg';
+        const head = cal
+          ? `<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px">
+               <span class="mono ${cls}" style="font-size:32px;font-weight:700">${Math.round((s.p_up||0)*100)} %</span>
+               <span class="muted">proba de <b>surperformance</b> · biais <b>${s.bias||'—'}</b></span></div>`
+          : `<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px">
+               <span class="mono ${cls}" style="font-size:32px;font-weight:700">${s.score>=0?'+':'−'}${Math.abs(s.score).toFixed(2)}</span>
+               <span class="muted">score composite (écarts-types) · <b>aucune probabilité publiée</b></span></div>`;
+        return head + kv([['Renversement (20 j)',s.reversal],['Momentum 6-1',s.momentum],
+                          ['Tendance',s.trend||'—'],
+                          ['Volatilité an.',s.vol_annual==null?'—':Math.round(s.vol_annual*100)+' %']]);})()}
+      <div class="mini">${(d.shortterm&&d.shortterm.calibrated===true)
+        ? 'Probabilité calibrée hors échantillon (voir onglet Court terme).'
+        : 'Notre calibration hors échantillon ne détecte <b>aucun pouvoir prédictif</b> (AUC ≈ 0,51) : nous n’affichons donc <b>aucune probabilité</b>, seulement le score brut. Renversement et momentum sont mesurés sur des fenêtres disjointes et standardisés par la volatilité des rendements. <a href="shortterm.html">Détail de la mesure</a>.'}</div>
     </div>
     <div class="card"><h2>Solidité forensique</h2>
       <div class="grid g4" style="grid-template-columns:1fr 1fr;gap:10px">

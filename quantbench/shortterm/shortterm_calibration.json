@@ -1,0 +1,63 @@
+{
+ "calibrated": false,
+ "horizon_days": 21,
+ "coefficients": {
+  "intercept": 0.05127957890126025,
+  "reversal": 0.03300137976397772,
+  "momentum": 0.013460512372930802,
+  "lowvol": -0.13040847930039665
+ },
+ "metrics": {
+  "brier": 0.2512,
+  "brier_naif": 0.25119,
+  "gain_vs_naif_pct": -0.006,
+  "auc": 0.5106,
+  "ecart_decile_pct": 2.597,
+  "n_apprentissage": 17334,
+  "n_test": 9334,
+  "coupure": "2022-05-20",
+  "taux_base": 0.523
+ },
+ "fiabilite": [
+  {
+   "annonce": 0.5105,
+   "realise": 0.4602,
+   "n": 1167
+  },
+  {
+   "annonce": 0.5161,
+   "realise": 0.4859,
+   "n": 1167
+  },
+  {
+   "annonce": 0.5195,
+   "realise": 0.4914,
+   "n": 1166
+  },
+  {
+   "annonce": 0.5224,
+   "realise": 0.4876,
+   "n": 1167
+  },
+  {
+   "annonce": 0.5254,
+   "realise": 0.4799,
+   "n": 1167
+  },
+  {
+   "annonce": 0.5288,
+   "realise": 0.4837,
+   "n": 1166
+  },
+  {
+   "annonce": 0.5328,
+   "realise": 0.4859,
+   "n": 1167
+  },
+  {
+   "annonce": 0.5416,
+   "realise": 0.5116,
+   "n": 1167
+  }
+ ]
+}

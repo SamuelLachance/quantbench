@@ -238,7 +238,15 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
            "beneish_flag": f.get("scores", {}).get("beneish_flag"),
            "n_flags": len(f.get("flags", [])),
            "p_up": (signal or {}).get("p_up"), "p_down": (signal or {}).get("p_down"),
-           "bias": (signal or {}).get("bias")}
+           "bias": (signal or {}).get("bias"),
+           # Signal court terme : le SCORE est continu et classable ; p_up n'existe
+           # que si la calibration hors echantillon a demontre un pouvoir predictif.
+           "st_score": (signal or {}).get("score"),
+           "reversal": (signal or {}).get("reversal"),
+           "momentum": (signal or {}).get("momentum"),
+           "vol_annual": (signal or {}).get("vol_annual"),
+           "trend": (signal or {}).get("trend"),
+           "st_calibrated": (signal or {}).get("calibrated")}
     return profile, row
 
 
@@ -251,10 +259,23 @@ def _write_aggregates(all_rows, universe_size, fail):
         {"n_ok": len(clean), "n_suspect": 0, "n_invalid": len(invalid), "n_fail": fail,
          "universe": universe_size, "updated": _now_et(), "rows": clean, "suspects": []},
         ensure_ascii=False), encoding="utf-8")
-    st = [r for r in all_rows if r.get("p_up") is not None]
-    st.sort(key=lambda r: -(r["p_up"] or 0))
+    # Classement sur le SCORE (continu, injectif) et non sur une probabilite bornee
+    # qui creait des ex aequo massifs. On publie aussi le resultat de la calibration
+    # hors echantillon : si elle ne demontre aucun edge, aucune probabilite n'est
+    # affichee — le classement reste indicatif, la mesure est publiee telle quelle.
+    st = [r for r in all_rows if r.get("st_score") is not None]
+    st.sort(key=lambda r: -(r["st_score"] or 0))
+    try:
+        calib = json.loads((Path(__file__).resolve().parent.parent / "quantbench" /
+                            "shortterm" / "shortterm_calibration.json")
+                           .read_text(encoding="utf-8"))
+    except Exception:
+        calib = {}
     (US / "_shortterm.json").write_text(json.dumps(
-        {"n": len(st), "updated": _now_et(), "rows": st}, ensure_ascii=False), encoding="utf-8")
+        {"n": len(st), "updated": _now_et(),
+         "calibrated": bool(calib.get("calibrated")),
+         "calibration": calib.get("metrics"), "fiabilite": calib.get("fiabilite"),
+         "rows": st}, ensure_ascii=False), encoding="utf-8")
     return len(clean), len(invalid), len(st)
 
 
