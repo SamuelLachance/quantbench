@@ -14,13 +14,41 @@ from . import DcfInputs
 from ..data import market
 from ..data.build import _estimate_growth, _clamp
 
-_DEFAULT_ERP = 0.045
+_DEFAULT_ERP = 0.045          # prime de risque d'un marche mature (Etats-Unis)
+
+# Prime de risque PAYS (methode Damodaran : ERP total = ERP mature + CRP du pays
+# d'operation, deduite du spread de defaut souverain ajuste de la volatilite
+# relative des actions). Sans elle, une societe bresilienne ou chinoise est
+# actualisee au cout du capital americain -> valeur fortement surestimee.
+_CRP = {
+    # marches matures
+    "US": 0.0, "CA": 0.0, "DE": 0.0, "CH": 0.0, "NL": 0.0, "SE": 0.0, "NO": 0.0,
+    "DK": 0.0, "SG": 0.0, "AU": 0.0, "NZ": 0.0, "LU": 0.0, "FI": 0.0,
+    "GB": 0.006, "FR": 0.008, "BE": 0.008, "IE": 0.010, "AT": 0.006, "JP": 0.010,
+    "KR": 0.010, "TW": 0.010, "IL": 0.014, "ES": 0.020, "IT": 0.026, "PT": 0.024,
+    # emergents
+    "CN": 0.014, "CL": 0.014, "PL": 0.017, "MY": 0.020, "TH": 0.023, "MX": 0.026,
+    "IN": 0.026, "ID": 0.026, "PH": 0.026, "PE": 0.026, "ZA": 0.043, "BR": 0.037,
+    "CO": 0.037, "VN": 0.043, "GR": 0.043, "TR": 0.075, "EG": 0.086, "NG": 0.086,
+    "AR": 0.115, "PK": 0.115, "RU": 0.115, "UA": 0.115,
+}
+_CRP_DEFAUT = 0.030           # pays non liste : prime emergente prudente
+
+
+def country_erp(country, erp_mature=_DEFAULT_ERP):
+    """ERP total = ERP mature + prime de risque pays (Damodaran)."""
+    if not country:
+        return erp_mature
+    return erp_mature + _CRP.get(str(country).strip().upper()[:2], _CRP_DEFAUT)
 
 
 def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = None,
-                                erp: float = _DEFAULT_ERP, rf: float | None = None):
+                                erp: float | None = None, rf: float | None = None):
     """Retourne (DcfInputs, meta) depuis un dict de fondamentaux universal.get_fundamentals.
-    margin_override : force la marge operationnelle (ex. marge normalisee pour un cyclique)."""
+    margin_override : force la marge operationnelle (ex. marge normalisee pour un cyclique).
+    erp : si None, ERP mature + prime de risque du pays de la societe (Damodaran)."""
+    if erp is None:
+        erp = country_erp(fund.get("country"))
     rev = fund.get("revenue")
     if not rev or rev <= 0:
         raise ValueError(f"CA indisponible pour {fund.get('ticker')}")
@@ -40,11 +68,16 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     cash = fund.get("cash") or 0.0
     equity_book = fund.get("book_equity") or 0.0
     market_cap = fund.get("market_cap") or rev
-    invested = max(equity_book + debt - cash, 0.05 * rev)
-    s2c = _clamp(rev / invested, 0.3, 6.0)
-
-    nopat = op_margin * rev * 0.75
-    cur_roic = _clamp(_safe_div(nopat, invested) or 0.12, 0.02, 0.60)
+    invested_raw = max(equity_book + debt - cash, 0.05 * rev)
+    s2c = _clamp(rev / invested_raw, 0.3, 6.0)
+    # COHERENCE : le ROIC doit porter sur le capital REELLEMENT utilise par le
+    # modele (rev / s2c borne), pas sur le capital comptable brut. Sinon une
+    # societe a capitaux propres negatifs (scission, rachats d'actions) affiche un
+    # capital investi derisoire -> ROIC plafonne a 60% -> reinvestissement quasi
+    # nul -> valeur surestimee (cas Embecta).
+    invested = rev / s2c
+    nopat = op_margin * rev * (1.0 - 0.25)          # meme taux que marginal_tax_rate
+    cur_roic = _clamp(_safe_div(nopat, invested) or 0.12, 0.02, 0.40)
 
     rf = rf if rf is not None else market.risk_free_rate()
     lev_beta = fund.get("beta") or 1.1
@@ -53,7 +86,13 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     cost_equity = rf + lev_beta * erp
     term_roic = _clamp(cost_equity + 0.02, 0.07, max(cur_roic, 0.08))
 
+    # Croissance perpetuelle : plafonnee par le taux sans risque (Damodaran : une
+    # societe ne peut croitre indefiniment plus vite que l'economie). Une activite
+    # en DECLIN structurel ne doit pas etre supposee re-accelerer a +2,8% : on borne
+    # alors la croissance terminale par sa tendance (plancher -1%).
     term = min(rf, 0.028)
+    if g_start < 0:
+        term = min(term, max(g_start, -0.01))
     x = DcfInputs(
         revenue_base=rev,
         g1_begin=g_start, g1_end=0.80 * g_start + 0.20 * term,

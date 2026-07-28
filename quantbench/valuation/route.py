@@ -21,7 +21,7 @@ import numpy as np
 from ..data.universal import get_fundamentals
 from ..data import market
 from ..forensics import analyze as forensic_analyze, get_financials
-from .build_universal import build_dcf_from_fundamentals
+from .build_universal import build_dcf_from_fundamentals, country_erp
 from .dcf import value_dcf
 
 
@@ -30,12 +30,30 @@ def _clip(x, lo, hi):
 
 
 def _coe(fund):
+    """Cout des fonds propres = rf + beta x ERP, ERP incluant la prime de risque
+    PAYS (Damodaran) — sinon une banque chinoise ou bresilienne serait actualisee
+    au cout du capital americain."""
     rf = market.risk_free_rate()
     beta = fund.get("beta") or 1.1
-    return rf + beta * 0.045, rf
+    erp = country_erp(fund.get("country"))
+    return rf + beta * erp, rf
 
 
-def classify(fund: dict, forensic: dict | None) -> str:
+# Le Z-score d'Altman est calibré sur des industriels : Altman lui-même et
+# Damodaran l'excluent pour les financières ; foncières et services publics ont
+# structurellement un Z bas (actifs lourds, dette élevée) sans être en détresse.
+_NO_ALTMAN = ("financial", "real estate", "utilities")
+
+
+def _hist_margins(F):
+    """Marges opérationnelles historiques (EBIT/CA)."""
+    if not F:
+        return []
+    return [e / r for e, r in zip(F.get("ebit", []), F.get("revenue", []))
+            if e is not None and r]
+
+
+def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
     sec = (fund.get("sector") or "").lower()
     ebit, ni = fund.get("ebit"), fund.get("net_income")
     z = (forensic or {}).get("scores", {}).get("altman_z")
@@ -44,16 +62,23 @@ def classify(fund: dict, forensic: dict | None) -> str:
         # Pré-revenu (biotech clinique, mineur d'exploration), holding, SPAC :
         # pas de flux à actualiser -> valeur d'actif net (méthode Damodaran).
         return "actif_net"
+    if "real estate" in sec:
+        return "fonciere"                      # REIT : FFO/NAV, jamais le FCFF
     if "financial" in sec:
         return "financiere"
     if any(s in sec for s in ("energy", "materials")):
         return "cyclique"
     neg = (ebit is not None and ebit < 0) or (ni is not None and ni < 0)
-    if neg and z is not None and z < 1.1:
+    z_ok = z is not None and not any(s in sec for s in _NO_ALTMAN)
+    if neg and z_ok and z < 1.1:
         return "detresse"
     if neg:
+        # Société MATURE en perte temporaire (déjà rentable par le passé) :
+        # Damodaran normalise les bénéfices — ce n'est pas une société jeune.
+        if sum(1 for m in _hist_margins(F) if m > 0) >= 2:
+            return "mature_deficitaire"
         return "jeune/deficitaire"
-    if z is not None and z < 1.1:
+    if z_ok and z < 1.1:
         return "detresse"
     return "standard"
 
@@ -78,6 +103,40 @@ def value_financial(fund):
     return {"equity_value": max(val, 0.2 * be),
             "method": "Excess-return (capitaux propres — Damodaran financières)",
             "confidence": "moyenne"}
+
+
+def value_reit(fund):
+    """Foncières (REIT) — méthode Damodaran : le FCFF est inapplicable car les
+    amortissements immobiliers, purement comptables, écrasent l'EBIT et rendent la
+    valeur d'entreprise inférieure à la dette. On capitalise le FFO (résultat net +
+    amortissements), mesure de flux propre à l'immobilier. Valorisation CÔTÉ ÉQUITÉ
+    (le FFO est après intérêts) : aucune dette n'est soustraite."""
+    ni, da = fund.get("net_income"), fund.get("dep_amort")
+    if ni is None or da is None:
+        return None
+    ffo = ni + da
+    if ffo <= 0:
+        return None
+    ke, rf = _coe(fund)
+    g = min(rf, 0.028)
+    ke = max(ke, g + 0.02)                      # écart minimal pour un multiple fini
+    return {"equity_value": ffo * (1 + g) / (ke - g),
+            "method": "FFO capitalisé (foncière — Damodaran REIT)",
+            "confidence": "moyenne", "ffo": round(ffo, 3)}
+
+
+def value_mature_loss(fund, F):
+    """Société MATURE en perte temporaire : Damodaran valorise sur bénéfices
+    NORMALISÉS (moyenne des marges positives passées) plutôt que d'extrapoler une
+    perte conjoncturelle à l'infini."""
+    ms = [m for m in _hist_margins(F) if m > 0]
+    if not ms:
+        return None
+    norm = float(np.mean(ms))
+    r = _dcf_value(fund, margin_override=norm,
+                   method="DCF sur bénéfices normalisés (perte temporaire)")
+    r["norm_margin"] = round(norm, 4)
+    return r
 
 
 def value_cyclical(fund, F):
@@ -140,15 +199,19 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
         F = get_financials(ticker)
     if forensic is None:
         forensic = forensic_analyze(ticker, financials=F) if F else None
-    cat = classify(fund, forensic)
+    cat = classify(fund, forensic, F)
 
     try:
         if cat == "actif_net":
             r = value_assetbased(fund)
+        elif cat == "fonciere":
+            r = value_reit(fund)
         elif cat == "financiere":
             r = value_financial(fund)
         elif cat == "cyclique":
             r = value_cyclical(fund, F)
+        elif cat == "mature_deficitaire":
+            r = value_mature_loss(fund, F)
         elif cat == "jeune/deficitaire":
             r = value_young(fund)
         elif cat == "detresse":
@@ -157,6 +220,20 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
             r = _dcf_value(fund, method="DCF FCFF (standard)")
     except Exception:                              # noqa: BLE001
         r = None
+
+    # L'approche ENTREPRISE (valeur d'entreprise − dette) est invalide quand la
+    # dette n'est pas opérationnelle mais de FINANCEMENT (bras financier captif :
+    # GM Financial, Ford Credit) : elle produit une équité négative pour une
+    # société solvable. Damodaran : basculer sur un modèle CÔTÉ ÉQUITÉ.
+    if r and r.get("equity_value") is not None and r["equity_value"] <= 0:
+        be = fund.get("book_equity")
+        if be and be > 0:
+            alt = value_financial(fund)            # residual income (borné)
+            if alt and alt.get("equity_value", 0) > 0:
+                alt["method"] = ("Residual income côté équité "
+                                 "(dette de financement — approche entreprise inapplicable)")
+                alt["confidence"] = "faible"
+                r = alt
 
     # Repli en cascade si la méthode routée échoue (ex. financière à capitaux
     # propres négatifs mais rentable : StepStone) — on ne renonce qu'en dernier recours.

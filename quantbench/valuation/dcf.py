@@ -211,7 +211,14 @@ def value_dcf(x: DcfInputs) -> dict:
         with np.errstate(divide="ignore", invalid="ignore"):
             g_ebi = np.where(ebi_prev > 0, ebit_after_tax / ebi_prev - 1.0, g)
             reinv_rate = np.where(roic_path > 0, g_ebi / roic_path, 0.0)
-        reinv_rate = np.clip(reinv_rate, 0.0, 0.95)
+        # Damodaran : taux de reinvestissement = g / ROIC, SANS plafond a 1. Une
+        # croissance superieure a ce que le ROIC finance exige plus que la totalite
+        # des benefices -> FCFF NEGATIF (la croissance consomme du cash). Plafonner
+        # a 0.95 fabriquait de la valeur : le modele accordait une forte croissance
+        # sans en facturer le capital (ex. 45% de croissance a 9% de ROIC exige 490%
+        # de reinvestissement, pas 95%). Plafond large uniquement pour eviter les
+        # divergences numeriques sur des ROIC quasi nuls.
+        reinv_rate = np.clip(reinv_rate, 0.0, 3.0)
         reinvestment = ebit_after_tax * reinv_rate
     else:
         with np.errstate(divide="ignore", invalid="ignore"):

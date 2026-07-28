@@ -28,7 +28,8 @@ from quantbench.data.market import risk_free_rate
 from quantbench.forensics import analyze
 from quantbench.valuation import monte_carlo_dcf
 from quantbench.valuation.route import value_stock
-from quantbench.valuation.build_universal import project, build_dcf_from_fundamentals
+from quantbench.valuation.build_universal import (project, build_dcf_from_fundamentals,
+                                                  country_erp)
 from quantbench.shortterm.predict import predict as st_predict
 from quantbench.reports import financial_summary_pdf
 
@@ -53,13 +54,17 @@ def _mc_stats(eq, mcap, shares):
 
 def _route_margin(fund, category, F):
     """Marge opérationnelle normalisée selon la catégorie (miroir de route.py) :
-    cyclique = marge moyenne du cycle ; jeune/déficitaire = marge cible (pas la
-    marge courante négative, sinon valeur nulle à l'infini). Sinon None (marge brute)."""
-    if category == "cyclique" and F:
-        ms = [e / r for e, r in zip(F.get("ebit", []), F.get("revenue", []))
-              if e is not None and r]
-        if ms:
-            return float(np.mean(ms))
+    cyclique = marge moyenne du cycle ; mature en perte = moyenne des marges
+    POSITIVES passées ; jeune/déficitaire = marge cible (pas la marge courante
+    négative, sinon valeur nulle à l'infini). Sinon None (marge brute)."""
+    ms = [e / r for e, r in zip((F or {}).get("ebit", []), (F or {}).get("revenue", []))
+          if e is not None and r]
+    if category == "cyclique" and ms:
+        return float(np.mean(ms))
+    if category == "mature_deficitaire":
+        pos = [m for m in ms if m > 0]
+        if pos:
+            return float(np.mean(pos))
     if category == "jeune/deficitaire":
         om = fund.get("operating_margin")
         return om if (om is not None and om > 0.05) else 0.12
@@ -72,8 +77,8 @@ def run_mc(fund, category, F=None, forensic=None, n=10000, rf=None):
     et équité plancher à 0 (responsabilité limitée : une action ne vaut jamais < 0).
     Excess-return simulé pour les financières. `rf` imposé pour le backtest."""
     shares, mcap = fund.get("shares"), fund.get("market_cap")
-    if category == "actif_net":
-        return None                                # valeur d'actif net = point, pas de MC
+    if category in ("actif_net", "fonciere"):
+        return None                    # actif net / FFO capitalisé : valeur point, pas de MC
     try:
         if category == "financiere":
             be, roe = fund.get("book_equity"), fund.get("roe")
@@ -85,7 +90,8 @@ def run_mc(fund, category, F=None, forensic=None, n=10000, rf=None):
             rng = np.random.default_rng(42)
             roes = rng.normal(roe, max(0.02, abs(roe) * 0.2), n)
             betas = rng.normal(beta, 0.15, n)
-            ke = np.maximum(rf + betas * 0.045, g + 0.01)
+            erp_c = country_erp(fund.get("country"))     # prime de risque pays
+            ke = np.maximum(rf + betas * erp_c, g + 0.01)
             mult = np.clip((roes - ke) / (ke - g), -0.6, 4.0)
             eq = np.maximum(be * (1 + mult), 0.2 * be)
         else:
@@ -193,11 +199,6 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
             val["value_per_share"] = mc["vps"]["p50"]
         val["upside"] = round(mc["median"] / fund["market_cap"] - 1.0, 4)
         val["upside_basis"] = "monte_carlo"
-    # Garde-fou final : un upside démesuré (>500%) révèle une donnée résiduelle non
-    # fiable (aucune société n'est crédiblement sous-évaluée de +5× via un DCF conservateur ;
-    # les vraies sous-évaluations plafonnent ~150-200%).
-    if val.get("upside") is not None and val["upside"] > 5.0:
-        return None, None
     signal = st_predict(fmp.history_closes(symbol))
     news = fmp.news(symbol, limit=8) if with_news else []
     try:

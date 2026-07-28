@@ -34,9 +34,22 @@ def _estimate_growth(revenues):
     CAGR complet, borne. Corrige le biais de la mediane historique qui sous-estime
     l'acceleration recente (ex. NVDA). Retourne (g_start, diagnostics)."""
     revs = [r for r in revenues if r > 0]
+    # Historique SIGNIFICATIF seulement : on ne garde que la serie continue la plus
+    # recente ou chaque exercice pese >=10% du dernier. Un passage de ~0 a X
+    # (lancement produit, paiement d'etape ponctuel, societe issue de scission)
+    # n'est pas une croissance extrapolable -- l'extrapoler donnait des valeurs
+    # absurdes (ex. Keros : CA [0, 0, 0.004, 0.244] -> 45%/an pendant 10 ans).
+    if revs:
+        seuil = 0.10 * revs[-1]
+        keep = []
+        for r in reversed(revs):
+            if r < seuil:
+                break
+            keep.append(r)
+        revs = list(reversed(keep))
     n = len(revs)
     if n < 2:
-        return 0.05, {}
+        return 0.05, {"historique_non_significatif": True}
     g_last = revs[-1] / revs[-2] - 1
     k3 = min(3, n - 1)
     g_cagr3 = (revs[-1] / revs[-1 - k3]) ** (1 / k3) - 1

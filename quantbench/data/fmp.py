@@ -152,6 +152,7 @@ def screener(exchanges=("NASDAQ",)):
                         "industry": r.get("industry"), "beta": _num(r.get("beta")),
                         "price": _num(r.get("price")),
                         "market_cap": _num(r.get("marketCap")),
+                        "country": r.get("country"),
                         "currency": None, "exchange": ex}
     return out
 
@@ -273,6 +274,7 @@ _EX_CUR = {"NASDAQ": "USD", "NYSE": "USD", "AMEX": "USD", "TSX": "CAD", "TSXV": 
 def fundamentals_from_fmp(symbol, sr, entry, desc):
     """Dict compatible universal.get_fundamentals — montants convertis en USD."""
     inc, bal = entry.get("income", {}), entry.get("balance", {})
+    cf = entry.get("cashflow", {})
     yrs = sorted(set(inc) & set(bal), reverse=True)
     if not yrs:
         return None
@@ -294,10 +296,15 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
             cash = min(cash, tot_assets)
         if debt is not None:
             debt = min(max(debt, 0.0), tot_assets)
-    shares = g(inc, "weightedAverageShsOutDil")
     rev_hist = [_num(inc.get(yy, {}).get("revenue")) for yy in sorted(inc)]
     rev_hist = [v * fxs / B for v in rev_hist if v is not None]
     price, mcap = _num(sr.get("price")), _num(sr.get("market_cap"))
+    # Nombre d'actions COHÉRENT avec le cours : capitalisation / cours donne la base
+    # exacte sur laquelle le marché price le titre. Les actions déclarées aux comptes
+    # peuvent porter sur une autre base (ADR = N actions ordinaires, multi-classes) ou
+    # être corrompues -> la valeur par action ne serait pas comparable au cours.
+    # Avec la base implicite : valeur/action ÷ cours − 1 == équité ÷ capi − 1 (identité).
+    shares = (mcap / price) if (mcap and price and price > 0) else g(inc, "weightedAverageShsOutDil")
     b = lambda v: None if v is None else v * fxs / B
     return {
         "ticker": symbol, "name": sr.get("name") or symbol, "sector": sr.get("sector"),
@@ -306,11 +313,16 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         "price": price * fxp if price else None,
         "market_cap": mcap * fxp / B if mcap else None,
         "shares": shares, "beta": _sane_beta(sr.get("beta")),
+        "country": sr.get("country"),
         "currency_ok": True, "price_currency": price_cur, "financial_currency": rep_cur,
         "revenue": b(rev), "revenue_history": rev_hist, "ebit": b(ebit), "net_income": b(ni),
         "total_debt": b(debt), "cash": b(cash), "book_equity": b(eq),
         "operating_margin": (ebit / rev) if (ebit and rev) else None,
         "roe": (ni / eq) if (ni and eq) else None,
+        # Amortissements + flux d'exploitation : nécessaires au FFO des foncières
+        # (Damodaran : les REIT se valorisent sur FFO/NAV, pas sur le FCFF).
+        "dep_amort": b(g(cf, "depreciationAndAmortization")),
+        "cfo": b(g(cf, "operatingCashFlow")),
         "cik": inc.get(y, {}).get("cik"), "sic": None,
     }
 
