@@ -155,15 +155,14 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
     et équité plancher à 0 (responsabilité limitée : une action ne vaut jamais < 0).
     Excess-return simulé pour les financières. `rf` imposé pour le backtest."""
     shares, mcap = fund.get("shares"), fund.get("market_cap")
-    if category in ("actif_net", "fonciere", "reglementee"):
-        return None                    # actif net / FFO capitalisé : valeur point, pas de MC
+    if category in ("actif_net", "fonciere", "reglementee", "financiere"):
+        return None      # actif net, FFO, benefices regules, rendement excedentaire :
+                         # valeurs POINT — la simulation reproduisait un autre modele
     # La simulation reproduit le DCF FCFF. Si la valorisation RETENUE vient d'une
     # autre methode (bascule cote equite pour dette de financement, valeur
     # comptable), simuler le DCF puis ECRASER l'upside avec sa mediane annulerait
     # justement la correction : General Motors repassait de -70 % a -100 %.
-    if method and str(method).startswith(("Residual income", "Valeur comptable",
-                                          "Valeur d'actif net", "FFO capitalisé",
-                                          "Benefices capitalises")):
+    if method and str(method).startswith(_METH_NON_DCF):
         return None
     try:
         if category == "financiere":
@@ -274,6 +273,20 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     # implausible, cap quasi nulle) qui produisent des valorisations aberrantes.
     sh, mc0 = fund.get("shares"), fund.get("market_cap")
     if not sh or sh < 100_000 or not mc0 or mc0 < 0.002:   # <100k actions ou <2 M$
+        return None, None
+    # FRAICHEUR : valoriser une societe sur des comptes vieux de plusieurs annees
+    # n'a pas de sens (Signature Bank, en faillite depuis mars 2023, etait encore
+    # valorisee sur son bilan 2022 et ressortait a +173 000 %).
+    dernier = max(set(entry["income"]) & set(entry["balance"]))
+    if dernier < datetime.now(timezone.utc).year - 2:
+        return None, None
+    # PLAUSIBILITE : des capitaux propres 200 fois superieurs a la capitalisation
+    # ne traduisent pas une opportunite mais une donnee non credible — erreur
+    # d'unites (Oncotelic : 262 000 milliards $ de fonds propres pour 16 M$ de
+    # capitalisation), serie obligataire prise pour une action (obligations de la
+    # Tennessee Valley Authority), ou capitalisation perimee.
+    be0 = fund.get("book_equity")
+    if be0 and mc0 and be0 > 200 * mc0:
         return None, None
     forensic = analyze(symbol, financials=F) if F else None
     val = value_stock(symbol, fund=fund, forensic=forensic, F=F)
