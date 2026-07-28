@@ -288,6 +288,15 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     be0 = fund.get("book_equity")
     if be0 and mc0 and be0 > 200 * mc0:
         return None, None
+    # COHERENCE COMPTES : aucune societe ne realise un chiffre d'affaires plusieurs
+    # fois superieur a son actif total (les plus legeres en capital tournent a 2-3x).
+    # Un tel ecart signale une entite de FINANCEMENT qui publie le CA consolide du
+    # groupe sans en porter le bilan : "KKR Group Finance Co. IX LLC" declarait
+    # 19,5 Md$ de CA pour 1 Md$ d'actif et 14 M$ de fonds propres — c'est une
+    # obligation cotee du groupe KKR, pas une action.
+    ta0, rev0 = fund.get("total_assets"), fund.get("revenue")
+    if ta0 and ta0 > 0 and rev0 and rev0 > 5 * ta0:
+        return None, None
     # Un SERVICE PUBLIC REGULE se traite entre 1 et 2,5 fois ses fonds propres :
     # sa rentabilite est FIXEE par le regulateur. Un titre "de service public" cote
     # au quart de ses capitaux propres n'est donc pas une action ordinaire mais une

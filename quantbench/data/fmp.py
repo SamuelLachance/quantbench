@@ -314,9 +314,14 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
     # (part des filiales non detenue). Sans cela, Fannie Mae affichait 109 Md$ de
     # fonds propres alors que 140 Md$ de privilegiees senior du Tresor passent
     # AVANT l'ordinaire -> valeur ordinaire en realite negative, upside +2400 %.
+    # `totalStockholdersEquity` EXCLUT deja les interets minoritaires (verifie :
+    # totalStockholdersEquity + minorityInterest == totalEquity). Les retrancher
+    # une seconde fois rendait negatifs les fonds propres de toute societe a
+    # filiales — l'assureur polonais PZU tombait a -0,45 Md$ au lieu de +9,6 Md$.
+    # Seules les actions PRIVILEGIEES, creance prioritaire sur l'ordinaire, se
+    # deduisent (Fannie Mae : 140 Md$ de privilegiees senior du Tresor).
     if eq is not None:
         eq -= (_num(bal.get(y, {}).get("preferredStock")) or 0.0)
-        eq -= (_num(bal.get(y, {}).get("minorityInterest")) or 0.0)
     cash = g(bal, "cashAndCashEquivalents")
     tot_assets = g(bal, "totalAssets")
     # Garde-fou données FMP corrompues (ex. RDZN cash=6.6e12 pour 55 M$ de CA) :

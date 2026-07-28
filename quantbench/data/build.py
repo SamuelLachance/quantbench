@@ -50,14 +50,25 @@ def _estimate_growth(revenues):
     n = len(revs)
     if n < 2:
         return 0.05, {"historique_non_significatif": True}
+    import statistics as _st
     g_last = revs[-1] / revs[-2] - 1
     k3 = min(3, n - 1)
     g_cagr3 = (revs[-1] / revs[-1 - k3]) ** (1 / k3) - 1
     g_cagr_full = (revs[-1] / revs[0]) ** (1 / (n - 1)) - 1
-    blend = 0.5 * g_last + 0.3 * g_cagr3 + 0.2 * g_cagr_full
+    # Melange ROBUSTE aux exercices exceptionnels : on prend la MEDIANE des
+    # croissances annuelles plutot que la derniere annee ponderee a 50 %. Un
+    # paiement d'etape, une cession ou une acquisition faisaient sinon extrapoler
+    # un doublement ponctuel sur dix ans -- 3SBio, dont le CA passe de 1,34 a
+    # 2,54 Md$ en une annee grace a un accord de licence, se voyait attribuer
+    # 45 %/an de croissance perpetuelle. La mediane resiste a un seul exercice
+    # aberrant tout en captant une acceleration REELLE (tous les exercices eleves).
+    gs = [revs[i] / revs[i - 1] - 1 for i in range(1, n)]
+    g_med = float(_st.median(gs))
+    blend = 0.60 * g_med + 0.40 * g_cagr_full
     g_start = _clamp(blend, -0.05, 0.45)
-    diag = {"g_last": round(g_last, 4), "g_cagr3": round(g_cagr3, 4),
-            "g_cagr_full": round(g_cagr_full, 4), "g_start": round(g_start, 4)}
+    diag = {"g_last": round(g_last, 4), "g_median": round(g_med, 4),
+            "g_cagr3": round(g_cagr3, 4), "g_cagr_full": round(g_cagr_full, 4),
+            "g_start": round(g_start, 4)}
     return g_start, diag
 
 

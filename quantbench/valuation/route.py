@@ -141,6 +141,23 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
     return "standard"
 
 
+def marge_normalisee(fund, F):
+    """Marge NORMALISEE : mediane des marges historiques quand la marge du dernier
+    exercice s'en ecarte fortement. Un produit exceptionnel (accord de licence,
+    cession) gonfle la marge de l'annee et, extrapole a l'infini, multiplie la
+    valeur. Damodaran normalise systematiquement dans ce cas."""
+    ms = _hist_margins(F)
+    cur = fund.get("operating_margin")
+    if len(ms) < 3 or cur is None:
+        return None
+    med = float(np.median(ms))
+    if med <= 0:
+        return None
+    if cur > 1.5 * med or cur < 0.5 * med:
+        return med
+    return None
+
+
 def _dcf_value(fund, margin_override=None, method="DCF FCFF"):
     x, _ = build_dcf_from_fundamentals(fund, margin_override=margin_override)
     res = value_dcf(x)
@@ -327,7 +344,10 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
         elif cat == "detresse":
             r = value_distressed(fund, forensic)
         else:
-            r = _dcf_value(fund, method="DCF FCFF (standard)")
+            mn = marge_normalisee(fund, F)
+            r = _dcf_value(fund, margin_override=mn,
+                           method="DCF FCFF sur marge normalisee" if mn is not None
+                           else "DCF FCFF (standard)")
     except Exception:                              # noqa: BLE001
         r = None
 
