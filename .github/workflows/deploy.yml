@@ -82,6 +82,15 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           PYTHONUNBUFFERED: "1"
         run: python scripts/build_site_fmp.py --combine 5
+      # BARRIERE QUALITE : si un invariant est viole (upside impossible, routage
+      # sectoriel casse, obligation prise pour une action, effondrement de la
+      # couverture), le job echoue ICI et le deploiement n'a pas lieu — le site
+      # conserve ses dernieres donnees valides plutot que de publier un defaut.
+      - name: Controle qualite du build
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PYTHONUNBUFFERED: "1"
+        run: python scripts/check_build.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

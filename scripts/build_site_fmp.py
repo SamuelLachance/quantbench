@@ -38,14 +38,17 @@ def _mc_stats(eq, mcap, shares):
     eq = np.asarray([v for v in eq if v == v and np.isfinite(v)], dtype=float)
     if eq.size < 50:
         return None
-    perc = {str(p): round(float(np.percentile(eq, p)), 1)
+    # Precision : arrondir a 0,1 Md$ (soit 100 M$ !) rendait la valeur par action
+    # incoherente avec l'upside pour toute societe de taille modeste — l'utilisateur
+    # lisait un cours cible et un pourcentage qui ne se reconciliaient pas.
+    perc = {str(p): round(float(np.percentile(eq, p)), 6)
             for p in (5, 10, 25, 50, 75, 90, 95)}
     counts, edges = np.histogram(eq, bins=30)
     hist = [{"x": round(float((edges[i] + edges[i + 1]) / 2), 1), "y": int(counts[i])}
             for i in range(len(counts))]
     vps = lambda q: round(float(np.percentile(eq, q)) * 1e9 / shares, 2) if shares else None
-    return {"median": round(float(np.median(eq)), 1),
-            "mean": round(float(eq.mean()), 1), "std": round(float(eq.std()), 1),
+    return {"median": round(float(np.median(eq)), 6),
+            "mean": round(float(eq.mean()), 6), "std": round(float(eq.std()), 6),
             "percentiles": perc, "histogram": hist,
             "vps": {"p10": vps(10), "p50": vps(50), "p90": vps(90)},
             "prob_undervalued": round(float((eq > mcap).mean()), 4) if mcap else None,
