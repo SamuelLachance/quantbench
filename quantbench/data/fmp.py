@@ -146,6 +146,8 @@ def screener(exchanges=("NASDAQ",)):
                 continue
             if _is_preferred(sym, r.get("companyName")):   # actions privilégiées / notes : exclues
                 continue
+            if ex == "OTC" and (_num(r.get("volume")) or 0) <= 0:   # OTC : exclure dead stocks
+                continue
             out[sym] = {"name": r.get("companyName"), "sector": r.get("sector"),
                         "industry": r.get("industry"), "beta": _num(r.get("beta")),
                         "price": _num(r.get("price")),

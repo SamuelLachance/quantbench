@@ -15,6 +15,7 @@ import json
 import sys
 import time
 import warnings
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -239,49 +240,63 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     return profile, row
 
 
-def write_otc_index():
-    """Index LÉGER des titres OTC (symbole + nom) pour la recherche — sans valorisation
-    (générée à la demande par le Cloudflare Worker). Exclut : bonds/privilégiées,
-    dead stocks (volume nul), fonds/ETF (déjà filtrés par FMP). Les indices ne sont
-    pas dans company-screener."""
-    try:
-        rows = fmp._json("company-screener?exchange=OTC&isEtf=false&isFund=false"
-                         "&isActivelyTrading=true&limit=30000")
-    except Exception:
-        return 0
-    out = []
-    for r in rows:
-        sym, name = r.get("symbol"), r.get("companyName")
-        if not sym or not name:
-            continue
-        if fmp._is_preferred(sym, name):                 # bonds / privilégiées
-            continue
-        vol = fmp._num(r.get("volume"))
-        if not vol or vol <= 0:                           # dead stock : aucun volume
-            continue
-        out.append({"t": sym, "n": name[:64]})
-    out.sort(key=lambda r: r["t"])
-    (US / "_otc_index.json").write_text(
-        json.dumps({"n": len(out), "updated": _now_et(), "rows": out}, ensure_ascii=False),
-        encoding="utf-8")
-    return len(out)
+def _write_aggregates(all_rows, universe_size, fail):
+    """Écrit _screener.json + _shortterm.json depuis l'ensemble des lignes."""
+    clean = [r for r in all_rows if r["upside"] is not None and np.isfinite(r["upside"])]
+    invalid = [r for r in all_rows if r["upside"] is None or not np.isfinite(r["upside"])]
+    clean.sort(key=lambda r: -(r["upside"] if r["upside"] is not None else -9))
+    (US / "_screener.json").write_text(json.dumps(
+        {"n_ok": len(clean), "n_suspect": 0, "n_invalid": len(invalid), "n_fail": fail,
+         "universe": universe_size, "updated": _now_et(), "rows": clean, "suspects": []},
+        ensure_ascii=False), encoding="utf-8")
+    st = [r for r in all_rows if r.get("p_up") is not None]
+    st.sort(key=lambda r: -(r["p_up"] or 0))
+    (US / "_shortterm.json").write_text(json.dumps(
+        {"n": len(st), "updated": _now_et(), "rows": st}, ensure_ascii=False), encoding="utf-8")
+    return len(clean), len(invalid), len(st)
 
 
-def main(exchanges, years=6, workers=20, with_news=True, with_pdf=True, limit=None):
+def combine_shards(n_shards):
+    """Job de combinaison : fusionne les _shard_*.json (produits par les jobs parallèles)
+    en _screener.json + _shortterm.json. Les fiches par-titre + PDF sont déjà en place
+    (téléchargées depuis les artefacts de chaque shard)."""
+    all_rows, universe, fail = [], 0, 0
+    for i in range(n_shards):
+        p = US / f"_shard_{i}.json"
+        if not p.exists():
+            print(f"  ATTENTION : shard {i} manquant")
+            continue
+        d = json.loads(p.read_text(encoding="utf-8"))
+        all_rows.extend(d.get("rows", []))
+        universe += d.get("universe", 0)
+        fail += d.get("fail", 0)
+    nok, ninv, nst = _write_aggregates(all_rows, universe, fail)
+    print(f"-> COMBINE {n_shards} shards : {nok} affichés, {ninv} non-fini, "
+          f"{fail} sans données | court terme {nst}")
+
+
+def main(exchanges, years=6, workers=20, with_news=True, with_pdf=True, limit=None,
+         shard=None, combine=None):
     US.mkdir(parents=True, exist_ok=True)
     PDF.mkdir(parents=True, exist_ok=True)
+    if combine:                                          # job de fusion (pas de calcul)
+        combine_shards(combine)
+        return
     t0 = time.time()
     uni = fmp.screener(exchanges)
     syms = sorted(uni, key=lambda s: -(uni[s].get("market_cap") or 0))   # plus grosses d'abord
+    if shard is not None:                                # partition stable (crc32) de l'univers
+        i, n = shard
+        syms = [s for s in syms if zlib.crc32(s.encode()) % n == i]
+        print(f"SHARD {i}/{n}")
     if limit:
         syms = syms[:limit]
     print(f"Univers {exchanges} : {len(syms)} sociétés")
 
-    work = syms
     print(f"Valorisation par-ticker (FMP), {workers} threads…")
     rows, done, fail = [], 0, 0
     with cf.ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(build_one, s, uni[s], with_news, with_pdf): s for s in work}
+        futs = {ex.submit(build_one, s, uni[s], with_news, with_pdf): s for s in syms}
         for fut in cf.as_completed(futs):
             try:
                 _, row = fut.result()
@@ -292,36 +307,35 @@ def main(exchanges, years=6, workers=20, with_news=True, with_pdf=True, limit=No
             except Exception:
                 fail += 1
             if (done + fail) % 200 == 0:
-                print(f"  {done+fail}/{len(work)} (ok={done})")
+                print(f"  {done+fail}/{len(syms)} (ok={done})")
 
-    # AUCUN filtre arbitraire : on montre tous les titres valorisés. Seule exclusion
-    # = upside non-fini (NaN/inf), qui n'est pas un nombre valide (pas une opinion du modèle).
-    clean = [r for r in rows if r["upside"] is not None and np.isfinite(r["upside"])]
-    invalid = [r for r in rows if r["upside"] is None or not np.isfinite(r["upside"])]
-    clean.sort(key=lambda r: -(r["upside"] if r["upside"] is not None else -9))
-    (US / "_screener.json").write_text(json.dumps(
-        {"n_ok": len(clean), "n_suspect": 0, "n_invalid": len(invalid), "n_fail": fail,
-         "universe": len(syms), "updated": _now_et(), "rows": clean, "suspects": []},
-        ensure_ascii=False), encoding="utf-8")
-    st = [r for r in rows if r.get("p_up") is not None]
-    st.sort(key=lambda r: -(r["p_up"] or 0))
-    (US / "_shortterm.json").write_text(json.dumps(
-        {"n": len(st), "updated": _now_et(), "rows": st}, ensure_ascii=False), encoding="utf-8")
-    n_otc = write_otc_index()                            # index recherche OTC (à la demande)
-    print(f"\n-> {done} valorisés ({len(clean)} affichés, {len(invalid)} upside non-fini), "
-          f"{fail} sans données | court terme {len(st)} | OTC index {n_otc} | total {time.time()-t0:.0f}s")
+    if shard is not None:                                # écrit les lignes de ce shard
+        i, n = shard
+        (US / f"_shard_{i}.json").write_text(json.dumps(
+            {"rows": rows, "universe": len(syms), "fail": fail}, ensure_ascii=False),
+            encoding="utf-8")
+        print(f"\n-> SHARD {i}/{n} : {done} valorisés, {fail} sans données, "
+              f"{len(rows)} lignes | {time.time()-t0:.0f}s")
+    else:                                                # build mono-job : agrégats directs
+        nok, ninv, nst = _write_aggregates(rows, len(syms), fail)
+        print(f"\n-> {done} valorisés ({nok} affichés, {ninv} upside non-fini), "
+              f"{fail} sans données | court terme {nst} | total {time.time()-t0:.0f}s")
 
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    kw = {"years": 6, "workers": 20, "with_news": True, "with_pdf": True, "limit": None}
-    exch = ["NASDAQ", "NYSE", "TSX", "TSXV"]
+    kw = {"years": 6, "workers": 20, "with_news": True, "with_pdf": True,
+          "limit": None, "shard": None, "combine": None}
+    exch = ["NASDAQ", "NYSE", "TSX", "TSXV", "OTC"]
     while args:
         a = args.pop(0)
         if a == "--exchanges": exch = args.pop(0).split(",")
         elif a == "--years": kw["years"] = int(args.pop(0))
         elif a == "--workers": kw["workers"] = int(args.pop(0))
         elif a == "--limit": kw["limit"] = int(args.pop(0))
+        elif a == "--shard":
+            p = args.pop(0).split("/"); kw["shard"] = (int(p[0]), int(p[1]))
+        elif a == "--combine": kw["combine"] = int(args.pop(0))
         elif a == "--no-news": kw["with_news"] = False
         elif a == "--no-pdf": kw["with_pdf"] = False
     main(exch, **kw)

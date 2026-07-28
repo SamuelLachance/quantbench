@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QuantBench — Valorisation intrinsèque · NASDAQ · NYSE · Canada</title>
-<meta name="description" content="Valorisation intrinsèque, forensique et sentiment — screener pro gratuit : NASDAQ, NYSE et Bourse canadienne.">
+<title>QuantBench — Valorisation intrinsèque · NASDAQ · NYSE · Canada · OTC</title>
+<meta name="description" content="Valorisation intrinsèque, forensique et sentiment — screener pro gratuit : NASDAQ, NYSE, Bourse canadienne et OTC.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
 <script>try{document.documentElement.setAttribute('data-theme',localStorage.getItem('qb-theme')||'dark')}catch(e){document.documentElement.setAttribute('data-theme','dark')}</script>
 <link rel="stylesheet" href="assets/style.css">
@@ -66,7 +66,7 @@ function row(r){
   const big=rows.filter(r=>r.upside!=null && (r.market_cap||0)>=5);
   document.getElementById('up').innerHTML=big.slice(0,15).map(row).join('');
   document.getElementById('down').innerHTML=big.slice(-12).reverse().map(row).join('');
-  document.getElementById('disc').innerHTML=`${d.n_ok} titres · NASDAQ, NYSE &amp; Canada · top opportunités filtrées ≥ 5 Md$ · valorisation routée (Damodaran) + forensique + sentiment · SEC + marché, USD · éducatif, pas un conseil.`;
+  document.getElementById('disc').innerHTML=`${d.n_ok} titres · NASDAQ, NYSE, Canada &amp; OTC · top opportunités filtrées ≥ 5 Md$ · valorisation routée (Damodaran) + forensique + sentiment · SEC + marché, USD · éducatif, pas un conseil.`;
 })();
 </script>
 </body>

@@ -1,4 +1,4 @@
-name: Build & Deploy (NASDAQ, quotidien)
+name: Build & Deploy (quotidien, shardé)
 
 on:
   schedule:
@@ -22,12 +22,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-deploy:
+  # 5 jobs parallèles : chacun valorise ~1/5 de l'univers (NASDAQ+NYSE+Canada+OTC).
+  # Partition stable par crc32(ticker) — chaque job reste bien sous le plafond 6h.
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 330          # ~7000 titres (NASDAQ+NYSE+Canada) ; marge sous limite 6h
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,13 +39,49 @@ jobs:
           cache: pip
       - name: Dépendances
         run: pip install numpy pandas scipy scikit-learn requests reportlab
-      - name: Régénérer US + Canada (FMP)
+      - name: Build shard ${{ matrix.shard }}/5
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           QUANTBENCH_SEC_UA: ${{ secrets.QUANTBENCH_SEC_UA }}
           PYTHONPATH: ${{ github.workspace }}
-          PYTHONUNBUFFERED: "1"          # progression visible en direct dans le log CI
-        run: python scripts/build_site_fmp.py --exchanges NASDAQ,NYSE,TSX,TSXV --workers 24
+          PYTHONUNBUFFERED: "1"
+        run: >
+          python scripts/build_site_fmp.py
+          --exchanges NASDAQ,NYSE,TSX,TSXV,OTC
+          --shard ${{ matrix.shard }}/5 --workers 24
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.shard }}
+          path: app/us/
+          retention-days: 1
+          if-no-files-found: error
+
+  # Combine les shards -> _screener/_shortterm, puis déploie sur Pages.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dépendances (combine)
+        run: pip install numpy
+      - name: Télécharger tous les shards -> app/us
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shard-*
+          path: app/us
+          merge-multiple: true
+      - name: Combiner les shards
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PYTHONUNBUFFERED: "1"
+        run: python scripts/build_site_fmp.py --combine 5
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
