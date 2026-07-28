@@ -16,6 +16,9 @@ Routage (par secteur + signaux) :
 
 from __future__ import annotations
 
+import json as _json
+import os as _os
+
 import numpy as np
 
 from ..data.universal import get_fundamentals
@@ -50,6 +53,54 @@ _NO_ALTMAN = ("financial", "real estate", "utilities")
 Z_DETRESSE_ROUTE = 3.20
 
 
+_SECT_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "sector_stats.json")
+try:
+    with open(_SECT_PATH, encoding="utf-8") as _f:
+        SECTEURS = _json.load(_f)
+except Exception:
+    SECTEURS = {}
+
+
+def sect(fund, cle, defaut):
+    """Repere MESURE du secteur (medianes calculees sur l'univers reel par
+    scripts/build_sector_stats.py) plutot qu'une constante identique pour tous."""
+    s = SECTEURS.get(fund.get("sector") or "")
+    v = s.get(cle) if s else None
+    return defaut if v is None else v
+
+
+def _financiere_de_bilan(fund) -> bool:
+    """Une societe n'est une FINANCIERE au sens de la valorisation que si son
+    BILAN est son outil de production (la dette y est une matiere premiere) :
+    banques, assurances, courtiers, preteurs. Les reseaux de paiement (Visa,
+    Mastercard), gerants d'actifs (BlackRock), bourses et fournisseurs de donnees
+    (S&P Global, CME) sont des metiers de COMMISSIONS : leurs capitaux propres ne
+    portent aucune information de valeur -> DCF classique. Les valoriser en
+    multiple de valeur comptable donnait Visa a -73 % et Mastercard a -92 %."""
+    ind = (fund.get("industry") or "").lower()
+    if any(k in ind for k in ("bank", "insurance", "mortgage", "thrift")):
+        return True
+    if any(k in ind for k in ("asset management", "stock exchange", "financial data",
+                              "shell", "conglomerate")):
+        return False
+    ta, rev = fund.get("total_assets"), fund.get("revenue")
+    if ta and rev and rev > 0:
+        return (ta / rev) >= 4.0        # poids du bilan : banques ~20x, Visa ~2,7x
+    return True
+
+
+def _roe_normalise(fund, F):
+    """ROE median sur l'historique : une annee deprimee ou dopee par un element
+    exceptionnel ne doit pas fixer la valeur (Capital One : 2,2 % une annee)."""
+    roes = []
+    if F:
+        for ni, eq in zip(F.get("net_income", []), F.get("equity", [])):
+            if ni is not None and eq and eq > 0:
+                roes.append(ni / eq)
+    r = float(np.median(roes)) if len(roes) >= 3 else fund.get("roe")
+    return None if r is None else max(-1.0, min(r, 0.40))
+
+
 def _hist_margins(F):
     """Marges opérationnelles historiques (EBIT/CA)."""
     if not F:
@@ -69,8 +120,10 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
         return "actif_net"
     if "real estate" in sec:
         return "fonciere"                      # REIT : FFO/NAV, jamais le FCFF
+    if "utilities" in sec:
+        return "reglementee"                   # service public : cote equite
     if "financial" in sec:
-        return "financiere"
+        return "financiere" if _financiere_de_bilan(fund) else "standard"
     if any(s in sec for s in ("energy", "materials")):
         return "cyclique"
     neg = (ebit is not None and ebit < 0) or (ni is not None and ni < 0)
@@ -94,34 +147,58 @@ def _dcf_value(fund, margin_override=None, method="DCF FCFF"):
     return {"equity_value": res["equity_value"], "method": method, "confidence": "moyenne"}
 
 
-def value_financial(fund):
-    be, roe = fund.get("book_equity"), fund.get("roe")
+def value_financial(fund, F=None):
+    """Financieres DE BILAN — modele de rendement excedentaire (Damodaran).
+    V = BE x [1 + (ROE - ke) x A], ou A actualise l'exces de rentabilite sur une
+    periode d'avantage concurrentiel de 10 ans, au terme de laquelle ROE = ke (les
+    rentes sont competees). Cela remplace un multiplicateur PERPETUEL qui explosait
+    des que ke - g devenait minuscule (assureurs a faible beta : Allstate ressortait
+    a +121 %) et qu'il fallait brider par des bornes arbitraires figeant le P/B de
+    TOUTE financiere dans [0,40 ; 5,00]."""
+    be = fund.get("book_equity")
+    roe = _roe_normalise(fund, F)
     if not be or be <= 0 or roe is None:
         return None
-    # Un resultat net SUPERIEUR au chiffre d'affaires est impossible en
-    # exploitation : il signale un element non recurrent (gain de restructuration,
-    # sortie de faillite, cession). Le ROE qui en decoule (WeightWatchers : 332 %)
-    # n'est pas reproductible -> on retombe sur la valeur comptable.
+    # Un resultat net SUPERIEUR au chiffre d'affaires signale un element non
+    # recurrent (sortie de faillite) : le ROE qui en decoule n'est pas reproductible.
     ni, rev = fund.get("net_income"), fund.get("revenue")
     if ni is not None and rev and rev > 0 and ni > rev:
         return {"equity_value": be, "confidence": "faible",
                 "method": "Valeur comptable (resultat net non recurrent)"}
-    roe = max(-1.0, min(roe, 0.40))          # ROE soutenable plafonne
     ke, rf = _coe(fund)
     g = min(rf, 0.03)
-    ke = max(ke, g + 0.01)
-    # Excess-return / residual income, avec multiplicateur BORNE (le spread ROE-Ke
-    # ne persiste pas a l'infini : atténuation implicite, évite l'explosion en taux bas).
-    # Une societe qui DETRUIT massivement ses fonds propres (ROE tres negatif) n'a pas
-    # droit au meme plancher : sa valeur comptable est fictive (promoteur immobilier en
-    # defaut, actifs a reevaluer). On laisse alors le multiplicateur descendre et on
-    # supprime le plancher de 20 % des capitaux propres.
-    detruit = roe is not None and roe < -0.20
-    mult = max(-0.95 if detruit else -0.6, min((roe - ke) / (ke - g), 4.0))
-    val = be * (1 + mult)
-    return {"equity_value": max(val, 0.0 if detruit else 0.2 * be),
-            "method": "Excess-return (capitaux propres — Damodaran financières)",
-            "confidence": "moyenne"}
+    ke = max(ke, g + 0.02)
+    n = 10                                   # periode d'avantage concurrentiel
+    q = (1.0 + g) / (1.0 + ke)
+    A = (n / (1.0 + ke)) if abs(1.0 - q) < 1e-9 else         (1.0 / (1.0 + ke)) * (1.0 - q ** n) / (1.0 - q)
+    val = be * (1.0 + (roe - ke) * A)
+    return {"equity_value": max(val, 0.0), "confidence": "moyenne",
+            "method": "Rendement excedentaire a erosion 10 ans (financiere de bilan)",
+            "roe_normalise": round(roe, 4), "pb_implicite": round(1.0 + (roe - ke) * A, 2)}
+
+
+def value_regulated(fund):
+    """Services publics REGULES (electricite, gaz, eau) — methode Damodaran.
+    Le DCF d'entreprise echoue ici : ces societes sont extremement capitalistiques
+    et endettees, si bien que "valeur d'entreprise moins dette" devient negatif
+    alors qu'elles sont parfaitement solvables et rentables. Leur rentabilite est
+    en outre FIXEE par le regulateur (ROE autorise stable) et leur distribution
+    elevee : on les valorise donc COTE EQUITE, par capitalisation des benefices
+    avec une croissance FONDAMENTALE coherente g = ROE x taux de retention
+    (identite de Damodaran), donc un taux de distribution = 1 - g/ROE."""
+    ni, be, roe = fund.get("net_income"), fund.get("book_equity"), fund.get("roe")
+    if not ni or ni <= 0 or not be or be <= 0 or not roe or roe <= 0:
+        return None
+    ke, rf = _coe(fund)
+    g = min(rf, 0.028, roe * 0.9)               # g ne peut exceder ce que le ROE finance
+    ke = max(ke, g + 0.02)
+    payout = max(0.0, 1.0 - g / roe)
+    val = ni * payout * (1.0 + g) / (ke - g)
+    if val <= 0:
+        return None
+    return {"equity_value": val, "confidence": "moyenne",
+            "method": "Benefices capitalises cote equite (service public regule)",
+            "payout": round(payout, 3), "g": round(g, 4)}
 
 
 def value_reit(fund):
@@ -178,14 +255,18 @@ def value_cyclical(fund, F):
 
 
 def value_young(fund):
+    # Marge cible = marge MEDIANE DU SECTEUR : une biotech et un distributeur
+    # n'ont aucune raison de converger vers la meme rentabilite.
     om = fund.get("operating_margin")
-    target = om if (om is not None and om > 0.05) else 0.12
+    target = om if (om is not None and om > 0.05) else sect(fund, "marge", 0.10)
     base = _dcf_value(fund, margin_override=target,
                       method="DCF top-down sur revenus (jeune) × survie")
     cash, ni = fund.get("cash") or 0.0, fund.get("net_income") or 0.0
     burn = -ni if ni < 0 else 0.0
     surv = _clip(0.3 + 0.15 * (cash / burn), 0.3, 0.9) if burn > 0 else 0.85
-    liq = 0.5 * (fund.get("book_equity") or 0.0)
+    # Recuperation en liquidation selon l'intensite d'ACTIFS CORPORELS du
+    # secteur : une centrale ou un gisement se revend, un logiciel beaucoup moins.
+    liq = sect(fund, "recuperation", 0.5) * max(fund.get("book_equity") or 0.0, 0.0)
     return {"equity_value": max(base["equity_value"], 0) * surv + liq * (1 - surv),
             "method": base["method"], "confidence": "faible", "survival": round(surv, 2)}
 
@@ -194,7 +275,9 @@ def value_distressed(fund, forensic):
     z = (forensic or {}).get("scores", {}).get("altman_z")
     pdef = default_probability(z)      # table de notation Altman/Damodaran
     gc = _dcf_value(fund, method="DCF going-concern")
-    liq = 0.5 * (fund.get("book_equity") or 0.0)
+    # Recuperation en liquidation selon l'intensite d'ACTIFS CORPORELS du
+    # secteur : une centrale ou un gisement se revend, un logiciel beaucoup moins.
+    liq = sect(fund, "recuperation", 0.5) * max(fund.get("book_equity") or 0.0, 0.0)
     return {"equity_value": max(gc["equity_value"], 0) * (1 - pdef) + liq * pdef,
             "method": f"DCF pondéré défaut (p={pdef:.0%}) + liquidation",
             "confidence": "faible", "p_default": round(pdef, 2)}
@@ -231,8 +314,10 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
             r = value_assetbased(fund)
         elif cat == "fonciere":
             r = value_reit(fund)
+        elif cat == "reglementee":
+            r = value_regulated(fund)
         elif cat == "financiere":
-            r = value_financial(fund)
+            r = value_financial(fund, F)
         elif cat == "cyclique":
             r = value_cyclical(fund, F)
         elif cat == "mature_deficitaire":
@@ -253,7 +338,7 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
     if r and r.get("equity_value") is not None and r["equity_value"] <= 0:
         be = fund.get("book_equity")
         if be and be > 0:
-            alt = value_financial(fund)            # residual income (borné)
+            alt = value_financial(fund, F)            # residual income (borné)
             if alt and alt.get("equity_value", 0) > 0:
                 alt["method"] = ("Residual income côté équité "
                                  "(dette de financement — approche entreprise inapplicable)")

@@ -97,6 +97,27 @@ function render(d){
     <div class="vcell"><div class="k">Forensique</div><div class="big">${f?(f.positives||[]).length:0}<span style="color:var(--pos);font-size:15px">+</span> / ${f?(f.flags||[]).length:0}<span style="color:var(--neg);font-size:15px">⚠</span></div><div class="note">points positifs / alertes</div></div>
   </div>
 
+  ${(()=>{const m=d.methodologie; if(!m)return'';
+    const H=m.hypotheses||{}, lbl={beta:'Bêta',prime_risque_actions_pct:'Prime de risque actions',
+      taux_impot_pct:'Taux d’impôt',taux_sans_risque_pct:'Taux sans risque',
+      croissance_initiale_pct:'Croissance initiale',marge_operationnelle_pct:'Marge opérationnelle',
+      roic_courant_pct:'ROIC courant',ventes_sur_capital:'Ventes / capital',
+      roe_normalise:'ROE normalisé',pb_implicite:'P/B implicite du modèle',payout:'Taux de distribution',
+      ffo:'FFO (Md$)',norm_margin:'Marge normalisée',p_default:'Proba. de défaut',survival:'Proba. de survie',
+      pays:'Pays',secteur:'Secteur'};
+    const unit=k=>k.endsWith('_pct')?' %':'';
+    const rows=Object.keys(lbl).filter(k=>H[k]!=null).map(k=>[lbl[k],
+      (typeof H[k]==='number'? (Math.abs(H[k])>=100?QB.nf0.format(H[k]):QB.nf2.format(H[k])) : H[k])+unit(k)]);
+    return `<div class="card span2" style="border-left:3px solid var(--accent)">
+      <h2>Méthode de valorisation <span class="sub">${m.categorie||''}</span></h2>
+      <div style="font-weight:600;color:var(--accent);margin-bottom:6px">${m.methode||'—'}</div>
+      <div class="summary">${m.pourquoi||''}</div>
+      ${rows.length?kv(rows):''}
+      <div class="mini">${m.dcf_applicable
+        ? 'Le DCF est applicable à ce profil : la projection année par année ci-dessous découle exactement des mêmes hypothèses.'
+        : 'Le DCF classique ne s’applique pas à ce type de société — aucune projection de flux actualisés n’est donc affichée, ce serait trompeur.'}</div>
+    </div>`;})()}
+
   <div class="pcards">
     <div class="card"><h2>Activité</h2>
       <div class="summary">${d.summary||'Description non disponible.'}</div>

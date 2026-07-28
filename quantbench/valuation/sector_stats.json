@@ -1,0 +1,90 @@
+{
+ "Basic Materials": {
+  "n": 44,
+  "marge": 0.2166,
+  "s2c": 0.828,
+  "corporel": 0.5693,
+  "beta": 1.098,
+  "recuperation": 0.585
+ },
+ "Communication Services": {
+  "n": 45,
+  "marge": 0.1981,
+  "s2c": 0.6267,
+  "corporel": 0.2828,
+  "beta": 0.785,
+  "recuperation": 0.441
+ },
+ "Consumer Cyclical": {
+  "n": 45,
+  "marge": 0.1268,
+  "s2c": 1.6595,
+  "corporel": 0.364,
+  "beta": 1.075,
+  "recuperation": 0.482
+ },
+ "Consumer Defensive": {
+  "n": 45,
+  "marge": 0.1212,
+  "s2c": 1.4439,
+  "corporel": 0.2854,
+  "beta": 0.437,
+  "recuperation": 0.443
+ },
+ "Energy": {
+  "n": 45,
+  "marge": 0.1862,
+  "s2c": 0.697,
+  "corporel": 0.7438,
+  "beta": 0.702,
+  "recuperation": 0.672
+ },
+ "Financial Services": {
+  "n": 44,
+  "marge": 0.1968,
+  "s2c": 0.4504,
+  "corporel": 0.0077,
+  "beta": 0.933,
+  "recuperation": 0.304
+ },
+ "Healthcare": {
+  "n": 43,
+  "marge": 0.2054,
+  "s2c": 0.7935,
+  "corporel": 0.1075,
+  "beta": 0.506,
+  "recuperation": 0.354
+ },
+ "Industrials": {
+  "n": 41,
+  "marge": 0.1861,
+  "s2c": 1.1567,
+  "corporel": 0.1646,
+  "beta": 1.1,
+  "recuperation": 0.382
+ },
+ "Real Estate": {
+  "n": 45,
+  "marge": 0.2804,
+  "s2c": 0.1987,
+  "corporel": 0.0272,
+  "beta": 0.911,
+  "recuperation": 0.314
+ },
+ "Technology": {
+  "n": 43,
+  "marge": 0.26,
+  "s2c": 0.9722,
+  "corporel": 0.0741,
+  "beta": 1.376,
+  "recuperation": 0.337
+ },
+ "Utilities": {
+  "n": 45,
+  "marge": 0.2423,
+  "s2c": 0.2746,
+  "corporel": 0.743,
+  "beta": 0.489,
+  "recuperation": 0.671
+ }
+}

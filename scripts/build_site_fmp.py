@@ -71,14 +71,100 @@ def _route_margin(fund, category, F):
     return None
 
 
-def run_mc(fund, category, F=None, forensic=None, n=10000, rf=None):
+_CAT_DCF = ("standard", "cyclique", "mature_deficitaire", "jeune/deficitaire", "detresse")
+_METH_NON_DCF = ("Residual income", "Valeur comptable", "Valeur d'actif net",
+                 "FFO capitalisé", "Benefices capitalises", "Rendement excedentaire")
+
+_POURQUOI = {
+    "financiere": ("Banque, assurance ou courtier : la dette est leur MATIERE PREMIERE, "
+                   "pas un financement — la notion de valeur d'entreprise n'a donc aucun "
+                   "sens. On valorise directement les capitaux propres par le rendement "
+                   "excedentaire (ROE face au cout des fonds propres), erode sur 10 ans "
+                   "car les rentes se competent."),
+    "fonciere": ("Fonciere (REIT) : les amortissements immobiliers, purement comptables, "
+                 "ecrasent le resultat operationnel et rendraient la valeur d'entreprise "
+                 "inferieure a la dette. Damodaran capitalise le FFO (resultat net + "
+                 "amortissements), cote equite — aucune dette n'est soustraite."),
+    "reglementee": ("Service public regule : rentabilite FIXEE par le regulateur, activite "
+                    "tres capitalistique et endettee. Le DCF d'entreprise sortirait une "
+                    "equite negative sur une societe parfaitement solvable. Benefices "
+                    "capitalises cote equite, croissance = ROE x taux de retention."),
+    "cyclique": ("Secteur cyclique (energie, matieres premieres) : la marge de l'exercice "
+                 "est trompeuse selon la position dans le cycle. DCF sur benefices "
+                 "NORMALISES — marge moyenne du cycle."),
+    "mature_deficitaire": ("Societe mature en perte TEMPORAIRE : extrapoler la perte a "
+                           "l'infini donnerait une valeur nulle. On normalise sur la "
+                           "moyenne des marges positives passees."),
+    "jeune/deficitaire": ("Societe jeune ou deficitaire : DCF descendant sur le chiffre "
+                          "d'affaires avec une marge cible egale a la MEDIANE DU SECTEUR, "
+                          "pondere par une probabilite de survie deduite de la tresorerie "
+                          "et du rythme de consommation de cash."),
+    "detresse": ("Risque de defaut avere (Z-score d'Altman) : DCF d'exploitation pondere "
+                 "par la probabilite de defaut issue de la table de notation, complete "
+                 "par la valeur de liquidation."),
+    "actif_net": ("Aucun chiffre d'affaires (biotech clinique, minier d'exploration, "
+                  "holding, SPAC) : il n'y a aucun flux a actualiser. Valeur d'actif net "
+                  "comptable — le portefeuille de brevets ou les gisements ne sont pas "
+                  "capitalises, methode volontairement prudente."),
+    "standard": ("DCF FCFF classique : flux de tresorerie disponibles pour l'entreprise, "
+                 "actualises au cout moyen pondere du capital, croissance decroissant vers "
+                 "celle de l'economie."),
+}
+
+
+def _methodologie(fund, val, F):
+    """Methode retenue, sa justification sectorielle, et les hypotheses REELLEMENT
+    utilisees pour ce titre (toutes deduites de ses donnees et de son secteur)."""
+    from quantbench.valuation.build_universal import country_erp, tax_rate
+    cat = val.get("category")
+    h = {"beta": fund.get("beta"),
+         "prime_risque_actions_pct": round(country_erp(fund.get("country")) * 100, 2),
+         "taux_impot_pct": round(tax_rate(fund.get("country")) * 100, 1),
+         "pays": fund.get("country"), "secteur": fund.get("sector")}
+    try:
+        h["taux_sans_risque_pct"] = round(risk_free_rate() * 100, 2)
+    except Exception:
+        pass
+    if cat in _CAT_DCF and not str(val.get("method") or "").startswith(_METH_NON_DCF):
+        try:
+            _, meta = build_dcf_from_fundamentals(
+                fund, margin_override=_route_margin(fund, cat, F))
+            h.update({"croissance_initiale_pct": round(meta["g_start"] * 100, 2),
+                      "marge_operationnelle_pct": round(meta["op_margin"] * 100, 2),
+                      "roic_courant_pct": round(meta["cur_roic"] * 100, 2),
+                      "ventes_sur_capital": round(meta["s2c"], 2)})
+        except Exception:
+            pass
+    for k in ("roe_normalise", "pb_implicite", "payout", "ffo", "norm_margin",
+              "p_default", "survival"):
+        if (val.get("extra") or {}).get(k) is not None:
+            h[k] = val["extra"][k]
+    return {"categorie": cat, "methode": val.get("method"),
+            "pourquoi": _POURQUOI.get(cat, ""), "hypotheses": h,
+            "dcf_applicable": proj_ok(cat, val)}
+
+
+def proj_ok(cat, val):
+    return bool(cat in _CAT_DCF
+                and not str(val.get("method") or "").startswith(_METH_NON_DCF))
+
+
+def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None):
     """Monte Carlo de valorisation COHÉRENT avec le routage Damodaran : marge
     normalisée (cyclique) ou cible (jeune/déficitaire), pondération survie/défaut,
     et équité plancher à 0 (responsabilité limitée : une action ne vaut jamais < 0).
     Excess-return simulé pour les financières. `rf` imposé pour le backtest."""
     shares, mcap = fund.get("shares"), fund.get("market_cap")
-    if category in ("actif_net", "fonciere"):
+    if category in ("actif_net", "fonciere", "reglementee"):
         return None                    # actif net / FFO capitalisé : valeur point, pas de MC
+    # La simulation reproduit le DCF FCFF. Si la valorisation RETENUE vient d'une
+    # autre methode (bascule cote equite pour dette de financement, valeur
+    # comptable), simuler le DCF puis ECRASER l'upside avec sa mediane annulerait
+    # justement la correction : General Motors repassait de -70 % a -100 %.
+    if method and str(method).startswith(("Residual income", "Valeur comptable",
+                                          "Valeur d'actif net", "FFO capitalisé",
+                                          "Benefices capitalises")):
+        return None
     try:
         if category == "financiere":
             be, roe = fund.get("book_equity"), fund.get("roe")
@@ -116,14 +202,14 @@ def run_mc(fund, category, F=None, forensic=None, n=10000, rf=None):
                 burn = -ni if ni < 0 else 0.0
                 cash = fund.get("cash") or 0.0
                 surv = min(max(0.3 + 0.15 * (cash / burn), 0.3), 0.9) if burn > 0 else 0.85
-                liq = 0.5 * (fund.get("book_equity") or 0.0)
-                eq = eq * surv + liq * (1.0 - surv)
+                liq = 0.5 * max(fund.get("book_equity") or 0.0, 0.0)
+                eq = np.maximum(eq * surv + liq * (1.0 - surv), 0.0)
             elif category == "detresse":
                 from quantbench.forensics.scores import default_probability
                 z = (forensic or {}).get("scores", {}).get("altman_z")
                 pdef = default_probability(z)
-                liq = 0.5 * (fund.get("book_equity") or 0.0)
-                eq = eq * (1.0 - pdef) + liq * pdef
+                liq = 0.5 * max(fund.get("book_equity") or 0.0, 0.0)
+                eq = np.maximum(eq * (1.0 - pdef) + liq * pdef, 0.0)
     except Exception:
         return None
     return _mc_stats(eq, mcap, shares)
@@ -194,18 +280,29 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     if not val.get("ok"):
         return None, None
     # Monte Carlo : l'upside affiché est basé sur la MÉDIANE de la simulation
-    mc = run_mc(fund, val.get("category"), F=F, forensic=forensic)
+    mc = run_mc(fund, val.get("category"), F=F, forensic=forensic,
+                method=val.get("method"))
     if mc and fund.get("market_cap"):
         if mc["vps"].get("p50") is not None:
             val["value_per_share"] = mc["vps"]["p50"]
-        val["upside"] = round(mc["median"] / fund["market_cap"] - 1.0, 4)
+        # Responsabilite limitee : l'upside ne peut pas descendre sous -100 %.
+        val["upside"] = round(max(mc["median"] / fund["market_cap"] - 1.0, -1.0), 4)
         val["upside_basis"] = "monte_carlo"
     signal = st_predict(fmp.history_closes(symbol))
     news = fmp.news(symbol, limit=8) if with_news else []
-    try:
-        proj = project(fund, years=20)
-    except Exception:
-        proj = None
+    # La projection 20 ans n'a de sens que si la valorisation retenue EST un DCF.
+    # Afficher un echeancier de flux actualises sous une banque valorisee par
+    # rendement excedentaire, ou sous une fonciere valorisee au FFO, etait
+    # trompeur. Elle utilise en outre EXACTEMENT la meme marge que la valorisation.
+    proj = None
+    if (val.get("category") in _CAT_DCF
+            and not str(val.get("method") or "").startswith(_METH_NON_DCF)):
+        try:
+            proj = project(fund, years=20,
+                           margin_override=_route_margin(fund, val.get("category"), F))
+        except Exception:
+            proj = None
+    methodo = _methodologie(fund, val, F)
     cik = fund.get("cik")
     ard = annual_report_docs(cik) if cik else {"ars_pdf": None, "tenk": None, "documents": []}
     filing = (f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=10-K"
@@ -218,7 +315,8 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
             "price", "market_cap", "shares", "beta", "revenue", "ebit", "net_income",
             "total_debt", "cash", "book_equity", "operating_margin", "roe")},
         "forensics": forensic, "statements": _statements(F), "news": news,
-        "projection": proj, "results_summary": _results_summary(F), "shortterm": signal,
+        "projection": proj, "methodologie": methodo,
+        "results_summary": _results_summary(F), "shortterm": signal,
         "montecarlo": mc, "documents": ard.get("documents", []),
         "report_url": ard.get("tenk"), "ars_pdf_url": ard.get("ars_pdf"),
         "filing_url": filing, "pdf_url": None,

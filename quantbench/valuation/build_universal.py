@@ -34,6 +34,28 @@ _CRP = {
 }
 _CRP_DEFAUT = 0.030           # pays non liste : prime emergente prudente
 
+# Taux d'impot sur les societes par PAYS (taux marginal legal). Appliquer 21 %
+# (taux federal americain) a une societe canadienne, allemande ou japonaise
+# faussait mecaniquement tous ses flux apres impot.
+_TAUX_IMPOT = {
+    "US": 0.21, "CA": 0.265, "GB": 0.25, "DE": 0.30, "FR": 0.258, "IT": 0.24,
+    "ES": 0.25, "NL": 0.258, "BE": 0.25, "CH": 0.15, "IE": 0.125, "SE": 0.206,
+    "NO": 0.22, "DK": 0.22, "FI": 0.20, "AT": 0.23, "PT": 0.21, "GR": 0.22,
+    "JP": 0.306, "CN": 0.25, "HK": 0.165, "TW": 0.20, "KR": 0.24, "SG": 0.17,
+    "IN": 0.252, "AU": 0.30, "NZ": 0.28, "IL": 0.23, "ZA": 0.27, "BR": 0.34,
+    "MX": 0.30, "CL": 0.27, "CO": 0.35, "AR": 0.35, "TR": 0.25, "RU": 0.20,
+    "ID": 0.22, "TH": 0.20, "MY": 0.24, "PH": 0.25, "VN": 0.20, "PL": 0.19,
+    "LU": 0.2494, "BM": 0.15, "KY": 0.15, "VG": 0.15, "PA": 0.25,
+}
+_IMPOT_DEFAUT = 0.25
+
+
+def tax_rate(country) -> float:
+    """Taux d'impot marginal du pays de la societe."""
+    if not country:
+        return _IMPOT_DEFAUT
+    return _TAUX_IMPOT.get(str(country).strip().upper()[:2], _IMPOT_DEFAUT)
+
 
 def country_erp(country, erp_mature=_DEFAULT_ERP):
     """ERP total = ERP mature + prime de risque pays (Damodaran)."""
@@ -63,6 +85,7 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     if op_margin is None:
         op_margin = _safe_div(fund.get("ebit"), rev) or 0.10
     op_margin = _clamp(op_margin, -0.20, 0.75)
+    tx = tax_rate(fund.get("country"))          # taux d'impot du pays de la societe
 
     debt = fund.get("total_debt") or 0.0
     cash = fund.get("cash") or 0.0
@@ -76,13 +99,13 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     # capital investi derisoire -> ROIC plafonne a 60% -> reinvestissement quasi
     # nul -> valeur surestimee (cas Embecta).
     invested = rev / s2c
-    nopat = op_margin * rev * (1.0 - 0.25)          # meme taux que marginal_tax_rate
+    nopat = op_margin * rev * (1.0 - tx)
     cur_roic = _clamp(_safe_div(nopat, invested) or 0.12, 0.02, 0.40)
 
     rf = rf if rf is not None else market.risk_free_rate()
     lev_beta = fund.get("beta") or 1.1
     de = _safe_div(debt, market_cap) or 0.0
-    unlev = lev_beta / (1 + (1 - 0.25) * de) if de >= 0 else lev_beta
+    unlev = lev_beta / (1 + (1 - tx) * de) if de >= 0 else lev_beta
     cost_equity = rf + lev_beta * erp
     term_roic = _clamp(cost_equity + 0.02, 0.07, max(cur_roic, 0.08))
 
@@ -112,7 +135,7 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         # durablement deficitaires sont routees ailleurs (jeune / mature en perte).
         terminal_operating_margin=op_margin if op_margin > 0 else 0.02,
         margin_converge_start=3,
-        current_tax_rate=0.21, marginal_tax_rate=0.25, tax_converge_start=5,
+        current_tax_rate=tx, marginal_tax_rate=tx, tax_converge_start=5,
         current_sales_to_capital=s2c, terminal_sales_to_capital=s2c, s2c_converge_start=3,
         risk_free_rate=rf, erp=erp,
         unlevered_beta=unlev, terminal_unlevered_beta=_clamp(unlev, 0.8, 1.2),
