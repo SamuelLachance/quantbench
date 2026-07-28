@@ -90,6 +90,13 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     # societe ne peut croitre indefiniment plus vite que l'economie). Une activite
     # en DECLIN structurel ne doit pas etre supposee re-accelerer a +2,8% : on borne
     # alors la croissance terminale par sa tendance (plancher -1%).
+    # Cout de la dette : spread synthetique CROISSANT avec le levier (notation
+    # synthetique de Damodaran). Un spread constant (rf + 120 bp) faisait decroitre
+    # le WACC sans borne quand la dette augmentait -- pathologie Modigliani-Miller
+    # sans couts de detresse : plus une societe s'endettait, plus elle "valait".
+    lev = debt / (debt + market_cap) if (debt + market_cap) > 0 else 0.0
+    kd = rf + 0.010 + 0.10 * _clamp(lev, 0.0, 1.0) ** 2
+
     term = min(rf, 0.028)
     if g_start < 0:
         term = min(term, max(g_start, -0.01))
@@ -99,14 +106,18 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         g2_begin=0.80 * g_start + 0.20 * term, g2_end=0.45 * g_start + 0.55 * term,
         g3_begin=0.45 * g_start + 0.55 * term, g3_end=term,
         len1=3, len2=4, len3=3,
-        current_operating_margin=op_margin, terminal_operating_margin=op_margin,
+        current_operating_margin=op_margin,
+        # Une societe ne peut pas perdre de l'argent A PERPETUITE (elle serait
+        # liquidee) : la marge TERMINALE ne descend pas sous zero. Les societes
+        # durablement deficitaires sont routees ailleurs (jeune / mature en perte).
+        terminal_operating_margin=op_margin if op_margin > 0 else 0.02,
         margin_converge_start=3,
         current_tax_rate=0.21, marginal_tax_rate=0.25, tax_converge_start=5,
         current_sales_to_capital=s2c, terminal_sales_to_capital=s2c, s2c_converge_start=3,
         risk_free_rate=rf, erp=erp,
         unlevered_beta=unlev, terminal_unlevered_beta=_clamp(unlev, 0.8, 1.2),
         beta_converge_start=5,
-        current_pretax_kd=rf + 0.012, terminal_pretax_kd=rf + 0.012, kd_converge_start=5,
+        current_pretax_kd=kd, terminal_pretax_kd=kd, kd_converge_start=5,
         equity_value=market_cap, debt_value=debt, cash_and_non_operating=cash,
         reinvestment_mode="roic", current_roic=cur_roic, terminal_roic=term_roic,
         roic_converge_start=5,

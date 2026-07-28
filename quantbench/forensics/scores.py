@@ -127,16 +127,49 @@ def beneish_m_score(F) -> float | None:
         parts = [dsri, gmi, aqi, sgi, depi, sgai, lvgi, tata]
         if any(p is None for p in parts):
             return None
+        # WINSORISATION : les 8 indices sont des ratios centres sur 1. Une valeur
+        # extreme (denominateur quasi nul, exercice partiel) traduit une anomalie de
+        # DONNEE, pas une manipulation -- sans bornes le M-Score atteignait 1,6
+        # million et declenchait un faux signal. Bornes de plausibilite usuelles.
+        cl = lambda v, lo, hi: max(lo, min(hi, v))
+        dsri, gmi, aqi = cl(dsri, 0, 5), cl(gmi, 0, 5), cl(aqi, 0, 5)
+        sgi, depi, sgai = cl(sgi, 0, 5), cl(depi, 0, 5), cl(sgai, 0, 5)
+        lvgi, tata = cl(lvgi, 0, 5), cl(tata, -1, 1)
         return (-4.84 + 0.92 * dsri + 0.528 * gmi + 0.404 * aqi + 0.892 * sgi
                 + 0.115 * depi - 0.172 * sgai + 4.679 * tata - 0.327 * lvgi)
     except (TypeError, ZeroDivisionError, IndexError):
         return None
 
 
+# Seuils du Z''-EMS : la formule ci-dessous INCLUT la constante +3,25 (variante
+# "emerging market scoring" d'Altman, calee sur les notations obligataires US).
+# Les seuils du Z'' SANS constante (1,1 / 2,6) ne s'y appliquent PAS : il faut leur
+# ajouter 3,25. Utiliser 1,1/2,6 sur un score constante-incluse decalait tout le
+# diagnostic de detresse de 3,25 points.
+Z_DETRESSE, Z_SAIN = 4.35, 5.85
+
+# Z''-EMS -> notation equivalente -> probabilite de defaut CUMULEE observee
+# (Altman / Damodaran). Remplace une formule lineaire ad hoc saturant a 90 %.
+_Z_PDEF = ((8.15, 0.005), (7.30, 0.010), (6.65, 0.025), (5.85, 0.075),
+           (5.25, 0.140), (4.95, 0.200), (4.15, 0.400), (3.20, 0.550),
+           (2.50, 0.700), (1.75, 0.800))
+
+
+def default_probability(z) -> float:
+    """Probabilite de defaut deduite du Z''-EMS via la table de notation."""
+    if z is None:
+        return 0.5
+    for seuil, p in _Z_PDEF:
+        if z >= seuil:
+            return p
+    return 0.90
+
+
 def altman_z_score(F, i=0) -> float | None:
-    """Altman Z''-Score (variante tous secteurs, capitaux propres comptables :
-    aucune donnee de marche -> pas de probleme de devise). < 1.1 detresse,
-    > 2.6 sain."""
+    """Altman Z''-EMS (tous secteurs, capitaux propres comptables : aucune donnee
+    de marche -> pas de probleme de devise). Constante +3,25 incluse :
+    < 4.35 detresse, > 5.85 sain. NE S'APPLIQUE PAS aux financieres ni aux
+    foncieres (Altman et Damodaran les excluent explicitement)."""
     g = lambda k: F[k][i]
     try:
         ta = g("total_assets")
@@ -224,7 +257,7 @@ def analyze(ticker: str, financials=None) -> dict:
     gm1 = _r(F["gross_profit"][1], F["revenue"][1])
     if gm0 is not None and gm1 is not None and gm0 > gm1:
         positives.append(f"Marge brute en expansion ({gm1*100:.1f}% -> {gm0*100:.1f}%)")
-    if z is not None and z > 2.6:
+    if z is not None and z > Z_SAIN:
         positives.append(f"Bilan sain, risque de detresse faible (Z-Score {z:.1f})")
     sh0, sh1 = F["shares"][0], F["shares"][1]
     if sh0 is not None and sh1 is not None and sh0 < sh1 * 0.999:
@@ -236,7 +269,7 @@ def analyze(ticker: str, financials=None) -> dict:
                      "- qualite du resultat a investiguer")
     if accr is not None and accr > 0.10:
         flags.append(f"Accruals eleves ({accr*100:.1f}% de l'actif) - resultats peu adosses au cash")
-    if z is not None and z < 1.1:
+    if z is not None and z < Z_DETRESSE:
         flags.append(f"Z-Score en zone de detresse ({z:.1f}) - solidite du bilan fragile")
     # Divergence resultat net vs cash-flow (type Stellantis : profits en hausse, cash qui decroche)
     g_ni = _growth(F["net_income"])

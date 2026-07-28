@@ -119,8 +119,9 @@ def run_mc(fund, category, F=None, forensic=None, n=10000, rf=None):
                 liq = 0.5 * (fund.get("book_equity") or 0.0)
                 eq = eq * surv + liq * (1.0 - surv)
             elif category == "detresse":
+                from quantbench.forensics.scores import default_probability
                 z = (forensic or {}).get("scores", {}).get("altman_z")
-                pdef = 0.5 if z is None else min(max(1.0 - (z - 0.5) / 2.0, 0.05), 0.9)
+                pdef = default_probability(z)
                 liq = 0.5 * (fund.get("book_equity") or 0.0)
                 eq = eq * (1.0 - pdef) + liq * pdef
     except Exception:

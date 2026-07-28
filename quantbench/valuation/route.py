@@ -21,6 +21,7 @@ import numpy as np
 from ..data.universal import get_fundamentals
 from ..data import market
 from ..forensics import analyze as forensic_analyze, get_financials
+from ..forensics.scores import default_probability
 from .build_universal import build_dcf_from_fundamentals, country_erp
 from .dcf import value_dcf
 
@@ -43,6 +44,10 @@ def _coe(fund):
 # Damodaran l'excluent pour les financières ; foncières et services publics ont
 # structurellement un Z bas (actifs lourds, dette élevée) sans être en détresse.
 _NO_ALTMAN = ("financial", "real estate", "utilities")
+# Route "detresse" reservee au risque de defaut REEL (Z''-EMS < 3.20 ~ notation
+# CCC+ ou moins). Entre 3.20 et 5.85 la societe est speculative mais en activite :
+# DCF normal, le risque passe par le cout du capital.
+Z_DETRESSE_ROUTE = 3.20
 
 
 def _hist_margins(F):
@@ -70,7 +75,7 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
         return "cyclique"
     neg = (ebit is not None and ebit < 0) or (ni is not None and ni < 0)
     z_ok = z is not None and not any(s in sec for s in _NO_ALTMAN)
-    if neg and z_ok and z < 1.1:
+    if neg and z_ok and z < Z_DETRESSE_ROUTE:
         return "detresse"
     if neg:
         # Société MATURE en perte temporaire (déjà rentable par le passé) :
@@ -78,7 +83,7 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
         if sum(1 for m in _hist_margins(F) if m > 0) >= 2:
             return "mature_deficitaire"
         return "jeune/deficitaire"
-    if z_ok and z < 1.1:
+    if z_ok and z < Z_DETRESSE_ROUTE:
         return "detresse"
     return "standard"
 
@@ -93,14 +98,28 @@ def value_financial(fund):
     be, roe = fund.get("book_equity"), fund.get("roe")
     if not be or be <= 0 or roe is None:
         return None
+    # Un resultat net SUPERIEUR au chiffre d'affaires est impossible en
+    # exploitation : il signale un element non recurrent (gain de restructuration,
+    # sortie de faillite, cession). Le ROE qui en decoule (WeightWatchers : 332 %)
+    # n'est pas reproductible -> on retombe sur la valeur comptable.
+    ni, rev = fund.get("net_income"), fund.get("revenue")
+    if ni is not None and rev and rev > 0 and ni > rev:
+        return {"equity_value": be, "confidence": "faible",
+                "method": "Valeur comptable (resultat net non recurrent)"}
+    roe = max(-1.0, min(roe, 0.40))          # ROE soutenable plafonne
     ke, rf = _coe(fund)
     g = min(rf, 0.03)
     ke = max(ke, g + 0.01)
     # Excess-return / residual income, avec multiplicateur BORNE (le spread ROE-Ke
     # ne persiste pas a l'infini : atténuation implicite, évite l'explosion en taux bas).
-    mult = max(-0.6, min((roe - ke) / (ke - g), 4.0))
+    # Une societe qui DETRUIT massivement ses fonds propres (ROE tres negatif) n'a pas
+    # droit au meme plancher : sa valeur comptable est fictive (promoteur immobilier en
+    # defaut, actifs a reevaluer). On laisse alors le multiplicateur descendre et on
+    # supprime le plancher de 20 % des capitaux propres.
+    detruit = roe is not None and roe < -0.20
+    mult = max(-0.95 if detruit else -0.6, min((roe - ke) / (ke - g), 4.0))
     val = be * (1 + mult)
-    return {"equity_value": max(val, 0.2 * be),
+    return {"equity_value": max(val, 0.0 if detruit else 0.2 * be),
             "method": "Excess-return (capitaux propres — Damodaran financières)",
             "confidence": "moyenne"}
 
@@ -111,8 +130,14 @@ def value_reit(fund):
     valeur d'entreprise inférieure à la dette. On capitalise le FFO (résultat net +
     amortissements), mesure de flux propre à l'immobilier. Valorisation CÔTÉ ÉQUITÉ
     (le FFO est après intérêts) : aucune dette n'est soustraite."""
-    ni, da = fund.get("net_income"), fund.get("dep_amort")
+    ni, da, ebit = fund.get("net_income"), fund.get("dep_amort"), fund.get("ebit")
     if ni is None or da is None:
+        return None
+    # Le FFO n'a de sens que si l'EXPLOITATION est benificiaire. Un promoteur en
+    # defaut affiche un resultat net positif issu d'un abandon de creances (gain
+    # exceptionnel) alors que son EBIT est tres negatif : capitaliser ce FFO
+    # reviendrait a valoriser une faillite comme une rente perenne.
+    if ebit is not None and ebit <= 0:
         return None
     ffo = ni + da
     if ffo <= 0:
@@ -167,7 +192,7 @@ def value_young(fund):
 
 def value_distressed(fund, forensic):
     z = (forensic or {}).get("scores", {}).get("altman_z")
-    pdef = 0.5 if z is None else _clip(1.0 - (z - 0.5) / 2.0, 0.05, 0.9)
+    pdef = default_probability(z)      # table de notation Altman/Damodaran
     gc = _dcf_value(fund, method="DCF going-concern")
     liq = 0.5 * (fund.get("book_equity") or 0.0)
     return {"equity_value": max(gc["equity_value"], 0) * (1 - pdef) + liq * pdef,
