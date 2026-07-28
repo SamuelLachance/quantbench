@@ -239,6 +239,34 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     return profile, row
 
 
+def write_otc_index():
+    """Index LÉGER des titres OTC (symbole + nom) pour la recherche — sans valorisation
+    (générée à la demande par le Cloudflare Worker). Exclut : bonds/privilégiées,
+    dead stocks (volume nul), fonds/ETF (déjà filtrés par FMP). Les indices ne sont
+    pas dans company-screener."""
+    try:
+        rows = fmp._json("company-screener?exchange=OTC&isEtf=false&isFund=false"
+                         "&isActivelyTrading=true&limit=30000")
+    except Exception:
+        return 0
+    out = []
+    for r in rows:
+        sym, name = r.get("symbol"), r.get("companyName")
+        if not sym or not name:
+            continue
+        if fmp._is_preferred(sym, name):                 # bonds / privilégiées
+            continue
+        vol = fmp._num(r.get("volume"))
+        if not vol or vol <= 0:                           # dead stock : aucun volume
+            continue
+        out.append({"t": sym, "n": name[:64]})
+    out.sort(key=lambda r: r["t"])
+    (US / "_otc_index.json").write_text(
+        json.dumps({"n": len(out), "updated": _now_et(), "rows": out}, ensure_ascii=False),
+        encoding="utf-8")
+    return len(out)
+
+
 def main(exchanges, years=6, workers=20, with_news=True, with_pdf=True, limit=None):
     US.mkdir(parents=True, exist_ok=True)
     PDF.mkdir(parents=True, exist_ok=True)
@@ -279,8 +307,9 @@ def main(exchanges, years=6, workers=20, with_news=True, with_pdf=True, limit=No
     st.sort(key=lambda r: -(r["p_up"] or 0))
     (US / "_shortterm.json").write_text(json.dumps(
         {"n": len(st), "updated": _now_et(), "rows": st}, ensure_ascii=False), encoding="utf-8")
+    n_otc = write_otc_index()                            # index recherche OTC (à la demande)
     print(f"\n-> {done} valorisés ({len(clean)} affichés, {len(invalid)} upside non-fini), "
-          f"{fail} sans données | court terme {len(st)} | total {time.time()-t0:.0f}s")
+          f"{fail} sans données | court terme {len(st)} | OTC index {n_otc} | total {time.time()-t0:.0f}s")
 
 
 if __name__ == "__main__":

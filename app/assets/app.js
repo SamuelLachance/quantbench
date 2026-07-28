@@ -1,5 +1,7 @@
 /* QuantBench — helpers partagés (pro) */
 const QB = {
+  // Endpoint Cloudflare Worker de valorisation OTC à la demande (voir worker/README.md).
+  OTC_API: 'https://otc.quantbench.ca',
   nf0: new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 0}),
   nf1: new Intl.NumberFormat('fr-FR', {minimumFractionDigits: 1, maximumFractionDigits: 1}),
   nf2: new Intl.NumberFormat('fr-FR', {minimumFractionDigits: 2, maximumFractionDigits: 2}),
@@ -31,12 +33,23 @@ const QB = {
     return this._uni;
   },
 
+  async otcIndex() {
+    if (this._otc) return this._otc;
+    try {
+      const d = await (await fetch('us/_otc_index.json', {cache: 'no-store'})).json();
+      this._otc = (d.rows || []).map(r => ({ticker: r.t, name: r.n, otc: true}));
+    } catch (e) { this._otc = []; }
+    return this._otc;
+  },
+
   async mountSearch() {
     const inp = document.getElementById('tickerSearch');
     if (!inp) return;
-    const uni = await this.universe();
+    const [uni, otc] = await Promise.all([this.universe(), this.otcIndex()]);
     const dl = document.getElementById('tickerList');
-    if (dl) dl.innerHTML = uni.map(r => `<option value="${r.ticker}">${r.name || ''}</option>`).join('');
+    // Univers pré-construit (NASDAQ/NYSE/Canada) + index OTC (fiche à la demande, marquée)
+    if (dl) dl.innerHTML = uni.map(r => `<option value="${r.ticker}">${r.name || ''}</option>`).join('')
+      + otc.map(r => `<option value="${r.ticker}">${r.name || ''} · OTC</option>`).join('');
     const go = () => {
       const t = (inp.value || '').trim().toUpperCase().split(/\s|—/)[0];
       if (t) location.href = 'stock.html?t=' + encodeURIComponent(t);

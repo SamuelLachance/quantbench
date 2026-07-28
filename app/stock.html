@@ -170,8 +170,24 @@ function render(d){
   QB.initTheme(); QB.mountSearch();
   const t=(QB.qs('t')||'').toUpperCase();
   if(!t){document.getElementById('app').innerHTML='<div class="loading">Aucun titre. <a href="screener.html">Screener</a>.</div>';return;}
-  try{ render(await (await fetch('us/'+t+'.json',{cache:'no-store'})).json()); }
-  catch(e){ document.getElementById('app').innerHTML=`<div class="loading">Profil indisponible pour <b>${t}</b> (hors univers couvert). <a href="screener.html">Screener</a>.</div>`; }
+  const app=document.getElementById('app');
+  try{
+    const r=await fetch('us/'+t+'.json',{cache:'no-store'});
+    if(!r.ok) throw 0;
+    render(await r.json());
+  }catch(e){
+    // Titre hors univers pré-construit -> valorisation OTC À LA DEMANDE via le Worker
+    if(QB.OTC_API){
+      app.innerHTML=`<div class="loading">Valorisation à la demande de <b>${t}</b> (marché OTC)…</div>`;
+      try{
+        const dd=await (await fetch(QB.OTC_API+'?ticker='+encodeURIComponent(t))).json();
+        if(dd && dd.ok){ render(dd); return; }
+        app.innerHTML=`<div class="loading">Impossible de valoriser <b>${t}</b> : ${(dd&&dd.error)||'données indisponibles'}. <a href="index.html">Accueil</a>.</div>`;
+        return;
+      }catch(e2){}
+    }
+    app.innerHTML=`<div class="loading">Profil indisponible pour <b>${t}</b>. <a href="screener.html">Screener</a>.</div>`;
+  }
 })();
 </script>
 </body>
