@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 # Seuils : bornes de PLAUSIBILITE larges, pas des opinions de valorisation.
 MIN_CAP_SUR_CA = 0.03          # une societe ne se traite pas a 3 % de ses ventes
 MIN_CAP_SUR_FONDS_PROPRES = 0.05
+MIN_CAP_SUR_EBIT = 2.0         # une societe rentable vaut plus de 2x son EBIT
 MAX_CA_SUR_ACTIF = 5.0         # les activites les plus legeres tournent a 2-3x
 MAX_FONDS_PROPRES_SUR_CAP = 200.0
 TOLERANCE_BILAN = 0.05         # 5 % d'ecart admis sur l'identite comptable
@@ -71,6 +72,16 @@ def valider(fund: dict, F: dict | None, entry: dict | None = None) -> list[str]:
                               f"({cap/be:.1%} des capitaux propres)")
             elif be > MAX_FONDS_PROPRES_SUR_CAP * cap:
                 motifs.append("fonds propres hors d'echelle face a la capitalisation")
+
+    # Une societe RENTABLE en continuite d'exploitation ne se traite pas sous deux
+    # fois son resultat operationnel — Apple vaut 37 fois le sien, Coca-Cola 28,
+    # General Motors 28. En dessous, soit les benefices ne reviennent pas a
+    # l'actionnaire, soit la capitalisation porte sur une AUTRE entite que les
+    # comptes : ligne de warrants, de droits, d'unites, ou ligne ADR.
+    ebit = fund.get("ebit")
+    if cap and cap > 0 and ebit and ebit > 0 and cap < MIN_CAP_SUR_EBIT * ebit:
+        motifs.append(f"capitalisation de {cap/ebit:.2f}x le resultat operationnel — "
+                      f"elle ne porte pas sur la meme entite que les comptes")
 
     # --- Identites comptables ----------------------------------------------
     if ta and ta > 0:

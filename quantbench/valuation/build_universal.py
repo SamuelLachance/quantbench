@@ -216,6 +216,22 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         if roic_ind and roic_ind > 0:
             cur_roic = _clamp(min(cur_roic, roic_ind * 1.5), 0.02, 0.40)
 
+    # --- CONTRAINTE DE CROISSANCE FINANCABLE (identite de Damodaran) ----------
+    # g = taux de reinvestissement x ROIC. Cette identite n'etait utilisee que pour
+    # DEDUIRE le reinvestissement a partir de g, et le plafond applique au taux de
+    # reinvestissement masquait alors les cas impossibles : le modele accordait 45 %
+    # de croissance a des societes de 2 % de ROIC, ce qui exigerait de reinvestir
+    # VINGT-DEUX FOIS leurs benefices. On l'impose desormais dans l'autre sens, en
+    # BORNANT la croissance a ce que la rentabilite du capital peut financer :
+    #     g <= ROIC x reinvestissement maximal
+    # Le maximum de 2 admet un financement externe soutenu (une societe peut
+    # reinvestir deux fois ses benefices en levant du capital), sans permettre
+    # l'impossible. Aucune societe rentable n'est touchee : Apple (ROIC 40 %) peut
+    # croitre jusqu'a 80 %, Coca-Cola (16 %) jusqu'a 32 %.
+    g_financable = 2.0 * cur_roic
+    if g_start > g_financable:
+        g_start = g_financable
+
     rf = rf if rf is not None else market.risk_free_rate()
     lev_beta, unlev, _src = beta_ascendant(fund, tx)
     cost_equity = rf + lev_beta * erp + prime_taille(fund.get("market_cap"))
@@ -259,7 +275,7 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         reinvestment_mode="roic", current_roic=cur_roic, terminal_roic=term_roic,
         roic_converge_start=5,
     )
-    meta = {"g_start": g_start, "op_margin": op_margin, "s2c": s2c,
+    meta = {"g_start": g_start, "g_financable": round(g_financable, 4), "op_margin": op_margin, "s2c": s2c,
             "cur_roic": cur_roic, "term_roic": term_roic, "rf": rf,
             "beta": lev_beta, "erp": erp}
     return x, meta

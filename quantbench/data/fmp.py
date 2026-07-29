@@ -173,7 +173,37 @@ def screener(exchanges=("NASDAQ",)):
                         "market_cap": _num(r.get("marketCap")),
                         "country": r.get("country"),
                         "currency": None, "exchange": ex}
-    return out
+    return _garder_la_ligne_principale(out)
+
+
+def _garder_la_ligne_principale(uni):
+    """Une meme societe peut avoir PLUSIEURS lignes cotees : l'action ordinaire, mais
+    aussi ses bons de souscription, ses droits, ses unites ou une ligne ADR. Toutes
+    portent les MEMES comptes consolides alors que leur capitalisation ne couvre que
+    la ligne — SBC Medical Group Holdings apparait en SBC (319 M$, l'action) et en
+    SBCWW (27 M$, les warrants), ce dernier ressortant a +2 505 % d'upside.
+    On ne conserve donc, par raison sociale, que la ligne principale. Les actions de
+    CLASSE (Alphabet A et C, Berkshire A et B) sont de vraies actions ordinaires et
+    ont des capitalisations du meme ordre : le seuil de 20 % les preserve."""
+    par_nom = {}
+    for sym, r in uni.items():
+        nom = (r.get("name") or "").strip().lower()
+        if nom:
+            par_nom.setdefault(nom, []).append(sym)
+    a_retirer = set()
+    for nom, syms in par_nom.items():
+        if len(syms) < 2:
+            continue
+        caps = {s: (uni[s].get("market_cap") or 0.0) for s in syms}
+        cap_max = max(caps.values())
+        if cap_max <= 0:
+            continue
+        for s, c in caps.items():
+            if c < 0.20 * cap_max:          # ligne accessoire, pas l'action ordinaire
+                a_retirer.add(s)
+    for s in a_retirer:
+        uni.pop(s, None)
+    return uni
 
 
 # --------------------------------------------------------------------------- #
@@ -432,8 +462,14 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         rev_usd = (rev or 0) * fxs
         eq_usd = (eq or 0) * fxs
         mcap_usd = mcap * fxp
+        ebit_usd = (ebit or 0) * fxs
         incoherent = ((rev_usd > 0 and mcap_usd < 0.03 * rev_usd)
-                      or (eq_usd > 0 and mcap_usd < 0.05 * eq_usd))
+                      or (eq_usd > 0 and mcap_usd < 0.05 * eq_usd)
+                      # Une societe RENTABLE ne se traite pas sous deux fois son
+                      # resultat operationnel : Apple vaut 37 fois le sien,
+                      # Coca-Cola 28 fois. En dessous, la capitalisation ne porte
+                      # pas sur la meme entite que les comptes.
+                      or (ebit_usd > 0 and mcap_usd < 2.0 * ebit_usd))
         if incoherent:
             vraie = _capitalisation_origine(symbol, sr.get("name") or "")
             if vraie and vraie > mcap_usd:
