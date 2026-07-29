@@ -266,6 +266,51 @@ def news(symbol, limit=8):
 
 
 # --------------------------------------------------------------------------- #
+# Capitalisation reelle d'un ADR : via la cotation D'ORIGINE
+# --------------------------------------------------------------------------- #
+@functools.lru_cache(maxsize=4096)
+def _capitalisation_origine(symbol: str, nom: str):
+    """Capitalisation de la SOCIETE, en USD, retrouvee sur sa cotation d'origine.
+
+    Pour un ADR de gre a gre, FMP renvoie la capitalisation de la seule LIGNE ADR
+    enregistree — 1 132 899 titres pour PT Kalbe Farma, soit 8,7 M$ — alors que les
+    etats financiers sont ceux du groupe entier (1,95 Md$ de chiffre d'affaires).
+    Le rapport valeur/capitalisation etait donc multiplie par plusieurs centaines.
+    La cotation d'origine (KLBF.JK) porte, elle, la vraie capitalisation.
+
+    Retourne None si aucune correspondance credible n'est trouvee."""
+    if not nom:
+        return None
+    try:
+        cands = _json(f"search-name?query={requests.utils.quote(nom[:40])}&limit=8") or []
+    except Exception:
+        return None
+    best = None
+    for c in cands:
+        sym = c.get("symbol") or ""
+        if sym == symbol or "." not in sym:      # on cherche une place BOURSIERE etrangere
+            continue
+        try:
+            j = _json(f"profile?symbol={sym}")
+            pr = j[0] if j else None
+        except Exception:
+            continue
+        if not pr:
+            continue
+        # meme societe ? on compare les debuts de raison sociale
+        n1 = (pr.get("companyName") or "").lower()[:14]
+        if not n1 or n1 not in nom.lower() and nom.lower()[:14] not in n1:
+            continue
+        cap = _num(pr.get("marketCap"))
+        fx = fx_to_usd(pr.get("currency") or "USD") or 1.0
+        if cap and cap > 0:
+            usd = cap * fx
+            if best is None or usd > best:
+                best = usd
+    return best
+
+
+# --------------------------------------------------------------------------- #
 # Conversion vers nos structures (forensics F + fundamentals) — tout en USD
 # --------------------------------------------------------------------------- #
 def financials_from_fmp(entry):
@@ -310,9 +355,16 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         return None
     y = yrs[0]
     rep_cur = inc.get(y, {}).get("reportedCurrency") or "USD"
-    fxs = fx_to_usd(rep_cur) or 1.0                       # états -> USD
+    # Taux de change : JAMAIS de repli silencieux a 1. Traiter des roupies
+    # indonesiennes comme des dollars fausse tout d'un facteur 18 000 — on signale
+    # l'indisponibilite et la societe sera ecartee par la validation.
+    _fxs = fx_to_usd(rep_cur)
+    fx_ko = (_fxs is None)
+    fxs = _fxs if _fxs is not None else 1.0               # etats -> USD
     price_cur = _EX_CUR.get((sr.get("exchange") or "").upper(), "USD")
-    fxp = fx_to_usd(price_cur) or 1.0                     # cours/capi -> USD
+    _fxp = fx_to_usd(price_cur)
+    fx_ko = fx_ko or (_fxp is None)
+    fxp = _fxp if _fxp is not None else 1.0               # cours/capi -> USD
     B = 1e9
     g = lambda src, f: _num(src.get(y, {}).get(f))
     rev, ebit, ni = g(inc, "revenue"), g(inc, "operatingIncome"), g(inc, "netIncome")
@@ -342,6 +394,20 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
     rev_hist = [_num(inc.get(yy, {}).get("revenue")) for yy in sorted(inc)]
     rev_hist = [v * fxs / B for v in rev_hist if v is not None]
     price, mcap = _num(sr.get("price")), _num(sr.get("market_cap"))
+    # COHERENCE capitalisation <-> comptes. Une societe ne se traite pas a 3 % de
+    # son chiffre d'affaires ni a 5 % de ses fonds propres : un tel ecart signale
+    # que la capitalisation porte sur une LIGNE ADR et non sur la societe. On va
+    # alors chercher la capitalisation sur sa cotation d'origine.
+    if mcap and mcap > 0:
+        rev_usd = (rev or 0) * fxs
+        eq_usd = (eq or 0) * fxs
+        mcap_usd = mcap * fxp
+        incoherent = ((rev_usd > 0 and mcap_usd < 0.03 * rev_usd)
+                      or (eq_usd > 0 and mcap_usd < 0.05 * eq_usd))
+        if incoherent:
+            vraie = _capitalisation_origine(symbol, sr.get("name") or "")
+            if vraie and vraie > mcap_usd:
+                mcap, fxp = vraie, 1.0            # deja en USD
     # Nombre d'actions COHÉRENT avec le cours : capitalisation / cours donne la base
     # exacte sur laquelle le marché price le titre. Les actions déclarées aux comptes
     # peuvent porter sur une autre base (ADR = N actions ordinaires, multi-classes) ou
@@ -357,7 +423,8 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         "market_cap": mcap * fxp / B if mcap else None,
         "shares": shares, "beta": _sane_beta(sr.get("beta"), sr.get("sector")),
         "country": sr.get("country"),
-        "currency_ok": True, "price_currency": price_cur, "financial_currency": rep_cur,
+        "currency_ok": not fx_ko, "fx_indisponible": fx_ko,
+        "price_currency": price_cur, "financial_currency": rep_cur,
         "revenue": b(rev), "revenue_history": rev_hist, "ebit": b(ebit), "net_income": b(ni),
         "total_debt": b(debt), "cash": b(cash), "book_equity": b(eq),
         "total_assets": b(tot_assets),

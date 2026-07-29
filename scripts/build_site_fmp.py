@@ -23,6 +23,8 @@ import numpy as np
 from scipy import stats
 
 from quantbench.data import fmp
+from quantbench.data.validate import valider
+from quantbench.data.repair import reparer
 from quantbench.data.sec_fundamentals import annual_report_docs
 from quantbench.data.market import risk_free_rate
 from quantbench.forensics import analyze
@@ -283,34 +285,38 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     # valorisées sur l'actif net. Il faut juste un prix (pour l'upside).
     if not fund or not fund.get("price"):
         return None, None
-    # Intégrité des données : rejeter les fondamentaux corrompus (nombre d'actions
-    # implausible, cap quasi nulle) qui produisent des valorisations aberrantes.
+    # VALIDATION DES ENTREES : une donnee non verifiee ne donne pas une valorisation
+    # approximative mais une valorisation FAUSSE. On ne valorise que ce dont on
+    # peut repondre, et on RETOURNE le motif quand ce n'est pas le cas.
+    motifs = valider(fund, F, entry)
+    reparations = []
+    if motifs:
+        # On tente de CORRIGER avant de renoncer : capitalisation de la cotation
+        # d'origine, identite du bilan, douze mois glissants, devise pivot.
+        reparations = reparer(symbol, fund, F, entry, motifs)
+        if reparations:
+            motifs = valider(fund, F, entry)          # revalidation apres reparation
     sh, mc0 = fund.get("shares"), fund.get("market_cap")
-    if not sh or sh < 100_000 or not mc0 or mc0 < 0.002:   # <100k actions ou <2 M$
-        return None, None
-    # FRAICHEUR : valoriser une societe sur des comptes vieux de plusieurs annees
-    # n'a pas de sens (Signature Bank, en faillite depuis mars 2023, etait encore
-    # valorisee sur son bilan 2022 et ressortait a +173 000 %).
-    dernier = max(set(entry["income"]) & set(entry["balance"]))
-    if dernier < datetime.now(timezone.utc).year - 2:
-        return None, None
+    if not sh or sh < 100_000:
+        motifs.append("nombre d'actions implausible")
+    if not mc0 or mc0 < 0.002:
+        motifs.append("capitalisation inferieure a 2 M$")
+    if motifs:
+        return None, {"__rejet__": motifs, "ticker": symbol,
+                      "reparations_tentees": reparations}
     # PLAUSIBILITE : des capitaux propres 200 fois superieurs a la capitalisation
     # ne traduisent pas une opportunite mais une donnee non credible — erreur
     # d'unites (Oncotelic : 262 000 milliards $ de fonds propres pour 16 M$ de
     # capitalisation), serie obligataire prise pour une action (obligations de la
     # Tennessee Valley Authority), ou capitalisation perimee.
     be0 = fund.get("book_equity")
-    if be0 and mc0 and be0 > 200 * mc0:
-        return None, None
     # COHERENCE COMPTES : aucune societe ne realise un chiffre d'affaires plusieurs
     # fois superieur a son actif total (les plus legeres en capital tournent a 2-3x).
     # Un tel ecart signale une entite de FINANCEMENT qui publie le CA consolide du
     # groupe sans en porter le bilan : "KKR Group Finance Co. IX LLC" declarait
     # 19,5 Md$ de CA pour 1 Md$ d'actif et 14 M$ de fonds propres — c'est une
     # obligation cotee du groupe KKR, pas une action.
-    ta0, rev0 = fund.get("total_assets"), fund.get("revenue")
-    if ta0 and ta0 > 0 and rev0 and rev0 > 5 * ta0:
-        return None, None
+
     # Un SERVICE PUBLIC REGULE se traite entre 1 et 2,5 fois ses fonds propres :
     # sa rentabilite est FIXEE par le regulateur. Un titre "de service public" cote
     # au quart de ses capitaux propres n'est donc pas une action ordinaire mais une
@@ -359,6 +365,7 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
             "total_debt", "cash", "book_equity", "operating_margin", "roe")},
         "forensics": forensic, "statements": _statements(F), "news": news,
         "projection": proj, "methodologie": methodo,
+        "reparations_donnees": reparations,
         "results_summary": _results_summary(F), "shortterm": signal,
         "montecarlo": mc, "documents": ard.get("documents", []),
         "report_url": ard.get("tenk"), "ars_pdf_url": ard.get("ars_pdf"),
@@ -459,19 +466,37 @@ def main(exchanges, years=6, workers=20, with_news=True, with_pdf=True, limit=No
 
     print(f"Valorisation par-ticker (FMP), {workers} threads…")
     rows, done, fail = [], 0, 0
+    rejets, repares = {}, {}
     with cf.ThreadPoolExecutor(max_workers=workers) as ex:
         futs = {ex.submit(build_one, s, uni[s], with_news, with_pdf): s for s in syms}
         for fut in cf.as_completed(futs):
             try:
                 _, row = fut.result()
-                if row:
+                if row and "__rejet__" in row:
+                    for m in row["__rejet__"]:
+                        rejets[m.split(" (")[0].split(" —")[0]] =                             rejets.get(m.split(" (")[0].split(" —")[0], 0) + 1
+                    for rp in row.get("reparations_tentees") or []:
+                        repares[rp.split(" (")[0]] = repares.get(rp.split(" (")[0], 0) + 1
+                    fail += 1
+                elif row:
                     rows.append(row); done += 1
+                    for rp in row.get("reparations") or []:
+                        repares[rp] = repares.get(rp, 0) + 1
                 else:
                     fail += 1
             except Exception:
                 fail += 1
             if (done + fail) % 200 == 0:
                 print(f"  {done+fail}/{len(syms)} (ok={done})")
+
+    if rejets:
+        print("\n  motifs de non-couverture (donnees non verifiables) :")
+        for m, c in sorted(rejets.items(), key=lambda kv: -kv[1])[:12]:
+            print(f"    {c:>6}  {m}")
+    if repares:
+        print("  reparations automatiques appliquees :")
+        for m, c in sorted(repares.items(), key=lambda kv: -kv[1])[:8]:
+            print(f"    {c:>6}  {m}")
 
     if shard is not None:                                # écrit les lignes de ce shard
         i, n = shard
