@@ -50,9 +50,11 @@ def _coe(fund):
     rf = market.risk_free_rate()
     from .build_universal import beta_ascendant, tax_rate
     pays = pays_exploitation(fund)
+    from .build_universal import prime_taille
     beta, _unlev, _src = beta_ascendant(fund, tax_rate(pays))
     erp = country_erp(pays)
-    return max(rf + beta * erp, rf + 0.03), rf
+    ke = rf + beta * erp + prime_taille(fund.get("market_cap"))
+    return max(ke, rf + 0.03), rf
 
 
 # Le Z-score d'Altman est calibré sur des industriels : Altman lui-même et
@@ -150,12 +152,34 @@ def _hist_margins(F):
 def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
     sec = (fund.get("sector") or "").lower()
     ebit, ni = fund.get("ebit"), fund.get("net_income")
+    be = fund.get("book_equity")
     z = (forensic or {}).get("scores", {}).get("altman_z")
     rev = fund.get("revenue")
     if rev is None or rev <= 0:
-        # Pré-revenu (biotech clinique, mineur d'exploration), holding, SPAC :
-        # pas de flux à actualiser -> valeur d'actif net (méthode Damodaran).
+        # Pre-revenu (biotech clinique, mineur d'exploration), holding, SPAC :
+        # pas de flux a actualiser -> valeur d'actif net (methode Damodaran).
         return "actif_net"
+
+    deficitaire = (ebit is not None and ebit < 0) or (ni is not None and ni < 0)
+    # Le Z-score d'Altman est calibre sur des industriels : Altman lui-meme et
+    # Damodaran l'excluent pour les financieres ; foncieres et services publics ont
+    # structurellement un Z bas sans etre en detresse.
+    z_ok = z is not None and not any(s in sec for s in _NO_ALTMAN)
+
+    # --- LA DETRESSE PRIME SUR LE SECTEUR -----------------------------------
+    # Une societe dont les pertes ont absorbe les fonds propres, ou dont le Z-score
+    # signale un risque de defaut avere, ne se valorise pas comme une consoeur en
+    # bonne sante — quel que soit son secteur. L'ordre inverse laissait SunPower,
+    # en faillite avec des fonds propres NEGATIFS, etre valorisee comme un cyclique
+    # ordinaire a +2 116 % : la branche "energie" repondait avant tout controle de
+    # solvabilite. Le meme angle mort touchait l'immobilier, les services publics et
+    # les financieres.
+    if deficitaire and be is not None and be <= 0:
+        return "detresse"                      # fonds propres absorbes par les pertes
+    if deficitaire and z_ok and z < Z_DETRESSE_ROUTE:
+        return "detresse"
+
+    # --- Routage sectoriel : societes en continuite d'exploitation -----------
     if "real estate" in sec:
         return "fonciere"                      # REIT : FFO/NAV, jamais le FCFF
     if "utilities" in sec:
@@ -166,13 +190,10 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
         return "financiere" if _financiere_de_bilan(fund) else "standard"
     if any(s in sec for s in ("energy", "materials")):
         return "cyclique"
-    neg = (ebit is not None and ebit < 0) or (ni is not None and ni < 0)
-    z_ok = z is not None and not any(s in sec for s in _NO_ALTMAN)
-    if neg and z_ok and z < Z_DETRESSE_ROUTE:
-        return "detresse"
-    if neg:
-        # Société MATURE en perte temporaire (déjà rentable par le passé) :
-        # Damodaran normalise les bénéfices — ce n'est pas une société jeune.
+
+    if deficitaire:
+        # Societe MATURE en perte temporaire (deja rentable par le passe) :
+        # Damodaran normalise les benefices — ce n'est pas une societe jeune.
         if sum(1 for m in _hist_margins(F) if m > 0) >= 2:
             return "mature_deficitaire"
         return "jeune/deficitaire"

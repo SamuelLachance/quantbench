@@ -118,6 +118,27 @@ def repere(fund, cle, defaut=None):
     return g[cle] if g.get(cle) is not None else defaut
 
 
+# Prime de TAILLE et d'ILLIQUIDITE ajoutee au cout des fonds propres. Damodaran
+# l'analyse comme un effet de liquidite et de risque de financement plutot que de
+# taille en soi, mais son application est la meme : une societe de 3 M$ de
+# capitalisation ne se finance pas au cout du capital d'Apple. Sans elle, notre DCF
+# actualisait un nano-cap a ~9 % et le valorisait 16 fois ses benefices — d'ou une
+# cohorte entiere de micro-caps a +2 000 % d'upside.
+_PRIME_TAILLE = ((10.0, 0.0), (2.0, 0.005), (0.5, 0.010),
+                 (0.1, 0.020), (0.025, 0.035))
+_PRIME_TAILLE_MAX = 0.05          # en dessous de 25 M$ de capitalisation
+
+
+def prime_taille(market_cap) -> float:
+    """Prime de taille/illiquidite selon la capitalisation, en Md USD."""
+    if not market_cap or market_cap <= 0:
+        return _PRIME_TAILLE_MAX
+    for seuil, prime in _PRIME_TAILLE:
+        if market_cap >= seuil:
+            return prime
+    return _PRIME_TAILLE_MAX
+
+
 def beta_ascendant(fund, tx):
     """BETA ASCENDANT (bottom-up), methode canonique de Damodaran.
 
@@ -183,10 +204,21 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     invested = rev / s2c
     nopat = op_margin * rev * (1.0 - tx)
     cur_roic = _clamp(_safe_div(nopat, invested) or 0.12, 0.02, 0.40)
+    # Quand le capital investi est INTROUVABLE — bilan quasi vide ou fonds propres
+    # negatifs, ce qui sature la borne du ratio ventes/capital — le ROIC mesure
+    # n'a plus de sens : il ressort tres eleve et le modele conclut que la
+    # croissance ne coute presque rien a financer. Damodaran retient alors la
+    # reference de l'INDUSTRIE. Une societe peut depasser son industrie, mais pas
+    # d'un facteur arbitraire quand son propre capital n'est pas mesurable.
+    capital_non_mesurable = (rev / invested_raw) > 5.9 or equity_book <= 0
+    if capital_non_mesurable:
+        roic_ind = repere(fund, "roic")
+        if roic_ind and roic_ind > 0:
+            cur_roic = _clamp(min(cur_roic, roic_ind * 1.5), 0.02, 0.40)
 
     rf = rf if rf is not None else market.risk_free_rate()
     lev_beta, unlev, _src = beta_ascendant(fund, tx)
-    cost_equity = rf + lev_beta * erp
+    cost_equity = rf + lev_beta * erp + prime_taille(fund.get("market_cap"))
     term_roic = _clamp(cost_equity + 0.02, 0.07, max(cur_roic, 0.08))
 
     # Croissance perpetuelle : plafonnee par le taux sans risque (Damodaran : une
@@ -217,7 +249,9 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         margin_converge_start=3,
         current_tax_rate=tx, marginal_tax_rate=tx, tax_converge_start=5,
         current_sales_to_capital=s2c, terminal_sales_to_capital=s2c, s2c_converge_start=3,
-        risk_free_rate=rf, erp=erp,
+        # La prime de taille est portee par l'ERP effectif pour qu'elle traverse
+        # tout le calcul du WACC, et non le seul cout des fonds propres affiche.
+        risk_free_rate=rf, erp=erp + prime_taille(fund.get("market_cap")) / max(lev_beta, 0.2),
         unlevered_beta=unlev, terminal_unlevered_beta=_clamp(unlev, 0.8, 1.2),
         beta_converge_start=5,
         current_pretax_kd=kd, terminal_pretax_kd=kd, kd_converge_start=5,
