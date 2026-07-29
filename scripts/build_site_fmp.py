@@ -228,6 +228,19 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
                 pdef = default_probability(z)
                 liq = 0.5 * max(fund.get("book_equity") or 0.0, 0.0)
                 eq = np.maximum(eq * (1.0 - pdef) + liq * pdef, 0.0)
+            elif category in ("mature_deficitaire", "cyclique") and margin is not None:
+                # MIROIR OBLIGATOIRE du routage : ces deux methodes valorisent un
+                # REDRESSEMENT vers une marge normalisee, pondere par la probabilite
+                # de l'atteindre. Sans ce miroir, la mediane simulee ecrase la
+                # ponderation et le redressement redevient certain — c'est le meme
+                # angle mort qui faisait repasser General Motors de -70 % a -100 %.
+                from quantbench.valuation.route import (probabilite_de_realisation,
+                                                        sect)
+                p_real = probabilite_de_realisation(fund, F, margin)
+                if p_real < 0.999:
+                    liq = sect(fund, "recuperation", 0.5) * max(
+                        fund.get("book_equity") or 0.0, 0.0)
+                    eq = np.maximum(eq * p_real + liq * (1.0 - p_real), 0.0)
     except Exception:
         return None
     return _mc_stats(eq, mcap, shares)

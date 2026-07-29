@@ -313,3 +313,18 @@ def test_historique_des_marges_utilise_aussi_l_ebit_economique():
     assert F is not None
     assert all(v is not None and v <= 0 for v in F["ebit"]),         f"historique d'EBIT non corrige : {F['ebit']}"
 
+def test_le_monte_carlo_reflete_la_ponderation_du_routage():
+    """Toute ponderation appliquee par le routage (survie, defaut, probabilite de
+    REALISATION d'un redressement) doit etre reproduite par la simulation, sinon la
+    mediane simulee ECRASE le raffinement — c'est l'angle mort qui a fait repasser
+    General Motors de -70 % a -100 % et Allstate de -34 % a +106 %."""
+    import build_site_fmp as bs
+    import inspect
+    src = inspect.getsource(bs.run_mc)
+    for ponderation in ("jeune/deficitaire", "detresse",
+                        "mature_deficitaire", "cyclique"):
+        assert ponderation in src, (
+            f"la categorie '{ponderation}' est ponderee par le routage mais pas "
+            f"par run_mc : la simulation annulerait la ponderation")
+    assert "probabilite_de_realisation" in src
+

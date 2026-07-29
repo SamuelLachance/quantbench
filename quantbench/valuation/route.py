@@ -391,6 +391,46 @@ def value_reit(fund):
             "confidence": "moyenne", "ffo": round(ffo, 3)}
 
 
+def probabilite_de_realisation(fund, F, marge_visee):
+    """Probabilite que la societe ATTEIGNE la marge sur laquelle on la valorise.
+
+    Damodaran : quand une valorisation repose sur un REDRESSEMENT — marge normalisee
+    d'une societe en perte, marge moyenne de cycle d'un cyclique deprime — la valeur
+    doit etre ponderee par la probabilite d'y parvenir, l'alternative etant la
+    liquidation. Nous n'appliquions cette ponderation qu'aux societes etiquetees
+    "detresse" : partout ailleurs le redressement etait traite comme CERTAIN.
+
+    La probabilite n'est pas supposee mais MESUREE : c'est la part des exercices ou
+    la societe a effectivement atteint cette marge. Une societe qui l'a tenue chaque
+    annee conserve toute sa valeur ; une societe qui ne l'a atteinte que deux fois
+    sur six n'en garde qu'un tiers. C'est la distinction entre difficulte passagere
+    et declin structurel, etablie sur les faits plutot que postulee."""
+    ms = _hist_margins(F)
+    if marge_visee is None or len(ms) < 3:
+        return 1.0
+    courante = fund.get("operating_margin")
+    if courante is not None and courante >= marge_visee:
+        return 1.0                       # aucun redressement suppose
+    atteints = sum(1 for m in ms if m >= marge_visee * 0.9)
+    p = atteints / len(ms)
+    return float(min(1.0, max(0.15, p)))
+
+
+def _pondere_par_realisation(r, fund, F, marge_visee):
+    """Applique la probabilite de realisation : la valeur du redressement d'un cote,
+    la valeur de liquidation de l'autre."""
+    if not r or r.get("equity_value") is None:
+        return r
+    p = probabilite_de_realisation(fund, F, marge_visee)
+    if p >= 0.999:
+        return r
+    liq = sect(fund, "recuperation", 0.5) * max(fund.get("book_equity") or 0.0, 0.0)
+    r["equity_value"] = max(r["equity_value"], 0.0) * p + liq * (1.0 - p)
+    r["probabilite_realisation"] = round(p, 2)
+    r["confidence"] = "faible" if p < 0.5 else r.get("confidence", "moyenne")
+    return r
+
+
 def value_mature_loss(fund, F):
     """Société MATURE en perte temporaire : Damodaran valorise sur bénéfices
     NORMALISÉS (moyenne des marges positives passées) plutôt que d'extrapoler une
@@ -402,7 +442,7 @@ def value_mature_loss(fund, F):
     r = _dcf_value(fund, margin_override=norm,
                    method="DCF sur bénéfices normalisés (perte temporaire)")
     r["norm_margin"] = round(norm, 4)
-    return r
+    return _pondere_par_realisation(r, fund, F, norm)
 
 
 def value_cyclical(fund, F):
@@ -414,7 +454,7 @@ def value_cyclical(fund, F):
             r = _dcf_value(fund, margin_override=navg,
                            method="DCF sur bénéfices normalisés (cyclique)")
             r["norm_margin"] = round(navg, 4)
-            return r
+            return _pondere_par_realisation(r, fund, F, navg)
     return _dcf_value(fund, method="DCF FCFF")
 
 
