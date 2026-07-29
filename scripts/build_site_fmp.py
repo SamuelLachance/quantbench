@@ -86,7 +86,8 @@ def _route_margin(fund, category, F):
 
 _CAT_DCF = ("standard", "cyclique", "mature_deficitaire", "jeune/deficitaire", "detresse")
 _METH_NON_DCF = ("Residual income", "Valeur comptable", "Valeur d'actif net",
-                 "FFO capitalisé", "Benefices capitalises", "Rendement excedentaire")
+                 "FFO capitalisé", "Benefices capitalises", "Rendement excedentaire",
+                 "Actif net reevalue")
 
 _POURQUOI = {
     "financiere": ("Banque, assurance ou courtier : la dette est leur MATIERE PREMIERE, "
@@ -168,7 +169,7 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
     et équité plancher à 0 (responsabilité limitée : une action ne vaut jamais < 0).
     Excess-return simulé pour les financières. `rf` imposé pour le backtest."""
     shares, mcap = fund.get("shares"), fund.get("market_cap")
-    if category in ("actif_net", "fonciere", "reglementee", "financiere"):
+    if category in ("actif_net", "fonciere", "reglementee", "financiere", "holding"):
         return None      # actif net, FFO, benefices regules, rendement excedentaire :
                          # valeurs POINT — la simulation reproduisait un autre modele
     # La simulation reproduit le DCF FCFF. Si la valorisation RETENUE vient d'une

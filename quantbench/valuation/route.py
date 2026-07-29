@@ -36,11 +36,21 @@ def _clip(x, lo, hi):
 def _coe(fund):
     """Cout des fonds propres = rf + beta x ERP, ERP incluant la prime de risque
     PAYS (Damodaran) — sinon une banque chinoise ou bresilienne serait actualisee
-    au cout du capital americain."""
+    au cout du capital americain.
+
+    PLANCHER DE BETA : une cotation OTC/ADR peu liquide produit un beta de
+    regression artificiellement bas (0,20 pour la fonciere mexicaine Fibra UNO,
+    0,24 pour la banque China Minsheng) — le titre bouge peu faute d'echanges, pas
+    faute de risque. Un tel beta effondre le cout des fonds propres et fait
+    exploser tout multiple de capitalisation. On le plancherise a 60 % de la
+    mediane MESUREE du secteur, et on impose au cout des fonds propres de rester
+    au-dessus du taux sans risque augmente de 3 points : aucune action n'est moins
+    risquee qu'une obligation d'Etat."""
     rf = market.risk_free_rate()
     beta = fund.get("beta") or 1.1
+    beta = max(beta, 0.60 * sect(fund, "beta", 1.0))
     erp = country_erp(fund.get("country"))
-    return rf + beta * erp, rf
+    return max(rf + beta * erp, rf + 0.03), rf
 
 
 # Le Z-score d'Altman est calibré sur des industriels : Altman lui-même et
@@ -78,15 +88,41 @@ def _financiere_de_bilan(fund) -> bool:
     portent aucune information de valeur -> DCF classique. Les valoriser en
     multiple de valeur comptable donnait Visa a -73 % et Mastercard a -92 %."""
     ind = (fund.get("industry") or "").lower()
+    ta, rev = fund.get("total_assets"), fund.get("revenue")
+    be = fund.get("book_equity")
+    # Le LEVIER prime sur l'etiquette : des fonds propres inferieurs a 15 % de
+    # l'actif avec un bilan lourd est la signature d'une activite de bilan
+    # (banques 8-10 %, assureurs 5-15 %). Apollo, etiquetee "Asset Management",
+    # detient l'assureur Athene : 460 Md$ d'actif pour 4,8 % de fonds propres —
+    # elle etait valorisee en DCF et ressortait a +532 %.
+    if ta and ta > 0 and be and rev and rev > 0:
+        if (be / ta) < 0.15 and (ta / rev) >= 4.0:
+            return True
     if any(k in ind for k in ("bank", "insurance", "mortgage", "thrift")):
         return True
     if any(k in ind for k in ("asset management", "stock exchange", "financial data",
                               "shell", "conglomerate")):
         return False
-    ta, rev = fund.get("total_assets"), fund.get("revenue")
     if ta and rev and rev > 0:
         return (ta / rev) >= 4.0        # poids du bilan : banques ~20x, Visa ~2,7x
     return True
+
+
+def _est_holding(fund) -> bool:
+    """Societe de PORTEFEUILLE (holding d'investissement) : son "chiffre
+    d'affaires" est le revenu de ses participations, pas une activite. Un DCF y
+    est denue de sens — AB Industrivarden ressortait a +540 % avec une croissance
+    et une marge toutes deux COLLEES A LEURS PLAFONDS (45 % et 75 %), signe que le
+    modele etait nourri de donnees non operationnelles.
+    Discriminant mesure : un holding degage un revenu tres faible au regard de ses
+    capitaux propres (Industrivarden 0,19) la ou une vraie societe de commissions
+    exploite ses fonds propres (BlackRock 0,43, S&P Global 0,49, ICE 0,44)."""
+    ind = (fund.get("industry") or "").lower()
+    if not any(k in ind for k in ("asset management", "conglomerate", "shell",
+                                  "holding", "closed-end")):
+        return False
+    rev, be = fund.get("revenue"), fund.get("book_equity")
+    return bool(rev is not None and be and be > 0 and (rev / be) < 0.30)
 
 
 def _roe_normalise(fund, F):
@@ -122,6 +158,8 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
         return "fonciere"                      # REIT : FFO/NAV, jamais le FCFF
     if "utilities" in sec:
         return "reglementee"                   # service public : cote equite
+    if _est_holding(fund):
+        return "holding"                       # portefeuille : actif net reevalue
     if "financial" in sec:
         return "financiere" if _financiere_de_bilan(fund) else "standard"
     if any(s in sec for s in ("energy", "materials")):
@@ -231,6 +269,70 @@ def value_regulated(fund, F=None):
             "resultat_normalise": round(ni, 3)}
 
 
+def value_holding(fund, F=None):
+    """Societe de portefeuille — ACTIF NET REEVALUE (somme des parties, Damodaran).
+
+    Une holding ne s'actualise pas : elle detient des participations. Sa valeur est
+    l'actif net, et l'ecart avec la capitalisation est la DECOTE DE HOLDING, qui est
+    l'information utile pour l'investisseur.
+
+    Fiabilite de l'actif net — le point cle. Les capitaux propres ne valent comme
+    actif net que si les participations sont inscrites a la JUSTE VALEUR (IFRS 9,
+    cas des holdings cotees europeennes). En cout historique, ils la sous-estiment.
+    On ne peut pas le supposer : on le VERIFIE sur les donnees.
+      1. Identite comptable : actif total - passif total doit redonner les capitaux
+         propres. Sinon le bilan est inexploitable.
+      2. Base d'evaluation : sous juste valeur, les capitaux propres suivent les
+         marches et varient fortement d'un exercice a l'autre ; en cout historique,
+         ils progressent regulierement. On mesure cette volatilite pour qualifier la
+         confiance au lieu de l'affirmer.
+      3. Plausibilite : une holding se traite typiquement entre 0,5 et 1,2 fois son
+         actif net. Au-dela, les capitaux propres ne sont pas un actif net credible
+         et on le signale plutot que d'afficher une fausse precision."""
+    be = fund.get("book_equity")
+    if not be or be <= 0:
+        return None
+
+    diag, confiance = {}, "moyenne"
+
+    # 1. Identite comptable actif - passif = capitaux propres
+    ta = (F or {}).get("total_assets", [None])[0]
+    tl = (F or {}).get("total_liab", [None])[0]
+    if ta and tl:
+        ecart = abs((ta - tl) / 1e9 - be) / max(ta / 1e9, 1e-9)
+        diag["identite_bilan_ok"] = bool(ecart < 0.05)
+        if ecart >= 0.05:
+            confiance = "faible"
+
+    # 2. Base d'evaluation deduite de la volatilite des capitaux propres
+    eqs = [e for e in (F or {}).get("equity", []) if e]
+    if len(eqs) >= 3:
+        var = [abs(eqs[i] / eqs[i + 1] - 1.0) for i in range(len(eqs) - 1)
+               if eqs[i + 1]]
+        if var:
+            v = float(np.median(var))
+            diag["variation_annuelle_capitaux_propres"] = round(v, 4)
+            # Sous juste valeur les capitaux propres suivent les marches (>8 %/an) ;
+            # une progression tres reguliere trahit un cout historique, qui
+            # SOUS-ESTIME l'actif net -> valeur plancher, confiance reduite.
+            diag["base_juste_valeur"] = bool(v >= 0.08)
+            if v < 0.08:
+                confiance = "faible"
+
+    # 3. Plausibilite : decote/prime de holding hors norme -> actif net douteux
+    mcap = fund.get("market_cap")
+    if mcap and mcap > 0:
+        ratio = mcap / be
+        diag["cours_sur_actif_net"] = round(ratio, 3)
+        diag["decote_nav_pct"] = round((ratio - 1.0) * 100, 1)
+        if not (0.35 <= ratio <= 1.6):
+            confiance = "faible"
+
+    return {"equity_value": be, "confidence": confiance,
+            "method": "Actif net reevalue (societe de portefeuille)",
+            "actif_net": round(be, 2), **diag}
+
+
 def value_reit(fund):
     """Foncières (REIT) — méthode Damodaran : le FCFF est inapplicable car les
     amortissements immobiliers, purement comptables, écrasent l'EBIT et rendent la
@@ -247,6 +349,16 @@ def value_reit(fund):
     if ebit is not None and ebit <= 0:
         return None
     ffo = ni + da
+    # FFO = resultat net + amortissements est une formule US GAAP, ou l'immobilier
+    # est AMORTI. Sous IFRS il est inscrit a la JUSTE VALEUR : il n'est pas amorti
+    # (amortissements quasi nuls) et le resultat net contient des PLUS-VALUES DE
+    # REEVALUATION, non monetaires. Le FFO ainsi calcule surestime alors largement
+    # la generation de tresorerie recurrente — Fibra UNO affichait 1,41 Md$ de FFO
+    # pour 0,26 Md$ de flux d'exploitation reel. On borne donc le FFO par le flux
+    # d'exploitation, qui est immunise contre les reevaluations comptables.
+    cfo = fund.get("cfo")
+    if cfo is not None and cfo > 0:
+        ffo = min(ffo, cfo)
     if ffo <= 0:
         return None
     ke, rf = _coe(fund)
@@ -342,6 +454,8 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
     try:
         if cat == "actif_net":
             r = value_assetbased(fund)
+        elif cat == "holding":
+            r = value_holding(fund, F)
         elif cat == "fonciere":
             r = value_reit(fund)
         elif cat == "reglementee":
@@ -372,7 +486,7 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
     # ne doit surtout pas y ramener un DCF, sinon on annule la correction meme —
     # Centrica (service public en perte) tombait dans le repli DCF et ressortait a
     # +1 043 %. Pour eux, l'actif net est le seul repli legitime.
-    if cat in ("fonciere", "reglementee", "financiere") and (
+    if cat in ("fonciere", "reglementee", "financiere", "holding") and (
             not r or r.get("equity_value") is None):
         r = value_assetbased(fund)
         if r:

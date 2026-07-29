@@ -34,8 +34,16 @@ _PREF_NAME = re.compile(
 _PREF_TICKER = re.compile(r"-P[A-Z]{1,2}(\.(TO|V))?$")
 
 
+# Un nom d'emetteur se terminant par un COUPON nu ("Prudential Financial, Inc.
+# 5.62", "KKR Group Finance Co. IX LLC 4.") designe une obligation cotee : FMP
+# tronque le libelle et le signe "%" disparait, si bien que le motif de coupon
+# habituel ne s'applique plus.
+_COUPON_FIN = re.compile(r"\s\d{1,2}\.\d*\s*$")
+
+
 def _is_preferred(symbol, name):
-    return bool(_PREF_TICKER.search(symbol) or (name and _PREF_NAME.search(name)))
+    return bool(_PREF_TICKER.search(symbol)
+                or (name and (_PREF_NAME.search(name) or _COUPON_FIN.search(name))))
 
 
 def _sane_beta(b, sector=None):
