@@ -324,9 +324,25 @@ def financials_from_fmp(entry):
     def col(src, field):
         return [_num(src.get(y, {}).get(field)) for y in yrs]
 
+    def col_ebit():
+        """Serie d'EBIT ECONOMIQUES : le resultat operationnel publie, borne par
+        resultat avant impot + charges d'interets. Sans cela l'historique des marges
+        (marge normalisee, cyclique) restait fonde sur un resultat operationnel qui
+        exclut des charges recurrentes majeures — l'incoherence se propageait."""
+        out = []
+        for y in yrs:
+            r = inc.get(y, {})
+            e = _num(r.get("operatingIncome"))
+            pt, it = _num(r.get("incomeBeforeTax")), _num(r.get("interestExpense"))
+            if e is not None and pt is not None:
+                eco = pt + (abs(it) if it else 0.0)
+                e = min(e, eco)
+            out.append(e)
+        return out
+
     F = {"years": [str(y) for y in yrs],
          "revenue": col(inc, "revenue"), "cogs": col(inc, "costOfRevenue"),
-         "gross_profit": col(inc, "grossProfit"), "ebit": col(inc, "operatingIncome"),
+         "gross_profit": col(inc, "grossProfit"), "ebit": col_ebit(),
          "sga": col(inc, "sellingGeneralAndAdministrativeExpenses"),
          "net_income": col(inc, "netIncome"), "shares": col(inc, "weightedAverageShsOutDil"),
          "total_assets": col(bal, "totalAssets"), "current_assets": col(bal, "totalCurrentAssets"),
@@ -368,6 +384,20 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
     B = 1e9
     g = lambda src, f: _num(src.get(y, {}).get(f))
     rev, ebit, ni = g(inc, "revenue"), g(inc, "operatingIncome"), g(inc, "netIncome")
+    # EBIT ECONOMIQUE. Le resultat operationnel publie peut EXCLURE des charges
+    # recurrentes majeures reclassees en "autres produits et charges" : chez Yiren
+    # Digital, preteur chinois, cette ligne vaut -2,2 Md CNY et efface la TOTALITE
+    # d'un resultat operationnel de 2,1 Md — les provisions pour creances douteuses,
+    # qui sont le coeur du metier. Le DCF projetait une marge de 38,5 % a l'infini
+    # sur une societe en PERTE avant impot, d'ou +4 700 % d'upside.
+    # Identite : resultat avant impot + charges d'interets = EBIT economique. On
+    # retient le plus PRUDENT des deux, ce qui ne change rien a une societe dont le
+    # compte de resultat est ordinaire.
+    pretax, interets = g(inc, "incomeBeforeTax"), g(inc, "interestExpense")
+    if ebit is not None and pretax is not None:
+        ebit_eco = pretax + (abs(interets) if interets else 0.0)
+        if ebit_eco < ebit:
+            ebit = ebit_eco
     eq, debt = g(bal, "totalStockholdersEquity"), g(bal, "totalDebt")
     # Capitaux propres revenant a l'ACTIONNAIRE ORDINAIRE : on retranche les
     # actions privilegiees (creance prioritaire) et les interets minoritaires
