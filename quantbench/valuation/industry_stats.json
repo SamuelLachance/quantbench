@@ -1,0 +1,1486 @@
+{
+ "industries": {
+  "Advertising Agencies": {
+   "n": 21,
+   "beta_desendette": 0.6163,
+   "marge": 0.0547,
+   "s2c": 1.0316,
+   "roic": 0.0669,
+   "dette_sur_capitalisation": 0.2202,
+   "corporel": 0.0503,
+   "recuperation": 0.325
+  },
+  "Aerospace & Defense": {
+   "n": 19,
+   "beta_desendette": 0.9953,
+   "marge": 0.105,
+   "s2c": 1.1408,
+   "roic": 0.1323,
+   "dette_sur_capitalisation": 0.0941,
+   "corporel": 0.1112,
+   "recuperation": 0.356
+  },
+  "Agricultural - Machinery": {
+   "n": 10,
+   "beta_desendette": 0.6815,
+   "marge": 0.1054,
+   "s2c": 1.4257,
+   "roic": 0.0815,
+   "dette_sur_capitalisation": 0.5028,
+   "corporel": 0.2084,
+   "recuperation": 0.404
+  },
+  "Agricultural Farm Products": {
+   "n": 20,
+   "beta_desendette": 0.345,
+   "marge": 0.0265,
+   "s2c": 1.7603,
+   "roic": 0.0408,
+   "dette_sur_capitalisation": 0.3355,
+   "corporel": 0.4388,
+   "recuperation": 0.519
+  },
+  "Agricultural Inputs": {
+   "n": 18,
+   "beta_desendette": 0.541,
+   "marge": 0.1017,
+   "s2c": 0.7755,
+   "roic": 0.0733,
+   "dette_sur_capitalisation": 0.3824,
+   "corporel": 0.4349,
+   "recuperation": 0.517
+  },
+  "Airlines, Airports & Air Services": {
+   "n": 22,
+   "beta_desendette": 0.6961,
+   "marge": 0.1127,
+   "s2c": 0.9423,
+   "roic": 0.0936,
+   "dette_sur_capitalisation": 0.5311,
+   "corporel": 0.662,
+   "recuperation": 0.631
+  },
+  "Apparel - Footwear & Accessories": {
+   "n": 15,
+   "beta_desendette": 1.0364,
+   "marge": 0.0772,
+   "s2c": 2.0107,
+   "roic": 0.0781,
+   "dette_sur_capitalisation": 0.3417,
+   "corporel": 0.1837,
+   "recuperation": 0.392
+  },
+  "Apparel - Manufacturers": {
+   "n": 22,
+   "beta_desendette": 0.9704,
+   "marge": 0.0603,
+   "s2c": 1.5948,
+   "roic": 0.0664,
+   "dette_sur_capitalisation": 0.5009,
+   "corporel": 0.2329,
+   "recuperation": 0.416
+  },
+  "Apparel - Retail": {
+   "n": 22,
+   "beta_desendette": 0.9128,
+   "marge": 0.0592,
+   "s2c": 2.2513,
+   "roic": 0.0913,
+   "dette_sur_capitalisation": 0.3981,
+   "corporel": 0.4712,
+   "recuperation": 0.536
+  },
+  "Asset Management": {
+   "n": 22,
+   "beta_desendette": 1.0753,
+   "marge": 0.2671,
+   "s2c": 0.4201,
+   "roic": 0.0858,
+   "dette_sur_capitalisation": 0.3113,
+   "corporel": 0.007,
+   "recuperation": 0.303
+  },
+  "Asset Management - Cryptocurrency": {
+   "n": 6,
+   "beta_desendette": 0.8812,
+   "marge": null,
+   "s2c": null,
+   "roic": null,
+   "dette_sur_capitalisation": 0.0602,
+   "corporel": 0.1715,
+   "recuperation": 0.386
+  },
+  "Auto - Dealerships": {
+   "n": 22,
+   "beta_desendette": 0.5183,
+   "marge": 0.0357,
+   "s2c": 2.0224,
+   "roic": 0.0544,
+   "dette_sur_capitalisation": 1.0908,
+   "corporel": 0.2209,
+   "recuperation": 0.41
+  },
+  "Auto - Manufacturers": {
+   "n": 22,
+   "beta_desendette": 0.6288,
+   "marge": 0.0082,
+   "s2c": 1.2814,
+   "roic": 0.0078,
+   "dette_sur_capitalisation": 0.53,
+   "corporel": 0.2613,
+   "recuperation": 0.431
+  },
+  "Auto - Parts": {
+   "n": 21,
+   "beta_desendette": 0.869,
+   "marge": 0.0781,
+   "s2c": 1.5494,
+   "roic": 0.0892,
+   "dette_sur_capitalisation": 0.336,
+   "corporel": 0.2528,
+   "recuperation": 0.426
+  },
+  "Auto - Recreational Vehicles": {
+   "n": 13,
+   "beta_desendette": 0.8607,
+   "marge": 0.0276,
+   "s2c": 1.7366,
+   "roic": 0.0512,
+   "dette_sur_capitalisation": 0.4246,
+   "corporel": 0.2207,
+   "recuperation": 0.41
+  },
+  "Banks - Diversified": {
+   "n": 21,
+   "beta_desendette": 0.3701,
+   "marge": 0.1867,
+   "s2c": 0.2903,
+   "roic": 0.0296,
+   "dette_sur_capitalisation": 2.0869,
+   "corporel": 0.006,
+   "recuperation": 0.303
+  },
+  "Banks - Regional": {
+   "n": 22,
+   "beta_desendette": 0.4111,
+   "marge": 0.2071,
+   "s2c": 0.4194,
+   "roic": 0.0757,
+   "dette_sur_capitalisation": 0.5598,
+   "corporel": 0.0145,
+   "recuperation": 0.307
+  },
+  "Beverages - Alcoholic": {
+   "n": 12,
+   "beta_desendette": 0.258,
+   "marge": 0.0734,
+   "s2c": 0.7114,
+   "roic": 0.0719,
+   "dette_sur_capitalisation": 0.5813,
+   "corporel": 0.2097,
+   "recuperation": 0.405
+  },
+  "Beverages - Non-Alcoholic": {
+   "n": 19,
+   "beta_desendette": 0.462,
+   "marge": 0.1326,
+   "s2c": 1.5271,
+   "roic": 0.1416,
+   "dette_sur_capitalisation": 0.1804,
+   "corporel": 0.1441,
+   "recuperation": 0.372
+  },
+  "Beverages - Wineries & Distilleries": {
+   "n": 11,
+   "beta_desendette": 0.4369,
+   "marge": 0.0566,
+   "s2c": 0.8855,
+   "roic": 0.0387,
+   "dette_sur_capitalisation": 0.3891,
+   "corporel": 0.1414,
+   "recuperation": 0.371
+  },
+  "Biotechnology": {
+   "n": 21,
+   "beta_desendette": 0.5054,
+   "marge": 0.1656,
+   "s2c": 0.8297,
+   "roic": 0.1655,
+   "dette_sur_capitalisation": 0.0316,
+   "corporel": 0.109,
+   "recuperation": 0.354
+  },
+  "Broadcasting": {
+   "n": 21,
+   "beta_desendette": 0.4518,
+   "marge": 0.0563,
+   "s2c": 0.8237,
+   "roic": 0.0394,
+   "dette_sur_capitalisation": 0.6908,
+   "corporel": 0.1614,
+   "recuperation": 0.381
+  },
+  "Chemicals": {
+   "n": 20,
+   "beta_desendette": 0.5139,
+   "marge": 0.0116,
+   "s2c": 1.247,
+   "roic": 0.0008,
+   "dette_sur_capitalisation": 0.7219,
+   "corporel": 0.5477,
+   "recuperation": 0.574
+  },
+  "Chemicals - Specialty": {
+   "n": 22,
+   "beta_desendette": 0.7302,
+   "marge": 0.1354,
+   "s2c": 0.881,
+   "roic": 0.0945,
+   "dette_sur_capitalisation": 0.2533,
+   "corporel": 0.3382,
+   "recuperation": 0.469
+  },
+  "Coal": {
+   "n": 10,
+   "beta_desendette": 0.3376,
+   "marge": 0.0002,
+   "s2c": 1.0479,
+   "roic": 0.0001,
+   "dette_sur_capitalisation": 0.09,
+   "corporel": 0.5459,
+   "recuperation": 0.573
+  },
+  "Communication Equipment": {
+   "n": 21,
+   "beta_desendette": 1.1159,
+   "marge": 0.0653,
+   "s2c": 0.9971,
+   "roic": 0.0661,
+   "dette_sur_capitalisation": 0.0724,
+   "corporel": 0.072,
+   "recuperation": 0.336
+  },
+  "Computer Hardware": {
+   "n": 19,
+   "beta_desendette": 1.3713,
+   "marge": 0.0744,
+   "s2c": 2.3676,
+   "roic": 0.0302,
+   "dette_sur_capitalisation": 0.0248,
+   "corporel": 0.0711,
+   "recuperation": 0.336
+  },
+  "Conglomerates": {
+   "n": 19,
+   "beta_desendette": 0.5148,
+   "marge": 0.1273,
+   "s2c": 1.027,
+   "roic": 0.0556,
+   "dette_sur_capitalisation": 0.3491,
+   "corporel": 0.2415,
+   "recuperation": 0.421
+  },
+  "Construction": {
+   "n": 8,
+   "beta_desendette": 1.1252,
+   "marge": 0.1396,
+   "s2c": 1.0711,
+   "roic": 0.1582,
+   "dette_sur_capitalisation": 0.1692,
+   "corporel": 0.2665,
+   "recuperation": 0.433
+  },
+  "Construction Materials": {
+   "n": 22,
+   "beta_desendette": 0.9346,
+   "marge": 0.1657,
+   "s2c": 0.9749,
+   "roic": 0.1114,
+   "dette_sur_capitalisation": 0.2259,
+   "corporel": 0.3563,
+   "recuperation": 0.478
+  },
+  "Consulting Services": {
+   "n": 21,
+   "beta_desendette": 0.7588,
+   "marge": 0.11,
+   "s2c": 1.3254,
+   "roic": 0.1529,
+   "dette_sur_capitalisation": 0.1945,
+   "corporel": 0.0803,
+   "recuperation": 0.34
+  },
+  "Consumer Electronics": {
+   "n": 17,
+   "beta_desendette": 1.2263,
+   "marge": -0.035,
+   "s2c": 2.1187,
+   "roic": 0.0108,
+   "dette_sur_capitalisation": 0.1938,
+   "corporel": 0.1074,
+   "recuperation": 0.354
+  },
+  "Copper": {
+   "n": 15,
+   "beta_desendette": 1.6788,
+   "marge": 0.2564,
+   "s2c": 0.5696,
+   "roic": 0.111,
+   "dette_sur_capitalisation": 0.1101,
+   "corporel": 0.7815,
+   "recuperation": 0.691
+  },
+  "Discount Stores": {
+   "n": 11,
+   "beta_desendette": 0.5311,
+   "marge": 0.0448,
+   "s2c": 2.6535,
+   "roic": 0.1355,
+   "dette_sur_capitalisation": 0.1763,
+   "corporel": 0.569,
+   "recuperation": 0.585
+  },
+  "Diversified Utilities": {
+   "n": 13,
+   "beta_desendette": 0.2589,
+   "marge": 0.2063,
+   "s2c": 0.3044,
+   "roic": 0.0372,
+   "dette_sur_capitalisation": 1.4257,
+   "corporel": 0.6897,
+   "recuperation": 0.645
+  },
+  "Drug Manufacturers - General": {
+   "n": 18,
+   "beta_desendette": 0.282,
+   "marge": 0.2717,
+   "s2c": 0.7642,
+   "roic": 0.1842,
+   "dette_sur_capitalisation": 0.2223,
+   "corporel": 0.1098,
+   "recuperation": 0.355
+  },
+  "Drug Manufacturers - Specialty & Generic": {
+   "n": 21,
+   "beta_desendette": 0.4707,
+   "marge": 0.1199,
+   "s2c": 0.751,
+   "roic": 0.0764,
+   "dette_sur_capitalisation": 0.255,
+   "corporel": 0.1055,
+   "recuperation": 0.353
+  },
+  "Education & Training Services": {
+   "n": 22,
+   "beta_desendette": 0.4935,
+   "marge": 0.0896,
+   "s2c": 1.253,
+   "roic": 0.1136,
+   "dette_sur_capitalisation": 0.1374,
+   "corporel": 0.218,
+   "recuperation": 0.409
+  },
+  "Electrical Equipment & Parts": {
+   "n": 21,
+   "beta_desendette": 1.1554,
+   "marge": 0.1318,
+   "s2c": 1.1966,
+   "roic": 0.1222,
+   "dette_sur_capitalisation": 0.0789,
+   "corporel": 0.1232,
+   "recuperation": 0.362
+  },
+  "Electronic Gaming & Multimedia": {
+   "n": 21,
+   "beta_desendette": 0.8936,
+   "marge": 0.0146,
+   "s2c": 1.6325,
+   "roic": 0.065,
+   "dette_sur_capitalisation": 0.0639,
+   "corporel": 0.0721,
+   "recuperation": 0.336
+  },
+  "Engineering & Construction": {
+   "n": 22,
+   "beta_desendette": 1.0668,
+   "marge": 0.0886,
+   "s2c": 2.1894,
+   "roic": 0.0921,
+   "dette_sur_capitalisation": 0.1543,
+   "corporel": 0.1077,
+   "recuperation": 0.354
+  },
+  "Entertainment": {
+   "n": 22,
+   "beta_desendette": 0.5902,
+   "marge": 0.0812,
+   "s2c": 0.8291,
+   "roic": 0.0403,
+   "dette_sur_capitalisation": 0.2601,
+   "corporel": 0.1228,
+   "recuperation": 0.361
+  },
+  "Financial - Capital Markets": {
+   "n": 22,
+   "beta_desendette": 0.5696,
+   "marge": 0.1978,
+   "s2c": 0.4366,
+   "roic": 0.051,
+   "dette_sur_capitalisation": 0.2228,
+   "corporel": 0.0159,
+   "recuperation": 0.308
+  },
+  "Financial - Credit Services": {
+   "n": 22,
+   "beta_desendette": 0.7333,
+   "marge": 0.1892,
+   "s2c": 0.5408,
+   "roic": 0.0762,
+   "dette_sur_capitalisation": 0.4331,
+   "corporel": 0.0225,
+   "recuperation": 0.311
+  },
+  "Financial - Data & Stock Exchanges": {
+   "n": 13,
+   "beta_desendette": 0.8774,
+   "marge": 0.303,
+   "s2c": 0.4614,
+   "roic": 0.1171,
+   "dette_sur_capitalisation": 0.1342,
+   "corporel": 0.0327,
+   "recuperation": 0.316
+  },
+  "Financial - Diversified": {
+   "n": 6,
+   "beta_desendette": 0.4732,
+   "marge": 0.2952,
+   "s2c": 0.9837,
+   "roic": 0.0447,
+   "dette_sur_capitalisation": 1.054,
+   "corporel": 0.0479,
+   "recuperation": 0.324
+  },
+  "Financial - Mortgages": {
+   "n": 16,
+   "beta_desendette": 0.5121,
+   "marge": 0.3501,
+   "s2c": 0.3114,
+   "roic": 0.0441,
+   "dette_sur_capitalisation": 1.5322,
+   "corporel": 0.0034,
+   "recuperation": 0.302
+  },
+  "Food Confectioners": {
+   "n": 6,
+   "beta_desendette": 0.3914,
+   "marge": 0.0888,
+   "s2c": 1.0842,
+   "roic": 0.0963,
+   "dette_sur_capitalisation": 0.2686,
+   "corporel": 0.2351,
+   "recuperation": 0.418
+  },
+  "Food Distribution": {
+   "n": 13,
+   "beta_desendette": 0.4755,
+   "marge": 0.0129,
+   "s2c": 2.9524,
+   "roic": 0.0625,
+   "dette_sur_capitalisation": 0.2545,
+   "corporel": 0.2823,
+   "recuperation": 0.441
+  },
+  "Furnishings, Fixtures & Appliances": {
+   "n": 22,
+   "beta_desendette": 0.7298,
+   "marge": 0.0598,
+   "s2c": 1.511,
+   "roic": 0.0638,
+   "dette_sur_capitalisation": 0.4416,
+   "corporel": 0.2279,
+   "recuperation": 0.414
+  },
+  "Gambling, Resorts & Casinos": {
+   "n": 22,
+   "beta_desendette": 0.522,
+   "marge": 0.1191,
+   "s2c": 0.8646,
+   "roic": 0.0913,
+   "dette_sur_capitalisation": 0.6266,
+   "corporel": 0.2851,
+   "recuperation": 0.443
+  },
+  "Gold": {
+   "n": 21,
+   "beta_desendette": 1.0897,
+   "marge": 0.4778,
+   "s2c": 0.6416,
+   "roic": 0.1997,
+   "dette_sur_capitalisation": 0.0277,
+   "corporel": 0.6679,
+   "recuperation": 0.634
+  },
+  "Grocery Stores": {
+   "n": 17,
+   "beta_desendette": 0.3086,
+   "marge": 0.0331,
+   "s2c": 2.542,
+   "roic": 0.0639,
+   "dette_sur_capitalisation": 0.4661,
+   "corporel": 0.6023,
+   "recuperation": 0.601
+  },
+  "Hardware, Equipment & Parts": {
+   "n": 22,
+   "beta_desendette": 1.2933,
+   "marge": 0.1085,
+   "s2c": 0.8496,
+   "roic": 0.0944,
+   "dette_sur_capitalisation": 0.0857,
+   "corporel": 0.1243,
+   "recuperation": 0.362
+  },
+  "Home Improvement": {
+   "n": 7,
+   "beta_desendette": 0.825,
+   "marge": 0.062,
+   "s2c": 1.8502,
+   "roic": 0.0689,
+   "dette_sur_capitalisation": 0.4439,
+   "corporel": 0.4186,
+   "recuperation": 0.509
+  },
+  "Household & Personal Products": {
+   "n": 22,
+   "beta_desendette": 0.4277,
+   "marge": 0.0736,
+   "s2c": 1.1908,
+   "roic": 0.0888,
+   "dette_sur_capitalisation": 0.2394,
+   "corporel": 0.1526,
+   "recuperation": 0.376
+  },
+  "Independent Power Producers": {
+   "n": 11,
+   "beta_desendette": 0.5046,
+   "marge": 0.0061,
+   "s2c": 0.5165,
+   "roic": 0.0018,
+   "dette_sur_capitalisation": 0.5249,
+   "corporel": 0.692,
+   "recuperation": 0.646
+  },
+  "Industrial - Distribution": {
+   "n": 22,
+   "beta_desendette": 0.8603,
+   "marge": 0.0759,
+   "s2c": 1.9476,
+   "roic": 0.1256,
+   "dette_sur_capitalisation": 0.1803,
+   "corporel": 0.163,
+   "recuperation": 0.382
+  },
+  "Industrial - Machinery": {
+   "n": 22,
+   "beta_desendette": 1.0435,
+   "marge": 0.1722,
+   "s2c": 1.0697,
+   "roic": 0.1133,
+   "dette_sur_capitalisation": 0.1077,
+   "corporel": 0.1016,
+   "recuperation": 0.351
+  },
+  "Industrial - Pollution & Treatment Controls": {
+   "n": 16,
+   "beta_desendette": 1.1868,
+   "marge": 0.0402,
+   "s2c": 1.1399,
+   "roic": 0.0489,
+   "dette_sur_capitalisation": 0.0559,
+   "corporel": 0.1299,
+   "recuperation": 0.365
+  },
+  "Industrial Materials": {
+   "n": 15,
+   "beta_desendette": 1.3292,
+   "marge": 0.1508,
+   "s2c": 0.5678,
+   "roic": 0.0433,
+   "dette_sur_capitalisation": 0.1512,
+   "corporel": 0.5443,
+   "recuperation": 0.572
+  },
+  "Information Technology Services": {
+   "n": 22,
+   "beta_desendette": 0.5563,
+   "marge": 0.1618,
+   "s2c": 1.191,
+   "roic": 0.1602,
+   "dette_sur_capitalisation": 0.1767,
+   "corporel": 0.066,
+   "recuperation": 0.333
+  },
+  "Insurance - Brokers": {
+   "n": 17,
+   "beta_desendette": 0.4955,
+   "marge": 0.1236,
+   "s2c": 0.9452,
+   "roic": 0.0783,
+   "dette_sur_capitalisation": 0.2295,
+   "corporel": 0.039,
+   "recuperation": 0.32
+  },
+  "Insurance - Diversified": {
+   "n": 22,
+   "beta_desendette": 0.5517,
+   "marge": 0.1375,
+   "s2c": 1.0871,
+   "roic": 0.1066,
+   "dette_sur_capitalisation": 0.2041,
+   "corporel": 0.0023,
+   "recuperation": 0.301
+  },
+  "Insurance - Life": {
+   "n": 22,
+   "beta_desendette": 0.618,
+   "marge": 0.1201,
+   "s2c": 1.0317,
+   "roic": 0.1066,
+   "dette_sur_capitalisation": 0.2427,
+   "corporel": 0.0029,
+   "recuperation": 0.301
+  },
+  "Insurance - Property & Casualty": {
+   "n": 22,
+   "beta_desendette": 0.3569,
+   "marge": 0.1635,
+   "s2c": 1.0805,
+   "roic": 0.1611,
+   "dette_sur_capitalisation": 0.1086,
+   "corporel": 0.0059,
+   "recuperation": 0.303
+  },
+  "Insurance - Reinsurance": {
+   "n": 7,
+   "beta_desendette": 0.3647,
+   "marge": 0.1409,
+   "s2c": 1.2976,
+   "roic": 0.1587,
+   "dette_sur_capitalisation": 0.1688,
+   "corporel": 0.0,
+   "recuperation": 0.3
+  },
+  "Insurance - Specialty": {
+   "n": 19,
+   "beta_desendette": 0.6072,
+   "marge": 0.1351,
+   "s2c": 1.0675,
+   "roic": 0.1146,
+   "dette_sur_capitalisation": 0.1201,
+   "corporel": 0.0057,
+   "recuperation": 0.303
+  },
+  "Integrated Freight & Logistics": {
+   "n": 22,
+   "beta_desendette": 0.9082,
+   "marge": 0.0435,
+   "s2c": 1.7563,
+   "roic": 0.0945,
+   "dette_sur_capitalisation": 0.2627,
+   "corporel": 0.2387,
+   "recuperation": 0.419
+  },
+  "Internet Content & Information": {
+   "n": 22,
+   "beta_desendette": 1.0527,
+   "marge": 0.0803,
+   "s2c": 0.9079,
+   "roic": 0.0639,
+   "dette_sur_capitalisation": 0.0475,
+   "corporel": 0.0576,
+   "recuperation": 0.329
+  },
+  "Investment - Banking & Investment Services": {
+   "n": 17,
+   "beta_desendette": 0.9239,
+   "marge": 0.2117,
+   "s2c": 1.286,
+   "roic": 0.1179,
+   "dette_sur_capitalisation": 0.0975,
+   "corporel": 0.0076,
+   "recuperation": 0.304
+  },
+  "Leisure": {
+   "n": 22,
+   "beta_desendette": 0.6411,
+   "marge": 0.1089,
+   "s2c": 1.3651,
+   "roic": 0.0667,
+   "dette_sur_capitalisation": 0.2722,
+   "corporel": 0.1873,
+   "recuperation": 0.394
+  },
+  "Luxury Goods": {
+   "n": 9,
+   "beta_desendette": 0.963,
+   "marge": 0.0376,
+   "s2c": 1.8732,
+   "roic": 0.0797,
+   "dette_sur_capitalisation": 0.1316,
+   "corporel": 0.1422,
+   "recuperation": 0.371
+  },
+  "Manufacturing - Metal Fabrication": {
+   "n": 18,
+   "beta_desendette": 0.8826,
+   "marge": 0.0035,
+   "s2c": 1.3208,
+   "roic": 0.01,
+   "dette_sur_capitalisation": 0.1075,
+   "corporel": 0.3061,
+   "recuperation": 0.453
+  },
+  "Manufacturing - Tools & Accessories": {
+   "n": 10,
+   "beta_desendette": 0.9926,
+   "marge": 0.1105,
+   "s2c": 1.0625,
+   "roic": 0.0836,
+   "dette_sur_capitalisation": 0.2266,
+   "corporel": 0.1838,
+   "recuperation": 0.392
+  },
+  "Marine Shipping": {
+   "n": 22,
+   "beta_desendette": 0.6901,
+   "marge": 0.2649,
+   "s2c": 0.3377,
+   "roic": 0.0839,
+   "dette_sur_capitalisation": 0.3329,
+   "corporel": 0.754,
+   "recuperation": 0.677
+  },
+  "Medical - Care Facilities": {
+   "n": 22,
+   "beta_desendette": 0.5311,
+   "marge": 0.0974,
+   "s2c": 1.196,
+   "roic": 0.1128,
+   "dette_sur_capitalisation": 0.5319,
+   "corporel": 0.2422,
+   "recuperation": 0.421
+  },
+  "Medical - Devices": {
+   "n": 22,
+   "beta_desendette": 0.7519,
+   "marge": 0.163,
+   "s2c": 0.7611,
+   "roic": 0.0923,
+   "dette_sur_capitalisation": 0.1138,
+   "corporel": 0.1428,
+   "recuperation": 0.371
+  },
+  "Medical - Diagnostics & Research": {
+   "n": 22,
+   "beta_desendette": 1.1423,
+   "marge": 0.1443,
+   "s2c": 0.8073,
+   "roic": 0.0857,
+   "dette_sur_capitalisation": 0.111,
+   "corporel": 0.1491,
+   "recuperation": 0.375
+  },
+  "Medical - Distribution": {
+   "n": 12,
+   "beta_desendette": 0.2596,
+   "marge": 0.0108,
+   "s2c": 1.9009,
+   "roic": 0.0868,
+   "dette_sur_capitalisation": 0.4011,
+   "corporel": 0.0508,
+   "recuperation": 0.325
+  },
+  "Medical - Equipment & Services": {
+   "n": 7,
+   "beta_desendette": 0.8878,
+   "marge": 0.0304,
+   "s2c": 0.9264,
+   "roic": 0.0446,
+   "dette_sur_capitalisation": 0.1116,
+   "corporel": 0.081,
+   "recuperation": 0.34
+  },
+  "Medical - Healthcare Information Services": {
+   "n": 22,
+   "beta_desendette": 1.1104,
+   "marge": 0.0467,
+   "s2c": 1.1259,
+   "roic": 0.041,
+   "dette_sur_capitalisation": 0.0458,
+   "corporel": 0.0427,
+   "recuperation": 0.321
+  },
+  "Medical - Healthcare Plans": {
+   "n": 11,
+   "beta_desendette": 0.5717,
+   "marge": 0.0142,
+   "s2c": 4.1977,
+   "roic": 0.0979,
+   "dette_sur_capitalisation": 0.2939,
+   "corporel": 0.0325,
+   "recuperation": 0.316
+  },
+  "Medical - Instruments & Supplies": {
+   "n": 22,
+   "beta_desendette": 0.6002,
+   "marge": 0.083,
+   "s2c": 0.6951,
+   "roic": 0.0494,
+   "dette_sur_capitalisation": 0.2565,
+   "corporel": 0.1253,
+   "recuperation": 0.363
+  },
+  "Medical - Pharmaceuticals": {
+   "n": 16,
+   "beta_desendette": 0.6235,
+   "marge": 0.0424,
+   "s2c": 1.5905,
+   "roic": 0.0663,
+   "dette_sur_capitalisation": 0.2777,
+   "corporel": 0.0279,
+   "recuperation": 0.314
+  },
+  "Medical - Specialties": {
+   "n": 11,
+   "beta_desendette": 0.6212,
+   "marge": -0.1877,
+   "s2c": 0.4398,
+   "roic": null,
+   "dette_sur_capitalisation": 0.1548,
+   "corporel": 0.0761,
+   "recuperation": 0.338
+  },
+  "Oil & Gas Drilling": {
+   "n": 16,
+   "beta_desendette": 0.8395,
+   "marge": 0.0565,
+   "s2c": 0.7552,
+   "roic": 0.0425,
+   "dette_sur_capitalisation": 0.5206,
+   "corporel": 0.7373,
+   "recuperation": 0.669
+  },
+  "Oil & Gas Equipment & Services": {
+   "n": 22,
+   "beta_desendette": 0.6567,
+   "marge": 0.1405,
+   "s2c": 1.1745,
+   "roic": 0.1191,
+   "dette_sur_capitalisation": 0.1766,
+   "corporel": 0.3151,
+   "recuperation": 0.458
+  },
+  "Oil & Gas Exploration & Production": {
+   "n": 22,
+   "beta_desendette": 0.3793,
+   "marge": 0.2404,
+   "s2c": 0.4821,
+   "roic": 0.0845,
+   "dette_sur_capitalisation": 0.2277,
+   "corporel": 0.832,
+   "recuperation": 0.716
+  },
+  "Oil & Gas Integrated": {
+   "n": 20,
+   "beta_desendette": 0.5079,
+   "marge": 0.1048,
+   "s2c": 0.9789,
+   "roic": 0.0982,
+   "dette_sur_capitalisation": 0.3299,
+   "corporel": 0.7558,
+   "recuperation": 0.678
+  },
+  "Oil & Gas Midstream": {
+   "n": 22,
+   "beta_desendette": 0.479,
+   "marge": 0.3219,
+   "s2c": 0.3126,
+   "roic": 0.0762,
+   "dette_sur_capitalisation": 0.4688,
+   "corporel": 0.7988,
+   "recuperation": 0.699
+  },
+  "Oil & Gas Refining & Marketing": {
+   "n": 20,
+   "beta_desendette": 0.5019,
+   "marge": 0.0345,
+   "s2c": 2.8321,
+   "roic": 0.0934,
+   "dette_sur_capitalisation": 0.4538,
+   "corporel": 0.4915,
+   "recuperation": 0.546
+  },
+  "Other Precious Metals": {
+   "n": 13,
+   "beta_desendette": 1.1094,
+   "marge": 0.3299,
+   "s2c": 0.5291,
+   "roic": 0.092,
+   "dette_sur_capitalisation": 0.0288,
+   "corporel": 0.6461,
+   "recuperation": 0.623
+  },
+  "Packaged Foods": {
+   "n": 22,
+   "beta_desendette": 0.3256,
+   "marge": 0.0839,
+   "s2c": 1.1601,
+   "roic": 0.082,
+   "dette_sur_capitalisation": 0.4605,
+   "corporel": 0.2811,
+   "recuperation": 0.441
+  },
+  "Packaging & Containers": {
+   "n": 22,
+   "beta_desendette": 0.5184,
+   "marge": 0.0929,
+   "s2c": 1.101,
+   "roic": 0.0895,
+   "dette_sur_capitalisation": 0.4324,
+   "corporel": 0.368,
+   "recuperation": 0.484
+  },
+  "Paper, Lumber & Forest Products": {
+   "n": 22,
+   "beta_desendette": 0.6277,
+   "marge": -0.0062,
+   "s2c": 1.3114,
+   "roic": 0.0077,
+   "dette_sur_capitalisation": 0.4337,
+   "corporel": 0.4752,
+   "recuperation": 0.538
+  },
+  "Personal Products & Services": {
+   "n": 12,
+   "beta_desendette": 0.5042,
+   "marge": 0.0987,
+   "s2c": 0.6595,
+   "roic": 0.0508,
+   "dette_sur_capitalisation": 0.657,
+   "corporel": 0.1061,
+   "recuperation": 0.353
+  },
+  "Publishing": {
+   "n": 15,
+   "beta_desendette": 0.6885,
+   "marge": 0.1131,
+   "s2c": 1.2003,
+   "roic": 0.0889,
+   "dette_sur_capitalisation": 0.2687,
+   "corporel": 0.1367,
+   "recuperation": 0.368
+  },
+  "REIT - Diversified": {
+   "n": 19,
+   "beta_desendette": 0.4661,
+   "marge": 0.2212,
+   "s2c": 0.1356,
+   "roic": 0.0322,
+   "dette_sur_capitalisation": 1.2761,
+   "corporel": 0.0002,
+   "recuperation": 0.3
+  },
+  "REIT - Healthcare Facilities": {
+   "n": 16,
+   "beta_desendette": 0.5053,
+   "marge": 0.1673,
+   "s2c": 0.1622,
+   "roic": 0.0266,
+   "dette_sur_capitalisation": 0.4321,
+   "corporel": 0.0043,
+   "recuperation": 0.302
+  },
+  "REIT - Hotel & Motel": {
+   "n": 10,
+   "beta_desendette": 0.7362,
+   "marge": 0.0941,
+   "s2c": 0.4408,
+   "roic": 0.0318,
+   "dette_sur_capitalisation": 0.4752,
+   "corporel": 0.0159,
+   "recuperation": 0.308
+  },
+  "REIT - Industrial": {
+   "n": 16,
+   "beta_desendette": 0.84,
+   "marge": 0.389,
+   "s2c": 0.1375,
+   "roic": 0.0343,
+   "dette_sur_capitalisation": 0.3316,
+   "corporel": 0.004,
+   "recuperation": 0.302
+  },
+  "REIT - Mortgage": {
+   "n": 21,
+   "beta_desendette": 0.1656,
+   "marge": 0.6701,
+   "s2c": null,
+   "roic": 0.0393,
+   "dette_sur_capitalisation": null,
+   "corporel": 0.0,
+   "recuperation": 0.3
+  },
+  "REIT - Office": {
+   "n": 15,
+   "beta_desendette": 0.5606,
+   "marge": 0.2244,
+   "s2c": 0.1358,
+   "roic": 0.0211,
+   "dette_sur_capitalisation": 1.3973,
+   "corporel": 0.0107,
+   "recuperation": 0.305
+  },
+  "REIT - Residential": {
+   "n": 17,
+   "beta_desendette": 0.584,
+   "marge": 0.1987,
+   "s2c": 0.1612,
+   "roic": 0.0296,
+   "dette_sur_capitalisation": 0.4756,
+   "corporel": 0.0003,
+   "recuperation": 0.3
+  },
+  "REIT - Retail": {
+   "n": 22,
+   "beta_desendette": 0.6204,
+   "marge": 0.3058,
+   "s2c": 0.1571,
+   "roic": 0.0336,
+   "dette_sur_capitalisation": 0.4929,
+   "corporel": 0.0016,
+   "recuperation": 0.301
+  },
+  "REIT - Specialty": {
+   "n": 15,
+   "beta_desendette": 0.6773,
+   "marge": 0.2078,
+   "s2c": 0.2446,
+   "roic": 0.0554,
+   "dette_sur_capitalisation": 0.5274,
+   "corporel": 0.3727,
+   "recuperation": 0.486
+  },
+  "Railroads": {
+   "n": 14,
+   "beta_desendette": 0.945,
+   "marge": 0.3208,
+   "s2c": 0.4426,
+   "roic": 0.0902,
+   "dette_sur_capitalisation": 0.2011,
+   "corporel": 0.6744,
+   "recuperation": 0.637
+  },
+  "Real Estate - Development": {
+   "n": 22,
+   "beta_desendette": 0.554,
+   "marge": 0.1585,
+   "s2c": 0.4981,
+   "roic": 0.0273,
+   "dette_sur_capitalisation": 0.5044,
+   "corporel": 0.0123,
+   "recuperation": 0.306
+  },
+  "Real Estate - Services": {
+   "n": 22,
+   "beta_desendette": 0.869,
+   "marge": 0.0448,
+   "s2c": 1.8957,
+   "roic": 0.0597,
+   "dette_sur_capitalisation": 0.2103,
+   "corporel": 0.1016,
+   "recuperation": 0.351
+  },
+  "Regulated Electric": {
+   "n": 22,
+   "beta_desendette": 0.2928,
+   "marge": 0.2441,
+   "s2c": 0.2725,
+   "roic": 0.0506,
+   "dette_sur_capitalisation": 0.6756,
+   "corporel": 0.7391,
+   "recuperation": 0.67
+  },
+  "Regulated Gas": {
+   "n": 21,
+   "beta_desendette": 0.4021,
+   "marge": 0.2025,
+   "s2c": 0.3306,
+   "roic": 0.056,
+   "dette_sur_capitalisation": 0.7172,
+   "corporel": 0.7575,
+   "recuperation": 0.679
+  },
+  "Regulated Water": {
+   "n": 13,
+   "beta_desendette": 0.4527,
+   "marge": 0.3015,
+   "s2c": 0.2289,
+   "roic": 0.0475,
+   "dette_sur_capitalisation": 0.4566,
+   "corporel": 0.7183,
+   "recuperation": 0.659
+  },
+  "Renewable Utilities": {
+   "n": 19,
+   "beta_desendette": 0.3143,
+   "marge": 0.225,
+   "s2c": 0.1881,
+   "roic": 0.0486,
+   "dette_sur_capitalisation": 0.7944,
+   "corporel": 0.7316,
+   "recuperation": 0.666
+  },
+  "Rental & Leasing Services": {
+   "n": 19,
+   "beta_desendette": 0.6632,
+   "marge": 0.1571,
+   "s2c": 0.5096,
+   "roic": 0.0548,
+   "dette_sur_capitalisation": 0.791,
+   "corporel": 0.2575,
+   "recuperation": 0.429
+  },
+  "Residential Construction": {
+   "n": 21,
+   "beta_desendette": 1.1245,
+   "marge": 0.0945,
+   "s2c": 1.2575,
+   "roic": 0.1173,
+   "dette_sur_capitalisation": 0.2732,
+   "corporel": 0.0273,
+   "recuperation": 0.314
+  },
+  "Restaurants": {
+   "n": 22,
+   "beta_desendette": 0.7701,
+   "marge": 0.1121,
+   "s2c": 1.2896,
+   "roic": 0.0938,
+   "dette_sur_capitalisation": 0.2381,
+   "corporel": 0.5779,
+   "recuperation": 0.589
+  },
+  "Security & Protection Services": {
+   "n": 21,
+   "beta_desendette": 0.6747,
+   "marge": 0.0699,
+   "s2c": 1.4524,
+   "roic": 0.0926,
+   "dette_sur_capitalisation": 0.1031,
+   "corporel": 0.1331,
+   "recuperation": 0.367
+  },
+  "Semiconductors": {
+   "n": 20,
+   "beta_desendette": 1.5324,
+   "marge": 0.2744,
+   "s2c": 0.8884,
+   "roic": 0.1559,
+   "dette_sur_capitalisation": 0.0227,
+   "corporel": 0.1274,
+   "recuperation": 0.364
+  },
+  "Silver": {
+   "n": 13,
+   "beta_desendette": 2.0488,
+   "marge": 0.2806,
+   "s2c": 0.5616,
+   "roic": 0.1226,
+   "dette_sur_capitalisation": 0.0471,
+   "corporel": 0.5681,
+   "recuperation": 0.584
+  },
+  "Software - Application": {
+   "n": 22,
+   "beta_desendette": 1.0782,
+   "marge": 0.1858,
+   "s2c": 0.9722,
+   "roic": 0.1169,
+   "dette_sur_capitalisation": 0.0464,
+   "corporel": 0.0396,
+   "recuperation": 0.32
+  },
+  "Software - Infrastructure": {
+   "n": 22,
+   "beta_desendette": 1.1648,
+   "marge": 0.1297,
+   "s2c": 0.7227,
+   "roic": 0.0597,
+   "dette_sur_capitalisation": 0.0381,
+   "corporel": 0.0522,
+   "recuperation": 0.326
+  },
+  "Software - Services": {
+   "n": 13,
+   "beta_desendette": 1.3398,
+   "marge": -0.0556,
+   "s2c": 1.5233,
+   "roic": 0.2055,
+   "dette_sur_capitalisation": 0.0256,
+   "corporel": 0.0217,
+   "recuperation": 0.311
+  },
+  "Solar": {
+   "n": 21,
+   "beta_desendette": 1.1233,
+   "marge": -0.0415,
+   "s2c": 1.2693,
+   "roic": 0.0188,
+   "dette_sur_capitalisation": 0.16,
+   "corporel": 0.1099,
+   "recuperation": 0.355
+  },
+  "Specialty Business Services": {
+   "n": 22,
+   "beta_desendette": 0.6455,
+   "marge": 0.122,
+   "s2c": 0.8859,
+   "roic": 0.0802,
+   "dette_sur_capitalisation": 0.2562,
+   "corporel": 0.128,
+   "recuperation": 0.364
+  },
+  "Specialty Retail": {
+   "n": 22,
+   "beta_desendette": 0.8478,
+   "marge": 0.0836,
+   "s2c": 2.0991,
+   "roic": 0.1392,
+   "dette_sur_capitalisation": 0.1709,
+   "corporel": 0.468,
+   "recuperation": 0.534
+  },
+  "Staffing & Employment Services": {
+   "n": 22,
+   "beta_desendette": 0.7719,
+   "marge": 0.0251,
+   "s2c": 2.5184,
+   "roic": 0.0757,
+   "dette_sur_capitalisation": 0.1214,
+   "corporel": 0.0575,
+   "recuperation": 0.329
+  },
+  "Steel": {
+   "n": 22,
+   "beta_desendette": 0.8572,
+   "marge": 0.0629,
+   "s2c": 1.2744,
+   "roic": 0.0602,
+   "dette_sur_capitalisation": 0.2757,
+   "corporel": 0.489,
+   "recuperation": 0.544
+  },
+  "Technology Distributors": {
+   "n": 9,
+   "beta_desendette": 1.0795,
+   "marge": 0.028,
+   "s2c": 3.2951,
+   "roic": 0.0759,
+   "dette_sur_capitalisation": 0.1084,
+   "corporel": 0.0175,
+   "recuperation": 0.309
+  },
+  "Telecommunications Services": {
+   "n": 22,
+   "beta_desendette": 0.3108,
+   "marge": 0.2123,
+   "s2c": 0.4832,
+   "roic": 0.0729,
+   "dette_sur_capitalisation": 1.1633,
+   "corporel": 0.4057,
+   "recuperation": 0.503
+  },
+  "Tobacco": {
+   "n": 10,
+   "beta_desendette": 0.3963,
+   "marge": 0.2069,
+   "s2c": 0.8146,
+   "roic": 0.1109,
+   "dette_sur_capitalisation": 0.2754,
+   "corporel": 0.0723,
+   "recuperation": 0.336
+  },
+  "Travel Lodging": {
+   "n": 14,
+   "beta_desendette": 0.6315,
+   "marge": 0.1909,
+   "s2c": 0.7466,
+   "roic": 0.0927,
+   "dette_sur_capitalisation": 0.4048,
+   "corporel": 0.0794,
+   "recuperation": 0.34
+  },
+  "Travel Services": {
+   "n": 19,
+   "beta_desendette": 0.8512,
+   "marge": 0.1468,
+   "s2c": 1.1186,
+   "roic": 0.087,
+   "dette_sur_capitalisation": 0.2598,
+   "corporel": 0.1122,
+   "recuperation": 0.356
+  },
+  "Trucking": {
+   "n": 18,
+   "beta_desendette": 1.101,
+   "marge": 0.0298,
+   "s2c": 1.2863,
+   "roic": 0.032,
+   "dette_sur_capitalisation": 0.2425,
+   "corporel": 0.557,
+   "recuperation": 0.579
+  },
+  "Uranium": {
+   "n": 10,
+   "beta_desendette": 1.01,
+   "marge": 0.1119,
+   "s2c": 0.5112,
+   "roic": -0.0125,
+   "dette_sur_capitalisation": 0.1627,
+   "corporel": 0.3071,
+   "recuperation": 0.454
+  },
+  "Waste Management": {
+   "n": 19,
+   "beta_desendette": 0.4666,
+   "marge": 0.0604,
+   "s2c": 0.7709,
+   "roic": 0.0491,
+   "dette_sur_capitalisation": 0.2189,
+   "corporel": 0.4253,
+   "recuperation": 0.513
+  }
+ },
+ "secteurs": {
+  "Basic Materials": {
+   "n": 207,
+   "beta_desendette": 0.9195,
+   "marge": 0.1401,
+   "s2c": 0.8932,
+   "roic": 0.088,
+   "dette_sur_capitalisation": 0.1715,
+   "corporel": 0.528,
+   "recuperation": 0.564
+  },
+  "Communication Services": {
+   "n": 123,
+   "beta_desendette": 0.5904,
+   "marge": 0.1142,
+   "s2c": 0.7866,
+   "roic": 0.0632,
+   "dette_sur_capitalisation": 0.2909,
+   "corporel": 0.1243,
+   "recuperation": 0.362
+  },
+  "Consumer Cyclical": {
+   "n": 355,
+   "beta_desendette": 0.787,
+   "marge": 0.0747,
+   "s2c": 1.4863,
+   "roic": 0.0788,
+   "dette_sur_capitalisation": 0.3588,
+   "corporel": 0.2479,
+   "recuperation": 0.424
+  },
+  "Consumer Defensive": {
+   "n": 184,
+   "beta_desendette": 0.4058,
+   "marge": 0.0676,
+   "s2c": 1.3346,
+   "roic": 0.0879,
+   "dette_sur_capitalisation": 0.2738,
+   "corporel": 0.2877,
+   "recuperation": 0.444
+  },
+  "Energy": {
+   "n": 153,
+   "beta_desendette": 0.5542,
+   "marge": 0.125,
+   "s2c": 0.8162,
+   "roic": 0.0799,
+   "dette_sur_capitalisation": 0.3084,
+   "corporel": 0.6327,
+   "recuperation": 0.616
+  },
+  "Financial Services": {
+   "n": 284,
+   "beta_desendette": 0.5658,
+   "marge": 0.1871,
+   "s2c": 0.7612,
+   "roic": 0.0852,
+   "dette_sur_capitalisation": 0.2334,
+   "corporel": 0.0068,
+   "recuperation": 0.303
+  },
+  "Healthcare": {
+   "n": 228,
+   "beta_desendette": 0.6039,
+   "marge": 0.1117,
+   "s2c": 0.8699,
+   "roic": 0.0836,
+   "dette_sur_capitalisation": 0.1744,
+   "corporel": 0.1013,
+   "recuperation": 0.351
+  },
+  "Industrials": {
+   "n": 423,
+   "beta_desendette": 0.8602,
+   "marge": 0.0981,
+   "s2c": 1.1918,
+   "roic": 0.0875,
+   "dette_sur_capitalisation": 0.2003,
+   "corporel": 0.1908,
+   "recuperation": 0.395
+  },
+  "Real Estate": {
+   "n": 199,
+   "beta_desendette": 0.5759,
+   "marge": 0.2091,
+   "s2c": 0.1869,
+   "roic": 0.0329,
+   "dette_sur_capitalisation": 0.5109,
+   "corporel": 0.0063,
+   "recuperation": 0.303
+  },
+  "Technology": {
+   "n": 222,
+   "beta_desendette": 1.1761,
+   "marge": 0.1227,
+   "s2c": 1.2198,
+   "roic": 0.1045,
+   "dette_sur_capitalisation": 0.0626,
+   "corporel": 0.071,
+   "recuperation": 0.335
+  },
+  "Utilities": {
+   "n": 98,
+   "beta_desendette": 0.3283,
+   "marge": 0.22,
+   "s2c": 0.2915,
+   "roic": 0.0489,
+   "dette_sur_capitalisation": 0.6554,
+   "corporel": 0.7352,
+   "recuperation": 0.668
+  }
+ },
+ "global": {
+  "n": 2476,
+  "beta_desendette": 0.6833,
+  "marge": 0.1179,
+  "s2c": 0.9741,
+  "roic": 0.0755,
+  "dette_sur_capitalisation": 0.2545,
+  "corporel": 0.163,
+  "recuperation": 0.382
+ }
+}

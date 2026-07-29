@@ -8,6 +8,9 @@ meme moteur DCF FCFF que le connecteur SEC, mais sur la source universelle.
 
 from __future__ import annotations
 
+import json as _json
+import os as _os
+
 import numpy as np
 
 from . import DcfInputs
@@ -64,6 +67,59 @@ def country_erp(country, erp_mature=_DEFAULT_ERP):
     return erp_mature + _CRP.get(str(country).strip().upper()[:2], _CRP_DEFAUT)
 
 
+# --------------------------------------------------------------------------- #
+# Reperes par INDUSTRIE puis par SECTEUR (mesures sur l'univers reel)
+# --------------------------------------------------------------------------- #
+_STATS_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                            "industry_stats.json")
+try:
+    with open(_STATS_PATH, encoding="utf-8") as _f:
+        _STATS = _json.load(_f)
+except Exception:
+    _STATS = {"industries": {}, "secteurs": {}, "global": {}}
+
+
+def repere(fund, cle, defaut=None):
+    """Repere mesure, du plus fin au plus large : INDUSTRIE -> SECTEUR -> GLOBAL.
+    Damodaran publie ses references par industrie ; a defaut on remonte d'un cran
+    plutot que d'imposer une constante unique a toutes les societes."""
+    for niveau, clef in (("industries", fund.get("industry")),
+                         ("secteurs", fund.get("sector"))):
+        g = _STATS.get(niveau, {}).get(clef or "")
+        if g and g.get(cle) is not None:
+            return g[cle]
+    g = _STATS.get("global", {})
+    return g[cle] if g.get(cle) is not None else defaut
+
+
+def beta_ascendant(fund, tx):
+    """BETA ASCENDANT (bottom-up), methode canonique de Damodaran.
+
+    Il recommande explicitement de NE PAS utiliser le beta de regression d'un
+    titre : bruite, instable, et carrement faux sur une cotation peu liquide (0,20
+    pour la fonciere mexicaine Fibra UNO, 0,24 pour China Minsheng — ces titres
+    bougent peu faute d'ECHANGES, pas faute de RISQUE).
+
+    On part du beta d'ACTIVITE de l'industrie, mesure en desendettant les betas de
+    ses membres, puis on le RE-ENDETTE au levier propre de la societe et au taux
+    d'impot de SON pays :
+
+        beta_levier = beta_desendette_industrie x (1 + (1 - t) x D/E)
+
+    Le risque devient ainsi une propriete de l'activite exercee, corrigee de la
+    structure de bilan et de la fiscalite locale — adaptatif sur les trois axes.
+    Retourne (beta_levier, beta_desendette, source)."""
+    bu = repere(fund, "beta_desendette")
+    if bu is None:
+        # aucun repere : on desendette le beta publie, faute de mieux
+        b = fund.get("beta") or 1.0
+        de0 = _safe_div(fund.get("total_debt"), fund.get("market_cap")) or 0.0
+        return b, b / (1 + (1 - tx) * de0), "beta publie"
+    de = _safe_div(fund.get("total_debt"), fund.get("market_cap")) or 0.0
+    de = _clamp(de, 0.0, 5.0)
+    return bu * (1 + (1 - tx) * de), bu, "industrie"
+
+
 def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = None,
                                 erp: float | None = None, rf: float | None = None):
     """Retourne (DcfInputs, meta) depuis un dict de fondamentaux universal.get_fundamentals.
@@ -103,9 +159,7 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     cur_roic = _clamp(_safe_div(nopat, invested) or 0.12, 0.02, 0.40)
 
     rf = rf if rf is not None else market.risk_free_rate()
-    lev_beta = fund.get("beta") or 1.1
-    de = _safe_div(debt, market_cap) or 0.0
-    unlev = lev_beta / (1 + (1 - tx) * de) if de >= 0 else lev_beta
+    lev_beta, unlev, _src = beta_ascendant(fund, tx)
     cost_equity = rf + lev_beta * erp
     term_roic = _clamp(cost_equity + 0.02, 0.07, max(cur_roic, 0.08))
 

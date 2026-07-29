@@ -47,8 +47,8 @@ def _coe(fund):
     au-dessus du taux sans risque augmente de 3 points : aucune action n'est moins
     risquee qu'une obligation d'Etat."""
     rf = market.risk_free_rate()
-    beta = fund.get("beta") or 1.1
-    beta = max(beta, 0.60 * sect(fund, "beta", 1.0))
+    from .build_universal import beta_ascendant, tax_rate
+    beta, _unlev, _src = beta_ascendant(fund, tax_rate(fund.get("country")))
     erp = country_erp(fund.get("country"))
     return max(rf + beta * erp, rf + 0.03), rf
 
