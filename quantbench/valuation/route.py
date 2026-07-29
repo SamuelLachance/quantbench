@@ -393,7 +393,9 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
         "ticker": ticker.upper(), "ok": True, "category": cat,
         "method": r["method"], "confidence": r.get("confidence"),
         "equity_value": round(eq, 2),
-        "value_per_share": round(vps, 2) if vps else None,
+        # 2 decimales ecrasaient la precision des titres sous 1 $ (penny stocks) :
+        # la valeur par action ne se reconciliait plus avec l'upside affiche.
+        "value_per_share": (round(vps, 2) if abs(vps) >= 1.0 else round(vps, 6)) if vps else None,
         "price": fund.get("price"), "market_cap": mcap,
         "upside": round(upside, 4) if upside is not None else None,
         "extra": {k: v for k, v in r.items()

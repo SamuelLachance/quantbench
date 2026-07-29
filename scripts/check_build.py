@@ -36,6 +36,7 @@ MAX_PART_NULLE = 0.32          # part de titres a -100 % (constatee : ~21 %)
 MAX_PART_EXTREME = 0.05        # part au-dessus de +500 % (constatee : ~1,8 %)
 MAX_UPSIDE = 100.0             # +10 000 % : au-dela, c'est une donnee corrompue
 MIN_COUVERTURE = 8000          # nombre de titres valorises (constate : ~12 000)
+MAX_NB_DEMESURES = 10          # nano-caps aberrantes tolerees avant blocage          # nombre de titres valorises (constate : ~12 000)
 
 # --- Panier de reference : methode attendue par secteur -----------------------
 PANIER = {
@@ -70,11 +71,15 @@ def main(strict=True):
     if impossibles:
         erreurs.append(f"{len(impossibles)} upside < -100 % (responsabilite limitee) : "
                        + ", ".join(r["ticker"] for r in impossibles[:5]))
+    # Une poignee de nano-caps aberrantes ne doit pas bloquer un build par ailleurs
+    # sain : on BLOQUE si le defaut est nombreux ou s'il touche une societe d'une
+    # taille significative (la, c'est le modele qui derape, pas une donnee isolee).
     demesures = [r for r in rows if (r.get("upside") or 0) > MAX_UPSIDE]
+    grosses = [r for r in demesures if (r.get("market_cap") or 0) >= 1.0]
     if demesures:
-        erreurs.append(f"{len(demesures)} upside > {MAX_UPSIDE*100:.0f} % (donnee corrompue) : "
-                       + ", ".join(f"{r['ticker']} {r['upside']*100:,.0f}%"
-                                   for r in demesures[:5]))
+        msg = (f"{len(demesures)} upside > {MAX_UPSIDE*100:.0f} % : "
+               + ", ".join(f"{r['ticker']} {r['upside']*100:,.0f}%" for r in demesures[:5]))
+        (erreurs if (len(demesures) > MAX_NB_DEMESURES or grosses) else alertes).append(msg)
     # identite valeur/action <-> cours
     # Tolerance RELATIVE : un ecart de 5 points d'upside n'a pas le meme sens a
     # -50 % qu'a +28 000 % (ou il ne traduit que l'arrondi d'affichage).

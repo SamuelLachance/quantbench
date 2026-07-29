@@ -34,6 +34,12 @@ from quantbench.shortterm.predict import predict as st_predict
 from quantbench.reports import financial_summary_pdf
 
 
+def _arrondi(v):
+    """Arrondi a precision constante en CHIFFRES SIGNIFICATIFS : 2 decimales
+    au-dela de 1 $, 6 en dessous (penny stocks)."""
+    return round(v, 2) if abs(v) >= 1.0 else round(v, 6)
+
+
 def _mc_stats(eq, mcap, shares):
     eq = np.asarray([v for v in eq if v == v and np.isfinite(v)], dtype=float)
     if eq.size < 50:
@@ -46,7 +52,11 @@ def _mc_stats(eq, mcap, shares):
     counts, edges = np.histogram(eq, bins=30)
     hist = [{"x": round(float((edges[i] + edges[i + 1]) / 2), 1), "y": int(counts[i])}
             for i in range(len(counts))]
-    vps = lambda q: round(float(np.percentile(eq, q)) * 1e9 / shares, 2) if shares else None
+    # Arrondi ADAPTATIF : 2 decimales ecrasaient toute precision sur les titres a
+    # moins de 1 $ — une valeur de 0,004 $ devenait 0,00 et l'upside implicite
+    # affiche passait a -100 %, incoherent avec le pourcentage calcule.
+    vps = lambda q: (_arrondi(float(np.percentile(eq, q)) * 1e9 / shares)
+                     if shares else None)
     return {"median": round(float(np.median(eq)), 6),
             "mean": round(float(eq.mean()), 6), "std": round(float(eq.std()), 6),
             "percentiles": perc, "histogram": hist,
