@@ -53,6 +53,32 @@ _TAUX_IMPOT = {
 _IMPOT_DEFAUT = 0.25
 
 
+# La devise de PUBLICATION revele l'economie ou la societe OPERE reellement.
+# Damodaran raisonne sur le pays d'EXPLOITATION, pas d'immatriculation : PDD
+# Holdings est domiciliee en Irlande mais publie en yuans et realise la totalite de
+# son activite en Chine — elle recevait le taux d'impot irlandais de 12,5 % et la
+# prime de risque irlandaise, d'ou un upside de +486 %. Les devises partagees par
+# plusieurs pays (euro, dollar) ne sont pas discriminantes et sont donc omises.
+_DEVISE_PAYS = {
+    "CNY": "CN", "HKD": "HK", "TWD": "TW", "JPY": "JP", "KRW": "KR", "INR": "IN",
+    "IDR": "ID", "THB": "TH", "MYR": "MY", "PHP": "PH", "VND": "VN", "SGD": "SG",
+    "BRL": "BR", "MXN": "MX", "CLP": "CL", "COP": "CO", "PEN": "PE", "ARS": "AR",
+    "ZAR": "ZA", "NGN": "NG", "EGP": "EG", "TRY": "TR", "RUB": "RU", "PKR": "PK",
+    "GBP": "GB", "CHF": "CH", "SEK": "SE", "NOK": "NO", "DKK": "DK", "PLN": "PL",
+    "CZK": "CZ", "HUF": "HU", "RON": "RO", "ILS": "IL", "AUD": "AU", "NZD": "NZ",
+    "CAD": "CA", "AED": "AE", "SAR": "SA", "QAR": "QA", "KWD": "KW", "BDT": "BD",
+}
+
+
+def pays_exploitation(fund) -> str | None:
+    """Pays d'EXPLOITATION : deduit de la devise de publication quand celle-ci est
+    propre a un pays, sinon pays declare. Corrige les immatriculations de
+    complaisance (Iles Caimans, Bermudes, Irlande) qui faussaient la prime de
+    risque et le taux d'impot."""
+    dev = (fund.get("financial_currency") or "").upper()
+    return _DEVISE_PAYS.get(dev) or fund.get("country")
+
+
 def tax_rate(country) -> float:
     """Taux d'impot marginal du pays de la societe."""
     if not country:
@@ -126,7 +152,7 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     margin_override : force la marge operationnelle (ex. marge normalisee pour un cyclique).
     erp : si None, ERP mature + prime de risque du pays de la societe (Damodaran)."""
     if erp is None:
-        erp = country_erp(fund.get("country"))
+        erp = country_erp(pays_exploitation(fund))
     rev = fund.get("revenue")
     if not rev or rev <= 0:
         raise ValueError(f"CA indisponible pour {fund.get('ticker')}")
@@ -141,7 +167,7 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     if op_margin is None:
         op_margin = _safe_div(fund.get("ebit"), rev) or 0.10
     op_margin = _clamp(op_margin, -0.20, 0.75)
-    tx = tax_rate(fund.get("country"))          # taux d'impot du pays de la societe
+    tx = tax_rate(pays_exploitation(fund))      # impot du pays d'EXPLOITATION
 
     debt = fund.get("total_debt") or 0.0
     cash = fund.get("cash") or 0.0

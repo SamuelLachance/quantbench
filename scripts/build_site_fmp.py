@@ -31,7 +31,7 @@ from quantbench.forensics import analyze
 from quantbench.valuation import monte_carlo_dcf
 from quantbench.valuation.route import value_stock
 from quantbench.valuation.build_universal import (project, build_dcf_from_fundamentals,
-                                                  country_erp)
+                                                  country_erp, pays_exploitation)
 from quantbench.shortterm.predict import predict as st_predict
 from quantbench.reports import financial_summary_pdf
 
@@ -131,12 +131,15 @@ _POURQUOI = {
 def _methodologie(fund, val, F):
     """Methode retenue, sa justification sectorielle, et les hypotheses REELLEMENT
     utilisees pour ce titre (toutes deduites de ses donnees et de son secteur)."""
-    from quantbench.valuation.build_universal import country_erp, tax_rate
+    from quantbench.valuation.build_universal import (country_erp, tax_rate,
+                                                      pays_exploitation)
     cat = val.get("category")
+    pays = pays_exploitation(fund)
     h = {"beta": fund.get("beta"),
-         "prime_risque_actions_pct": round(country_erp(fund.get("country")) * 100, 2),
-         "taux_impot_pct": round(tax_rate(fund.get("country")) * 100, 1),
-         "pays": fund.get("country"), "secteur": fund.get("sector")}
+         "prime_risque_actions_pct": round(country_erp(pays) * 100, 2),
+         "taux_impot_pct": round(tax_rate(pays) * 100, 1),
+         "pays_exploitation": pays, "pays_declare": fund.get("country"),
+         "secteur": fund.get("sector"), "industrie": fund.get("industry")}
     try:
         h["taux_sans_risque_pct"] = round(risk_free_rate() * 100, 2)
     except Exception:
@@ -191,7 +194,7 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
             rng = np.random.default_rng(42)
             roes = rng.normal(roe, max(0.02, abs(roe) * 0.2), n)
             betas = rng.normal(beta, 0.15, n)
-            erp_c = country_erp(fund.get("country"))     # prime de risque pays
+            erp_c = country_erp(pays_exploitation(fund))  # prime du pays d'exploitation
             ke = np.maximum(rf + betas * erp_c, g + 0.01)
             mult = np.clip((roes - ke) / (ke - g), -0.6, 4.0)
             eq = np.maximum(be * (1 + mult), 0.2 * be)

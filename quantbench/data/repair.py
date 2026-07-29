@@ -29,10 +29,10 @@ def _fonds_propres_recalcules(fund, F):
     """Identite fondamentale : actif - passif = fonds propres. Quand le champ
     publie contredit le bilan, l'identite fait foi."""
     ta = fund.get("total_assets")
-    tl = (F or {}).get("total_liab", [None])[0]
+    tl = fund.get("total_liab")              # deja converti en USD, comme ta
     if not ta or ta <= 0 or tl is None:
         return None
-    recalcule = ta - tl / 1e9
+    recalcule = ta - tl
     ancien = fund.get("book_equity")
     if ancien is None or abs(recalcule - ancien) / max(ta, 1e-9) > 0.05:
         return recalcule

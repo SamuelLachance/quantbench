@@ -428,6 +428,11 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         "revenue": b(rev), "revenue_history": rev_hist, "ebit": b(ebit), "net_income": b(ni),
         "total_debt": b(debt), "cash": b(cash), "book_equity": b(eq),
         "total_assets": b(tot_assets),
+        # Passif total CONVERTI en USD : indispensable pour verifier l'identite
+        # actif = passif + fonds propres. Le comparer au passif BRUT (en devise
+        # locale) faisait echouer l'identite pour toute societe non americaine —
+        # l'ecart valait exactement le taux de change (534 % pour une chinoise).
+        "total_liab": b(g(bal, "totalLiabilities")),
         "operating_margin": (ebit / rev) if (ebit and rev) else None,
         "roe": (ni / eq) if (ni and eq) else None,
         # Amortissements + flux d'exploitation : nécessaires au FFO des foncières

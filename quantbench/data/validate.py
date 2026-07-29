@@ -81,9 +81,9 @@ def valider(fund: dict, F: dict | None, entry: dict | None = None) -> list[str]:
         if rev and rev > MAX_CA_SUR_ACTIF * ta:
             motifs.append(f"chiffre d'affaires de {rev/ta:.0f}x l'actif total — "
                           f"entite de financement publiant les comptes du groupe")
-        tl = (F or {}).get("total_liab", [None])[0]
+        tl = fund.get("total_liab")          # deja converti en USD, comme ta et be
         if tl and be is not None:
-            ecart = abs(ta - (tl / 1e9 + be)) / ta
+            ecart = abs(ta - (tl + be)) / ta
             if ecart > TOLERANCE_BILAN:
                 motifs.append(f"identite du bilan violee (ecart {ecart:.0%} entre "
                               f"l'actif et passif + fonds propres)")

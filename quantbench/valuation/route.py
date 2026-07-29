@@ -25,7 +25,8 @@ from ..data.universal import get_fundamentals
 from ..data import market
 from ..forensics import analyze as forensic_analyze, get_financials
 from ..forensics.scores import default_probability
-from .build_universal import build_dcf_from_fundamentals, country_erp
+from .build_universal import (build_dcf_from_fundamentals, country_erp,
+                              pays_exploitation)
 from .dcf import value_dcf
 
 
@@ -48,8 +49,9 @@ def _coe(fund):
     risquee qu'une obligation d'Etat."""
     rf = market.risk_free_rate()
     from .build_universal import beta_ascendant, tax_rate
-    beta, _unlev, _src = beta_ascendant(fund, tax_rate(fund.get("country")))
-    erp = country_erp(fund.get("country"))
+    pays = pays_exploitation(fund)
+    beta, _unlev, _src = beta_ascendant(fund, tax_rate(pays))
+    erp = country_erp(pays)
     return max(rf + beta * erp, rf + 0.03), rf
 
 
@@ -296,10 +298,9 @@ def value_holding(fund, F=None):
     diag, confiance = {}, "moyenne"
 
     # 1. Identite comptable actif - passif = capitaux propres
-    ta = (F or {}).get("total_assets", [None])[0]
-    tl = (F or {}).get("total_liab", [None])[0]
+    ta, tl = fund.get("total_assets"), fund.get("total_liab")   # en USD tous deux
     if ta and tl:
-        ecart = abs((ta - tl) / 1e9 - be) / max(ta / 1e9, 1e-9)
+        ecart = abs((ta - tl) - be) / max(ta, 1e-9)
         diag["identite_bilan_ok"] = bool(ecart < 0.05)
         if ecart >= 0.05:
             confiance = "faible"
