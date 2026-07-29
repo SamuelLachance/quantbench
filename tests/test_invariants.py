@@ -253,3 +253,63 @@ def test_service_public_benefices_normalises():
     assert v["ok"] and v["equity_value"] > 0
     assert "service public regule" in v["method"], v["method"]
 
+# --------------------------------------------------------------------------- #
+# 6. EBIT ECONOMIQUE : des charges recurrentes reclassees sous la ligne
+#    operationnelle ne doivent JAMAIS gonfler la marge (35 % de l'univers touche)
+# --------------------------------------------------------------------------- #
+def _etats_fmp(operating, pretax, interets=0.0, revenue=5.57e9, net=0.039e9):
+    inc = {2025: {"revenue": revenue, "operatingIncome": operating,
+                  "incomeBeforeTax": pretax, "interestExpense": interets,
+                  "netIncome": net, "weightedAverageShsOutDil": 8.7e7,
+                  "reportedCurrency": "USD"}}
+    bal = {2025: {"totalStockholdersEquity": 1.37e9, "totalAssets": 1.99e9,
+                  "totalLiabilities": 0.62e9, "totalDebt": 7e6,
+                  "cashAndCashEquivalents": 0.3e9, "preferredStock": 0.0,
+                  "minorityInterest": 0.0, "reportedCurrency": "USD"}}
+    return {"income": inc, "balance": bal, "cashflow": {}}
+
+
+def _fond(entry):
+    from quantbench.data import fmp
+    return fmp.fundamentals_from_fmp(
+        "TEST", {"price": 1.07, "market_cap": 93e6, "exchange": "NASDAQ",
+                 "name": "TEST", "sector": "Financial Services",
+                 "industry": "Financial - Credit Services", "country": "US"},
+        entry, {})
+
+
+def test_charges_reclassees_sous_la_ligne_operationnelle_ne_gonflent_pas_la_marge():
+    """Yiren Digital : resultat operationnel +2,145 Md, "autres charges" -2,202 Md
+    (provisions pour creances douteuses), resultat avant impot NEGATIF. La marge
+    publiee de 38,5 % etait projetee a perpetuite -> +4 700 % d'upside."""
+    f = _fond(_etats_fmp(operating=2.145e9, pretax=-0.057e9))
+    assert f["ebit"] <= 0, f"EBIT non corrige : {f['ebit']}"
+    assert f["operating_margin"] < 0.01, f"marge encore gonflee : {f['operating_margin']:.1%}"
+
+
+def test_compte_de_resultat_ordinaire_reste_inchange():
+    """La correction ne doit RIEN changer quand la ligne operationnelle est saine :
+    resultat avant impot = EBIT - interets (Apple, Microsoft, Visa, Exxon...)."""
+    f = _fond(_etats_fmp(operating=1.0e9, pretax=0.95e9, interets=0.05e9))
+    assert abs(f["ebit"] - 1.0) < 1e-6, f"EBIT sain modifie a tort : {f['ebit']}"
+
+
+def test_produits_non_operationnels_ne_gonflent_pas_l_ebit():
+    """Symetrie : une societe riche en tresorerie a un resultat avant impot
+    SUPERIEUR a son EBIT (produits financiers). L'EBIT ne doit pas etre releve."""
+    f = _fond(_etats_fmp(operating=1.0e9, pretax=1.40e9))
+    assert abs(f["ebit"] - 1.0) < 1e-6, f"EBIT gonfle par du hors-exploitation : {f['ebit']}"
+
+
+def test_historique_des_marges_utilise_aussi_l_ebit_economique():
+    """Sinon la marge normalisee et la marge moyenne du cycle restent calculees sur
+    un resultat operationnel qui exclut des charges recurrentes : l'incoherence se
+    propage aux methodes sectorielles."""
+    from quantbench.data import fmp
+    e = _etats_fmp(operating=2.145e9, pretax=-0.057e9)
+    e["income"][2024] = dict(e["income"][2025])
+    e["balance"][2024] = dict(e["balance"][2025])
+    F = fmp.financials_from_fmp(e)
+    assert F is not None
+    assert all(v is not None and v <= 0 for v in F["ebit"]),         f"historique d'EBIT non corrige : {F['ebit']}"
+
