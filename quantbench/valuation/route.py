@@ -194,28 +194,41 @@ def value_financial(fund, F=None):
             "roe_normalise": round(roe, 4), "pb_implicite": round(1.0 + (roe - ke) * A, 2)}
 
 
-def value_regulated(fund):
+def value_regulated(fund, F=None):
     """Services publics REGULES (electricite, gaz, eau) — methode Damodaran.
     Le DCF d'entreprise echoue ici : ces societes sont extremement capitalistiques
     et endettees, si bien que "valeur d'entreprise moins dette" devient negatif
-    alors qu'elles sont parfaitement solvables et rentables. Leur rentabilite est
-    en outre FIXEE par le regulateur (ROE autorise stable) et leur distribution
-    elevee : on les valorise donc COTE EQUITE, par capitalisation des benefices
-    avec une croissance FONDAMENTALE coherente g = ROE x taux de retention
-    (identite de Damodaran), donc un taux de distribution = 1 - g/ROE."""
-    ni, be, roe = fund.get("net_income"), fund.get("book_equity"), fund.get("roe")
-    if not ni or ni <= 0 or not be or be <= 0 or not roe or roe <= 0:
+    alors qu'elles sont parfaitement solvables. Leur rentabilite est en outre
+    FIXEE par le regulateur (ROE autorise stable) et leur distribution elevee : on
+    les valorise COTE EQUITE, par capitalisation des benefices avec une croissance
+    FONDAMENTALE coherente g = ROE x taux de retention (identite de Damodaran),
+    donc un taux de distribution = 1 - g/ROE.
+
+    Benefices NORMALISES sur la mediane historique : un service public regule ne
+    perd pas durablement d'argent, sa tarification etant fixee pour couvrir ses
+    couts. Un exercice deficitaire (couverture energetique, sinistre, provision)
+    ne doit ni fixer sa valeur ni faire basculer vers un DCF inapplicable —
+    Centrica, en perte une annee, ressortait a +1 043 %."""
+    be = fund.get("book_equity")
+    if not be or be <= 0:
+        return None
+    # Resultat net normalise : mediane de l'historique quand il est disponible.
+    nis = [x for x in (F or {}).get("net_income", []) if x is not None]
+    ni = float(np.median(nis)) / 1e9 if len(nis) >= 3 else fund.get("net_income")
+    roe = _roe_normalise(fund, F)
+    if not ni or ni <= 0 or not roe or roe <= 0:
         return None
     ke, rf = _coe(fund)
     g = min(rf, 0.028, roe * 0.9)               # g ne peut exceder ce que le ROE finance
-    ke = max(ke, g + 0.02)
+    ke = max(ke, g + 0.03)                      # ecart minimal : un multiple fini
     payout = max(0.0, 1.0 - g / roe)
     val = ni * payout * (1.0 + g) / (ke - g)
     if val <= 0:
         return None
     return {"equity_value": val, "confidence": "moyenne",
             "method": "Benefices capitalises cote equite (service public regule)",
-            "payout": round(payout, 3), "g": round(g, 4)}
+            "payout": round(payout, 3), "g": round(g, 4),
+            "resultat_normalise": round(ni, 3)}
 
 
 def value_reit(fund):
@@ -332,7 +345,7 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
         elif cat == "fonciere":
             r = value_reit(fund)
         elif cat == "reglementee":
-            r = value_regulated(fund)
+            r = value_regulated(fund, F)
         elif cat == "financiere":
             r = value_financial(fund, F)
         elif cat == "cyclique":
@@ -355,6 +368,18 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
     # dette n'est pas opérationnelle mais de FINANCEMENT (bras financier captif :
     # GM Financial, Ford Credit) : elle produit une équité négative pour une
     # société solvable. Damodaran : basculer sur un modèle CÔTÉ ÉQUITÉ.
+    # Secteurs ou le DCF d'entreprise est INAPPLICABLE par construction : le repli
+    # ne doit surtout pas y ramener un DCF, sinon on annule la correction meme —
+    # Centrica (service public en perte) tombait dans le repli DCF et ressortait a
+    # +1 043 %. Pour eux, l'actif net est le seul repli legitime.
+    if cat in ("fonciere", "reglementee", "financiere") and (
+            not r or r.get("equity_value") is None):
+        r = value_assetbased(fund)
+        if r:
+            r["method"] = "Valeur d'actif net (methode sectorielle inapplicable)"
+            r["confidence"] = "faible"
+        return _finalise(ticker, fund, r, cat)
+
     if r and r.get("equity_value") is not None and r["equity_value"] <= 0:
         be = fund.get("book_equity")
         if be and be > 0:
@@ -385,8 +410,17 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
             return {"ticker": ticker.upper(), "ok": False,
                     "reason": "valorisation impossible", "category": cat}
 
+    return _finalise(ticker, fund, r, cat)
+
+
+def _finalise(ticker, fund, r, cat):
+    """Met en forme le resultat : plancher de responsabilite limitee, valeur par
+    action coherente avec le cours, upside."""
+    if not r or r.get("equity_value") is None:
+        return {"ticker": ticker.upper(), "ok": False,
+                "reason": "valorisation impossible", "category": cat}
     shares, mcap = fund.get("shares"), fund.get("market_cap")
-    eq = max(float(r["equity_value"]), 0.0)         # Md USD — responsabilité limitée : équité ≥ 0
+    eq = max(float(r["equity_value"]), 0.0)         # Md USD — responsabilite limitee : equite >= 0
     vps = eq * 1e9 / shares if shares else None
     upside = (eq / mcap - 1.0) if (mcap and mcap > 0) else None
     return {

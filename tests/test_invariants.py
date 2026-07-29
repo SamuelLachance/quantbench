@@ -220,3 +220,36 @@ def test_valeur_par_action_coherente_avec_le_cours():
     v = route.value_stock("TEST", fund=f, forensic=_FOR, F=etats())
     assert v["ok"]
     assert abs((v["value_per_share"] / f["price"] - 1.0) - v["upside"]) < 0.02
+
+def test_secteur_en_perte_ne_retombe_pas_sur_un_dcf_inapplicable():
+    """Centrica : service public en PERTE une annee. value_regulated refusait le
+    dossier et la cascade enchainait sur un DCF classique — precisement la methode
+    etablie comme inapplicable aux services publics -> +1 043 % d'upside.
+    Le repli d'un secteur a methode dediee doit rester l'ACTIF NET, jamais le DCF."""
+    for secteur, industrie in (("Utilities", "Utilities - Regulated Gas"),
+                               ("Real Estate", "REIT - Office")):
+        f = societe(sector=secteur, industry=industrie, net_income=-0.09,
+                    roe=-0.023, ebit=-0.05, operating_margin=-0.002, dep_amort=None)
+        # historique lui aussi deficitaire : la normalisation ne peut pas sauver
+        F = {"years": [2025, 2024, 2023], "revenue": [25e9] * 3,
+             "ebit": [-0.05e9] * 3, "net_income": [-0.09e9] * 3,
+             "equity": [4.1e9] * 3, "total_assets": [40e9] * 3, "net_ppe": [20e9] * 3}
+        v = route.value_stock("TEST", fund=f, forensic=_FOR, F=F)
+        if v.get("ok"):
+            assert "DCF" not in (v.get("method") or ""), (
+                f"{secteur} : repli sur un DCF inapplicable ({v['method']})")
+            assert v["upside"] < 3.0, f"{secteur} : upside implausible {v['upside']:.0%}"
+
+
+def test_service_public_benefices_normalises():
+    """Un exercice deficitaire ne doit pas fixer la valeur d'un regule : sa
+    tarification est fixee pour couvrir ses couts."""
+    f = societe(sector="Utilities", industry="Utilities - Regulated Electric",
+                net_income=-0.09, roe=-0.023, revenue=25.0, book_equity=4.1)
+    F = {"years": [2025, 2024, 2023, 2022], "revenue": [25e9] * 4,
+         "ebit": [1.5e9] * 4, "net_income": [-0.09e9, 0.5e9, 0.6e9, 0.55e9],
+         "equity": [4.1e9] * 4, "total_assets": [40e9] * 4, "net_ppe": [20e9] * 4}
+    v = route.value_stock("TEST", fund=f, forensic=_FOR, F=F)
+    assert v["ok"] and v["equity_value"] > 0
+    assert "service public regule" in v["method"], v["method"]
+
