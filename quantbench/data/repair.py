@@ -53,6 +53,10 @@ def _ttm_depuis_trimestres(symbol):
     return {"revenue": som("revenue"), "operatingIncome": som("operatingIncome"),
             "netIncome": som("netIncome"),
             "shares": fmp._num(inc[0].get("weightedAverageShsOutDil")),
+            # La DEVISE de publication des trimestres : les montants reconstitues
+            # doivent etre convertis comme le reste, faute de quoi les comptes d'une
+            # societe non americaine entrent dans le modele libelles en dollars.
+            "devise": inc[0].get("reportedCurrency"),
             "bilan": bal[0], "date": inc[0].get("date")}
 
 
@@ -110,7 +114,17 @@ def reparer(symbol, fund, F, entry, motifs):
     if "comptes perimes" in texte:
         ttm = _ttm_depuis_trimestres(symbol)
         if ttm and ttm.get("revenue"):
-            fx = 1.0
+            # Le taux de change etait FIGE A 1. Les comptes trimestriels sont publies
+            # dans la devise de la societe : reconstituer douze mois glissants sans
+            # les convertir revenait a faire entrer des roupies ou des wons dans le
+            # modele comme s'il s'agissait de dollars — l'erreur valant exactement le
+            # taux de change. C'est le meme defaut que celui qui portait la valeur de
+            # l'argentine Edenor a +6 864 %, ici loge dans la REPARATION elle-meme,
+            # donc invisible : il ne frappait que des titres deja signales.
+            devise = ttm.get("devise") or fund.get("financial_currency")
+            fx = fmp.fx_to_usd(devise) if devise else 1.0
+            if not fx or fx <= 0:
+                return faites                    # sans taux fiable, on ne repare pas
             B = 1e9
             fund["revenue"] = ttm["revenue"] * fx / B
             if ttm.get("operatingIncome") is not None:
