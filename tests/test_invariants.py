@@ -1145,3 +1145,39 @@ def test_le_calibrage_ne_contient_aucun_poids_de_conviction():
     assert len(poids) <= 1 or cal.get("origine_poids", "").startswith("estimee"), (
         "des poids differencies sans estimation declaree : "
         f"{cal.get('poids')} / origine={cal.get('origine_poids')}")
+
+
+def test_aucune_valeur_non_finie_ne_sort_de_la_notation():
+    """`json.dumps` de Python ecrit `Infinity` et `-Infinity`, qui ne sont PAS du
+    JSON valide. Le navigateur echoue alors a lire la fiche ENTIERE — pas seulement
+    la note — et affiche "profil indisponible". Le defaut est invisible cote serveur,
+    ou Python relit sans broncher ce qu'il vient d'ecrire : seule une lecture par un
+    vrai navigateur l'a revele.
+    Les infinis sont des MODALITES internes, deja traduites en rang ; ils n'ont rien
+    a faire dans la charge utile publiee."""
+    import json
+    import math
+
+    from quantbench.risk import noter
+    cas = [societe(),
+           societe(interest_expense=None, ebit=1.0),          # -inf en solvabilite
+           societe(cfo=5.0, capex=-0.1),                      # -inf en autonomie
+           societe(revenue=0.0, revenue_history=[]),          # +inf en rentabilite
+           societe(short_term_debt=0.0),                      # -inf en refinancement
+           {}]
+    for f in cas:
+        charge = json.dumps(noter(f, etats()), allow_nan=False)   # leve si non fini
+        assert "Infinity" not in charge and "NaN" not in charge
+
+    def parcourir(x):
+        if isinstance(x, float):
+            assert math.isfinite(x), f"valeur non finie publiee : {x}"
+        elif isinstance(x, dict):
+            for v in x.values():
+                parcourir(v)
+        elif isinstance(x, (list, tuple)):
+            for v in x:
+                parcourir(v)
+
+    for f in cas:
+        parcourir(noter(f, etats()))

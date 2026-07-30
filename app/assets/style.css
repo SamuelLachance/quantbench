@@ -149,3 +149,51 @@ svg.chart{width:100%;height:auto;display:block}
 .summary{font-size:13px;color:var(--muted);line-height:1.55}
 .mini{font-size:11px;color:var(--faint);margin-top:8px}
 h2 .sub{font-weight:400;color:var(--faint);font-size:12px;letter-spacing:0;text-transform:none}
+
+/* ------------------------------------------------------------------ *
+ * NOTE DE RISQUE — cinq familles, A+ a F
+ *
+ * Palette choisie pour rester lisible en DEUTERANOPIE et PROTANOPIE, les
+ * deux formes les plus repandues de daltonisme : les cinq familles varient
+ * en LUMINOSITE autant qu'en teinte, si bien qu'elles restent ordonnees
+ * meme percues en niveaux de gris. Le vert et le rouge de l'upside ne sont
+ * volontairement PAS reutilises : la note et la decote repondent a deux
+ * questions differentes, les confondre visuellement les ferait lire comme
+ * un seul signal.
+ * ------------------------------------------------------------------ */
+:root{
+  --r-a:#1a7f5a; --r-a-bg:rgba(26,127,90,.14);
+  --r-b:#2f7db8; --r-b-bg:rgba(47,125,184,.14);
+  --r-c:#a8791f; --r-c-bg:rgba(168,121,31,.16);
+  --r-d:#c2612a; --r-d-bg:rgba(194,97,42,.16);
+  --r-f:#a33b47; --r-f-bg:rgba(163,59,71,.16);
+}
+:root[data-theme="dark"]{
+  --r-a:#4fc793; --r-a-bg:rgba(79,199,147,.16);
+  --r-b:#63aee6; --r-b-bg:rgba(99,174,230,.16);
+  --r-c:#d9a942; --r-c-bg:rgba(217,169,66,.18);
+  --r-d:#eb8b4e; --r-d-bg:rgba(235,139,78,.18);
+  --r-f:#e8697a; --r-f-bg:rgba(232,105,122,.18);
+}
+.note-risque{display:inline-flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-weight:700;letter-spacing:-.02em;
+  border-radius:8px;border:1.5px solid currentColor;line-height:1;
+  padding:.28em .5em;min-width:2.6em}
+.note-risque.grand{font-size:30px;padding:.22em .42em}
+.note-risque.tag{font-size:12px;padding:.24em .42em;min-width:2.4em}
+.nr-a{color:var(--r-a);background:var(--r-a-bg)}
+.nr-b{color:var(--r-b);background:var(--r-b-bg)}
+.nr-c{color:var(--r-c);background:var(--r-c-bg)}
+.nr-d{color:var(--r-d);background:var(--r-d-bg)}
+.nr-f{color:var(--r-f);background:var(--r-f-bg)}
+.dims{display:grid;gap:7px;margin-top:4px}
+.dim{display:grid;grid-template-columns:150px 1fr 46px;gap:10px;align-items:center;
+  font-size:12.5px}
+.dim .dnom{color:var(--muted)}
+.dim .djauge{height:7px;border-radius:4px;background:var(--surface-2);overflow:hidden;
+  position:relative}
+.dim .dbar{height:100%;border-radius:4px}
+.dim .dval{font-family:var(--mono);font-size:11.5px;color:var(--faint);text-align:right}
+.dim.indispo .dnom,.dim.indispo .dval{color:var(--faint);opacity:.65}
+.plafond{display:inline-block;font-size:11.5px;padding:.22em .5em;border-radius:5px;
+  background:var(--r-f-bg);color:var(--r-f);border:1px solid currentColor;margin:2px 4px 2px 0}

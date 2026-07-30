@@ -149,8 +149,15 @@ def noter(fund, F=None, motifs=None, reparations=None, cal=None):
         signal, libelle = signaux.get(cle, (None, None))
         r = rang(cle, signal, cal, secteur, industrie, niveau)
         w = float(poids.get(cle, 1.0))
+        # LES INFINIS NE DOIVENT JAMAIS SORTIR DU MODULE. `json.dumps` de Python les
+        # ecrit `Infinity` et `-Infinity`, qui ne sont PAS du JSON valide : le
+        # navigateur echoue alors a lire la fiche ENTIERE, pas seulement la note, et
+        # le message affiche est "profil indisponible" — un defaut invisible cote
+        # serveur, ou Python relit sans broncher ce qu'il vient d'ecrire.
+        # Ici l'infini est une MODALITE, deja traduite en rang : le signal chiffre
+        # n'a pas a la porter.
         detail.append({"cle": cle, "nom": nom, "libelle": libelle,
-                       "signal": (None if signal is None or signal == math.inf
+                       "signal": (None if signal is None or not math.isfinite(signal)
                                   else round(signal, 4)),
                        "rang": None if r is None else round(r, 3),
                        "poids": w, "niveau": niveau})

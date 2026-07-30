@@ -35,6 +35,11 @@
       <div class="field"><label>Signaux forensiques</label>
         <select id="flags"><option value="">tous</option><option value="none">aucun</option>
         <option value="any">≥ 1 alerte</option><option value="beneish">M-Score alerté</option></select></div>
+      <div class="field"><label>Risque au plus</label>
+        <select id="riskmax"><option value="">tous</option>
+        <option value="A-">A− ou mieux</option><option value="B">B ou mieux</option>
+        <option value="B-">B− ou mieux</option><option value="C">C ou mieux</option>
+        <option value="C-">C− ou mieux</option><option value="D">D ou mieux</option></select></div>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <span id="count" class="mono" style="font-size:13px;color:var(--muted)"></span>
@@ -57,10 +62,15 @@ const COLS=[
   {k:'price',t:'Cours',fmt:r=>QB.usd(r.price),num:true},
   {k:'value_per_share',t:'Valeur/action',fmt:r=>QB.usd(r.value_per_share),num:true},
   {k:'upside',t:'Upside',fmt:r=>upCell(r.upside),num:true},
+  {k:'score_risque',t:'Risque',fmt:r=>noteCell(r.note_risque),num:true},
   {k:'piotroski',t:'F-Score',fmt:r=>r.piotroski==null?'—':`${r.piotroski}/9`,num:true},
   {k:'roe',t:'ROE',fmt:r=>r.roe==null?'—':QB.pct(r.roe,0),num:true},
   {k:'n_flags',t:'Alertes',fmt:r=>r.n_flags?`<span class="pill flag">${r.n_flags}</span>`:'<span class="pill good">0</span>',num:true},
 ];
+/* La note de risque se trie sur le SCORE continu et non sur la lettre : trier
+   sur le grade regrouperait treize paquets et perdrait tout l'ordre interne. */
+function noteCell(g){if(!g)return'<span class="mono" style="color:var(--faint)">—</span>';
+  return `<span class="note-risque tag nr-${g[0].toLowerCase()}">${g}</span>`;}
 function upCell(u){if(u==null)return'—';const cls=u>=0?'pos':'neg';const w=Math.min(Math.abs(u),1)*38;
   const bar=u>=0?`<i style="left:50%;width:${w}px;background:var(--pos)"></i>`:`<i style="right:50%;width:${w}px;background:var(--neg)"></i>`;
   return `<span class="mono ${cls}" style="font-weight:600">${QB.pct(u)}</span> <span class="ubar"><span class="mid"></span>${bar}</span>`;}
@@ -82,6 +92,12 @@ function apply(){
     if(fl==='none'&&r.n_flags>0)return false;
     if(fl==='any'&&!(r.n_flags>0))return false;
     if(fl==='beneish'&&!r.beneish_flag)return false;
+    const rmax=document.getElementById('riskmax');
+    if(rmax&&rmax.value){
+      const ordre=['A+','A','A-','B+','B','B-','C+','C','C-','D+','D','D-','F'];
+      const i=ordre.indexOf(r.note_risque||''), j=ordre.indexOf(rmax.value);
+      if(i<0||i>j)return false;
+    }
     return true;
   });
   out.sort((a,b)=>{const x=a[SORT.key],y=b[SORT.key];

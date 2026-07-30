@@ -32,6 +32,71 @@ const badge=l=>{const t={positive:'positif',negative:'négatif',neutral:'neutre'
 
 function kv(pairs){return '<div class="kv">'+pairs.map(([k,v])=>`<div class="lbl">${k}</div><div class="val">${v}</div>`).join('')+'</div>';}
 
+/* --- NOTE DE RISQUE ------------------------------------------------------
+   Elle répond à une question DIFFÉRENTE de l'upside : non pas « combien vaut
+   cette société » mais « quelle est la probabilité de perdre durablement sa
+   mise ». Un titre peut être très décoté ET très dangereux — c'est même la
+   configuration la plus fréquente. */
+const RISK_FAM = g => g ? 'nr-' + g[0].toLowerCase() : '';
+const RISK_LIB = {
+  d1:'Solvabilité', d2:'Autonomie de trésorerie', d3:'Rentabilité de cycle',
+  d4:"Volatilité d'exploitation", d5:'Dilution', d6:'Liquidité de sortie',
+  d7:'Confiance dans la donnée', d8:'Mur de refinancement'};
+const RISK_PLAFOND = {
+  passif_non_couvert:"le passif dépasse l'actif réalisable",
+  fonds_propres_absorbes:'fonds propres absorbés par les pertes',
+  moins_d_un_an_d_autonomie:"moins d'un an d'autonomie de trésorerie",
+  bilan_non_verifiable:'bilan invérifiable',
+  aucun_exercice_exploitable:'aucun exercice comptable exploitable',
+  aucune_dimension_mesurable:'aucune dimension mesurable'};
+const RISK_REGIME = {
+  exploitante:'société d’exploitation', financiere:'financière de bilan',
+  amortissement_lourd:'amortissement lourd',
+  sans_dette_beneficiaire:'sans dette, bénéficiaire',
+  sans_dette_deficitaire:'sans dette, déficitaire'};
+
+function noteRisque(r){
+  if(!r||!r.grade) return '<div class="big">—</div><div class="note">non calibrée</div>';
+  return `<div class="big"><span class="note-risque grand ${RISK_FAM(r.grade)}">${r.grade}</span></div>
+    <div class="note">${RISK_REGIME[r.regime]||r.regime||''}</div>`;
+}
+
+function detailRisque(r){
+  if(!r||!r.dimensions) return '';
+  const dispo = r.dimensions.filter(d=>d.rang!==null);
+  const rangs = d => {
+    const pct = Math.round(d.rang*100);
+    /* Le rang est orienté RISQUE : 0 = le meilleur cas mesuré, 100 = le pire. */
+    const fam = pct<20?'--r-a':pct<40?'--r-b':pct<60?'--r-c':pct<80?'--r-d':'--r-f';
+    return `<div class="dim"><div class="dnom">${RISK_LIB[d.cle]||d.nom}</div>
+      <div class="djauge"><div class="dbar" style="width:${pct}%;background:var(${fam})"></div></div>
+      <div class="dval">${pct}</div></div>`;
+  };
+  const absentes = r.dimensions.filter(d=>d.rang===null).map(d=>
+    `<div class="dim indispo"><div class="dnom">${RISK_LIB[d.cle]||d.nom}</div>
+     <div class="djauge"></div><div class="dval">n/d</div></div>`).join('');
+  const plafonds = (r.plafonds_appliques||[]).map(p=>
+    `<span class="plafond">${RISK_PLAFOND[p]||p}</span>`).join('');
+  return `<div class="card span2" style="border-left:3px solid var(${
+      r.grade?('--r-'+r.grade[0].toLowerCase()):'--border'})">
+    <h2>Note de risque <span class="sub">${RISK_REGIME[r.regime]||''} · calibrage ${r.calibrage||'—'}</span></h2>
+    <div class="mini" style="margin-bottom:10px">La note ne dit pas si le titre est
+      <em>bon marché</em> — c’est le rôle de l’upside — mais quelle est la probabilité
+      de <strong>perdre durablement sa mise</strong>. Chaque dimension est un rang
+      parmi les sociétés de référence : <strong>0 = le meilleur cas observé,
+      100 = le pire</strong>. Le rang se lit dans une table figée, si bien qu’une
+      dégradation signale une dégradation de la société et non un mouvement de ses
+      voisines.</div>
+    ${plafonds?`<div style="margin-bottom:9px">${plafonds}</div>`:''}
+    <div class="dims">${dispo.sort((a,b)=>b.rang-a.rang).map(rangs).join('')}${absentes}</div>
+    <div class="mini" style="margin-top:10px">Les dimensions marquées <em>n/d</em> ne
+      sont pas définissables pour cette société — le poids se redistribue sur les
+      autres. Pondération actuellement <strong>uniforme</strong> : tant que la variable
+      de résultat n’est pas construite, aucune mesure n’autorise à déclarer une
+      dimension plus prédictive qu’une autre.</div>
+  </div>`;
+}
+
 function projTable(proj){
   if(!proj||!proj.length)return'';
   const pick=[0,4,9,14,19].filter(i=>i<proj.length);
@@ -94,8 +159,10 @@ function render(d){
   <div class="verdict">
     <div class="vcell"><div class="k">Valeur intrinsèque / action</div><div class="big ${upcls}">${U(v.value_per_share)}</div><div class="note">${v.method||''}</div></div>
     <div class="vcell"><div class="k">Upside</div><div class="big ${upcls}">${P(v.upside)}</div><div class="note">confiance ${v.confidence||'—'}</div></div>
-    <div class="vcell"><div class="k">Forensique</div><div class="big">${f?(f.positives||[]).length:0}<span style="color:var(--pos);font-size:15px">+</span> / ${f?(f.flags||[]).length:0}<span style="color:var(--neg);font-size:15px">⚠</span></div><div class="note">points positifs / alertes</div></div>
+    <div class="vcell"><div class="k">Note de risque</div>${noteRisque(d.risque)}</div>
   </div>
+
+  ${detailRisque(d.risque)}
 
   ${(()=>{const m=d.methodologie; if(!m)return'';
     const H=m.hypotheses||{}, lbl={beta:'Bêta',prime_risque_actions_pct:'Prime de risque actions',

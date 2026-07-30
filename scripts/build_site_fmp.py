@@ -28,6 +28,7 @@ from quantbench.data.repair import reparer
 from quantbench.data.sec_fundamentals import annual_report_docs
 from quantbench.data.market import risk_free_rate
 from quantbench.forensics import analyze
+from quantbench.risk import noter as noter_risque
 from quantbench.valuation import monte_carlo_dcf
 from quantbench.valuation.route import value_stock
 from quantbench.valuation.build_universal import (project, build_dcf_from_fundamentals,
@@ -402,6 +403,16 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     ard = annual_report_docs(cik) if cik else {"ars_pdf": None, "tenk": None, "documents": []}
     filing = (f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=10-K"
               if cik else None)
+    # NOTE DE RISQUE. Elle repond a une question DIFFERENTE de l'upside : non pas
+    # "combien vaut cette societe" mais "quelle est la probabilite de perdre
+    # durablement sa mise". Elle lit un calibrage GELE, donc n'exige aucune statistique
+    # d'univers et laisse les cinq shards independants.
+    fund["exchange"] = sr.get("exchange")
+    try:
+        risque = noter_risque(fund, F, motifs, reparations)
+    except Exception:                                  # noqa: BLE001
+        risque = None
+
     profile = {
         "ticker": symbol, "name": fund.get("name"), "sector": fund.get("sector"),
         "industry": fund.get("industry"), "summary": fund.get("summary"),
@@ -409,6 +420,7 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
         "fundamentals": {k: fund.get(k) for k in (
             "price", "market_cap", "shares", "beta", "revenue", "ebit", "net_income",
             "total_debt", "cash", "book_equity", "operating_margin", "roe")},
+        "risque": risque,
         "forensics": forensic, "statements": _statements(F), "news": news,
         "projection": proj, "methodologie": methodo,
         "reparations_donnees": reparations,
@@ -427,6 +439,10 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
            "method": val.get("method"), "price": val.get("price"),
            "market_cap": val.get("market_cap"), "value_per_share": val.get("value_per_share"),
            "upside": val.get("upside"), "confidence": val.get("confidence"),
+           "note_risque": (risque or {}).get("grade"),
+           "score_risque": (risque or {}).get("score"),
+           "regime_risque": (risque or {}).get("regime"),
+           "date_comptes": fund.get("date_des_comptes"),
            "op_margin": fund.get("operating_margin"), "roe": fund.get("roe"),
            "piotroski": f.get("scores", {}).get("piotroski_f"),
            "beneish_flag": f.get("scores", {}).get("beneish_flag"),
