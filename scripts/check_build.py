@@ -24,12 +24,28 @@ Usage : python scripts/check_build.py [--strict]
 """
 
 import json
+from collections import Counter
 import os
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
 _HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(_HERE))
 SCREENER = os.path.join(os.path.dirname(_HERE), "app", "us", "_screener.json")
+
+from quantbench.risk import GRADES                                    # noqa: E402
+
+# Couverture minimale de la note de risque. Ce n'est pas un seuil de qualite mais un
+# detecteur de PANNE : la note est calculable pour TOUT titre valorise — meme sans
+# donnees, la dimension de confiance en tient lieu — donc une couverture effondree ne
+# peut signifier qu'une chose, le fichier de calibrage est absent ou illisible.
+MIN_PART_NOTEE = 0.95
+# Un grade concentrant la moitie de l'univers signale un calibrage degenere : bornes
+# ecrasees, table de quantiles vide, ou signal devenu constant. C'est exactement ce
+# qui s'est produit quand la dimension de liquidite classait TOUT l'univers au 96e
+# centile, Apple comprise, parce que le calibrage mesurait une grandeur differente de
+# celle que la notation classait.
+MAX_PART_UN_GRADE = 0.50
 
 # --- Seuils : larges, ils ne visent QUE les regressions grossieres ------------
 MAX_PART_NULLE = 0.32          # part de titres a -100 % (constatee : ~21 %)
@@ -131,6 +147,45 @@ def main(strict=True):
     if presents:
         erreurs.append("titres qui ne sont pas des actions ordinaires (obligations, "
                        f"privilegiees, entites disparues) presents : {', '.join(presents)}")
+
+    # 4. NOTE DE RISQUE
+    # Une note absente ne se voit pas : la fiche affiche simplement un tiret, et rien
+    # n'alerte. Les controles ci-dessous portent donc sur la COUVERTURE et sur la
+    # FORME de la distribution, jamais sur la note d'un titre en particulier.
+    notes = [r.get("note_risque") for r in rows]
+    notees = [g for g in notes if g]
+    print(f"\n  note de risque : {len(notees)}/{len(rows)} titres notes "
+          f"({len(notees) / max(len(rows), 1) * 100:.1f} %)")
+    if rows and len(notees) / len(rows) < MIN_PART_NOTEE:
+        erreurs.append(f"seulement {len(notees) / len(rows) * 100:.0f} % des titres "
+                       f"portent une note de risque — le calibrage est probablement "
+                       f"absent ou illisible")
+    if notees:
+        c = Counter(notees)
+        print("    " + "  ".join(f"{g}:{c.get(g, 0)}" for g in GRADES))
+        # UN SEUL GRADE CONCENTRANT LA MOITIE DE L'UNIVERS signale un calibrage
+        # degenere — bornes ecrasees, table de quantiles vide, ou signal constant.
+        pire = max(c.values()) / len(notees)
+        if pire > MAX_PART_UN_GRADE:
+            domine = max(c, key=c.get)
+            erreurs.append(f"le grade {domine} concentre {pire * 100:.0f} % des titres "
+                           f"— calibrage degenere")
+        # Les grandes valeurs du panier ne peuvent pas ressortir en risque extreme :
+        # si Apple ou Microsoft tombent en D ou F, une dimension est cassee.
+        for t in ("AAPL", "MSFT", "V", "JPM", "XOM", "KO"):
+            g = (par_ticker.get(t) or {}).get("note_risque")
+            if g and g[0] in ("D", "F"):
+                erreurs.append(f"{t} note {g} — une dimension de risque est cassee")
+
+    # Aucune valeur non finie ne doit atteindre le JSON : `Infinity` et `NaN` ne sont
+    # pas du JSON valide et rendent la fiche ENTIERE illisible dans un navigateur,
+    # alors que Python les relit sans broncher.
+    with open(SCREENER, encoding="utf-8") as f:
+        brut = f.read()
+    for jeton in ("Infinity", "NaN"):
+        if jeton in brut:
+            erreurs.append(f"'{jeton}' present dans le JSON publie — le navigateur "
+                           f"echouera a lire le fichier entier")
 
     # --- Verdict --------------------------------------------------------------
     print()

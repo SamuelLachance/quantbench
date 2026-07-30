@@ -1181,3 +1181,40 @@ def test_aucune_valeur_non_finie_ne_sort_de_la_notation():
 
     for f in cas:
         parcourir(noter(f, etats()))
+
+
+def test_le_calibrage_mesure_ce_que_la_notation_classe():
+    """La dimension de liquidite n'est pas le volume brut mais son RESIDU sur la
+    taille. Le residu etait calcule dans le module de SCORE, apres que le calibrage
+    eut mesure ses quantiles sur la grandeur BRUTE : la table portait sur des
+    -log10(volume), de l'ordre de -6 a -9, et l'on y cherchait le rang de residus de
+    l'ordre de l'unite. Tout residu depassait donc tout centile, et l'univers ENTIER —
+    Apple comprise, la valeur la plus echangee au monde — ressortait au 96e centile
+    d'ILLIQUIDITE.
+    La regle : une seule fonction produit le signal, et le calibrage l'appelle."""
+    src_score = (Path(__file__).resolve().parent.parent
+                 / "quantbench" / "risk" / "score.py").read_text(encoding="utf-8")
+    assert "signaux[" not in src_score, (
+        "le module de score reecrit un signal apres coup : le calibrage mesurera "
+        "alors une grandeur differente de celle qui est classee")
+    src_cal = (Path(__file__).resolve().parent.parent
+               / "scripts" / "build_risk_stats.py").read_text(encoding="utf-8")
+    assert src_cal.index("Passe 0") < src_cal.index("Passe 1"), (
+        "la regression de liquidite doit preceder la mesure des quantiles")
+
+
+def test_la_liquidite_est_un_residu_de_la_taille():
+    """La part d'illiquidite qu'explique la capitalisation est deja tarifee dans le
+    cout des fonds propres, par la prime de taille. L'entrer a nouveau la compterait
+    deux fois, et la note ne ferait que reproduire un classement par taille."""
+    from quantbench.risk.dimensions import d6_liquidite
+    cal = {"liquidite": {"global": {"a": -3.0, "b": 0.9}}}
+    # Deux societes au MEME volume mais de tailles tres differentes : la petite est la
+    # plus liquide RELATIVEMENT a sa taille, elle doit donc etre la moins risquee.
+    grande = societe(market_cap=100.0, volume_dollars_median=1e7, exchange="NYSE")
+    petite = societe(market_cap=0.05, volume_dollars_median=1e7, exchange="NYSE")
+    sg, _ = d6_liquidite(grande, None, "exploitante", cal)
+    sp, _ = d6_liquidite(petite, None, "exploitante", cal)
+    assert sg > sp, (sg, sp)
+    # Sans calibrage, la dimension est indefinissable — jamais devinee.
+    assert d6_liquidite(grande, None, "exploitante", None) == (None, None)

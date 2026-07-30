@@ -131,11 +131,33 @@ def main(limite):
     print(f"\nexploitables {len(lignes)} | population de REFERENCE {len(reference)} "
           f"({len(reference) / max(len(lignes), 1) * 100:.0f} %)")
 
+    # --- Passe 0 : regression de liquidite, PAR PLACE DE COTATION ---------------
+    # Elle doit preceder la mesure des quantiles : la dimension de liquidite n'est pas
+    # le volume brut mais son RESIDU sur la taille, et le calibrage doit mesurer
+    # EXACTEMENT la grandeur que la notation classera ensuite. Mesurer les centiles du
+    # volume brut puis y chercher le rang d'un residu revient a confronter des
+    # -log10(volume) de l'ordre de -6 a -9 a des residus de l'ordre de l'unite : tout
+    # residu depasse alors tout centile, et l'univers ENTIER — Apple comprise, la
+    # valeur la plus echangee au monde — ressort au 96e centile d'illiquidite.
+    # --- Regression de liquidite, par place de cotation -------------------------
+    par_place = {}
+    for l in reference:
+        f = l["fund"]
+        vol, cap = f.get("volume_dollars_median"), f.get("market_cap")
+        if vol and vol > 0 and cap and cap > 0:
+            par_place.setdefault(f.get("exchange") or "?", []).append(
+                (math.log10(cap * 1e9), math.log10(vol)))
+    liquidite = {k: r for k, v in par_place.items() if (r := regression(v))}
+    tous = [p for v in par_place.values() for p in v]
+    if (r := regression(tous)):
+        liquidite["global"] = r
+
     # --- Passe 1 : grilles de centiles, mesurees sur la reference ---------------
     par_dim = {cle: {"global": [], "secteurs": {}, "industries": {}}
                for cle, _n, _f, _niv in DIMENSIONS}
     for l in reference:
-        s = mesurer(l["fund"], l["F"], l["motifs"], l["reparations"])
+        s = mesurer(l["fund"], l["F"], l["motifs"], l["reparations"],
+                    {"liquidite": liquidite})
         s.pop("__regime__", None)
         sec = l["fund"].get("sector") or "?"
         ind = l["fund"].get("industry") or "?"
@@ -156,19 +178,6 @@ def main(limite):
         quantiles[cle] = q
         print(f"  {cle} : global n={len(paquets['global'])}, "
               f"{len(q['secteurs'])} secteurs, {len(q['industries'])} industries")
-
-    # --- Regression de liquidite, par place de cotation -------------------------
-    par_place = {}
-    for l in reference:
-        f = l["fund"]
-        vol, cap = f.get("volume_dollars_median"), f.get("market_cap")
-        if vol and vol > 0 and cap and cap > 0:
-            par_place.setdefault(f.get("exchange") or "?", []).append(
-                (math.log10(cap * 1e9), math.log10(vol)))
-    liquidite = {k: r for k, v in par_place.items() if (r := regression(v))}
-    tous = [p for v in par_place.values() for p in v]
-    if (r := regression(tous)):
-        liquidite["global"] = r
 
     cal = {
         "version": "1",
@@ -199,8 +208,7 @@ def main(limite):
     par_modalite = {}
     for l in lignes:
         r = noter(l["fund"], l["F"], l["motifs"], l["reparations"], cal=cal)
-        sig = mesurer(l["fund"], l["F"], l["motifs"], l["reparations"],
-                      cal.get("seuil_amortissement"))
+        sig = mesurer(l["fund"], l["F"], l["motifs"], l["reparations"], cal)
         for m in _modalites(l["fund"], l["F"], l["motifs"], sig):
             par_modalite.setdefault(m, []).append(r["score"])
     plafonds = {}

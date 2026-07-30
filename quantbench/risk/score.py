@@ -86,24 +86,6 @@ def rang(cle, signal, cal, secteur=None, industrie=None, niveau="univers"):
     return min(1.0, max(0.0, bas / n))
 
 
-def _residu_liquidite(fund, cal):
-    """Volume echange corrige de ce que la TAILLE laisse attendre.
-
-    La part d'illiquidite qu'explique la capitalisation est deja tarifee dans le cout
-    des fonds propres, par la prime de taille. L'entrer telle quelle la compterait
-    deux fois et la note ne ferait que reproduire un classement par taille."""
-    vol, cap = fund.get("volume_dollars_median"), fund.get("market_cap")
-    if not vol or vol <= 0 or not cap or cap <= 0:
-        return None
-    reg = ((cal or {}).get("liquidite", {}) or {}).get(fund.get("exchange") or "", None)
-    if not reg:
-        reg = ((cal or {}).get("liquidite", {}) or {}).get("global")
-    if not reg:
-        return None
-    attendu = reg["a"] + reg["b"] * math.log10(cap * 1e9)
-    return -(math.log10(vol) - attendu)          # signal oriente RISQUE
-
-
 def _modalites(fund, F, motifs, mesures):
     """Faits VERIFIABLES qui plafonnent la note. Ce ne sont pas des jugements : chacun
     est une observation qu'aucune qualite par ailleurs ne compense."""
@@ -134,13 +116,8 @@ def noter(fund, F=None, motifs=None, reparations=None, cal=None):
     pour TOUS les titres, y compris ceux dont les donnees sont pauvres — l'incertitude
     sur la donnee est elle-meme un risque, et c'est la dimension D7 qui la porte."""
     cal = cal if cal is not None else _CAL
-    signaux = mesurer(fund, F, motifs, reparations,
-                      (cal or {}).get('seuil_amortissement'))
+    signaux = mesurer(fund, F, motifs, reparations, cal)
     reg = signaux.pop("__regime__")
-    if fund.get("volume_dollars_median"):
-        residu = _residu_liquidite(fund, cal)
-        if residu is not None:
-            signaux["d6"] = (residu, "volume quotidien échangé, corrigé de la taille")
 
     poids = (cal or {}).get("poids") or {}
     secteur, industrie = fund.get("sector"), fund.get("industry")

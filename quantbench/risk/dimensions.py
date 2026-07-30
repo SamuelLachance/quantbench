@@ -297,21 +297,31 @@ def d5_dilution(fund, F, reg):
 # --------------------------------------------------------------------------- #
 # D6 — Liquidite de sortie, RESIDUELLE
 # --------------------------------------------------------------------------- #
-def d6_liquidite(fund, F, reg):
-    """Signal = -(volume echange), RESIDUEL de la taille.
+def d6_liquidite(fund, F, reg, cal=None):
+    """Signal = ecart du volume echange a ce que la TAILLE laisse attendre.
 
-    On n'entre NI le volume NI la capitalisation, mais l'ecart du volume a ce que la
-    taille laisse attendre. La part d'illiquidite qu'explique la taille est en effet
-    DEJA tarifee dans le cout des fonds propres, par la prime de taille : l'entrer a
-    nouveau la compterait deux fois, et la note ne ferait que reproduire un
-    classement par capitalisation.
+    On n'entre NI le volume NI la capitalisation, mais le RESIDU de l'un sur l'autre.
+    La part d'illiquidite qu'explique la taille est en effet deja tarifee dans le cout
+    des fonds propres, par la prime de taille : l'entrer a nouveau la compterait deux
+    fois, et la note ne ferait que reproduire un classement par capitalisation.
 
-    Le residu est calcule dans `score.py`, contre une regression gelee par place de
-    cotation. On ne retourne ici que la grandeur brute."""
-    vol = fund.get("volume_dollars_median")
-    if vol is None or vol <= 0:
+    Le residu se calcule ICI et non dans le module de score. Il y etait, et la
+    notation remplacait alors le signal APRES que le calibrage eut mesure ses
+    quantiles sur la grandeur brute : la table portait sur des `-log10(volume)`, de
+    l'ordre de -6 a -9, tandis qu'on y cherchait le rang de residus de l'ordre de
+    l'unite. Tout residu depassait donc tout centile, et les 16 000 titres de
+    l'univers — Apple comprise, la valeur la plus echangee au monde — ressortaient au
+    96e centile d'ILLIQUIDITE. Le calibrage doit mesurer EXACTEMENT la grandeur que la
+    notation classe : une seule fonction, un seul chemin."""
+    vol, cap = fund.get("volume_dollars_median"), fund.get("market_cap")
+    if not vol or vol <= 0 or not cap or cap <= 0:
         return None, None
-    return -math.log10(vol), "volume quotidien echange, corrige de la taille"
+    droites = (cal or {}).get("liquidite") or {}
+    d = droites.get(fund.get("exchange") or "") or droites.get("global")
+    if not d:
+        return None, None
+    attendu = d["a"] + d["b"] * math.log10(cap * 1e9)
+    return -(math.log10(vol) - attendu), "volume echange, corrige de la taille"
 
 
 # --------------------------------------------------------------------------- #
@@ -387,15 +397,20 @@ DIMENSIONS = (
 )
 
 
-def mesurer(fund, F=None, motifs=None, reparations=None, seuil_amortissement=None):
+def mesurer(fund, F=None, motifs=None, reparations=None, cal=None):
     """Signaux bruts des huit dimensions. Retourne {cle: (signal, libelle)} ; le
     signal vaut None quand la dimension n'est pas definissable pour ce titre."""
-    reg = regime(fund, F, seuil_amortissement)
+    cal = cal or {}
+    reg = regime(fund, F, cal.get("seuil_amortissement"))
     out = {"__regime__": reg}
     for cle, _nom, fonction, _niveau in DIMENSIONS:
         try:
             if cle == "d7":
                 out[cle] = fonction(fund, F, reg, motifs, reparations)
+            elif cle == "d6":
+                # La liquidite a besoin du CALIBRAGE : son signal est un residu de
+                # regression, pas une grandeur brute.
+                out[cle] = fonction(fund, F, reg, cal)
             else:
                 out[cle] = fonction(fund, F, reg)
         except Exception:                              # noqa: BLE001
