@@ -1495,3 +1495,53 @@ def test_une_marge_nulle_est_publiee_comme_nulle():
     assert "if (ebit and rev)" not in src, (
         "un resultat operationnel NUL est declare absent")
     assert "if (ni and eq)" not in src, "un resultat net NUL est declare absent"
+
+
+# --------------------------------------------------------------------------- #
+# 31. MOTEUR DCF — la prime de taille s'AJOUTE, elle ne se multiplie pas
+# --------------------------------------------------------------------------- #
+def test_la_prime_de_taille_ne_derive_pas_avec_le_beta():
+    """Elle etait injectee dans l'ERP sous la forme `erp + prime / beta_initial`, ce
+    qui l'annulait exactement — mais la PREMIERE annee seulement. Le beta converge
+    ensuite vers sa valeur terminale, emportant la prime avec lui : une societe dont
+    le beta double sur l'horizon voyait sa prime doubler, jusqu'a 3,5 points de cout
+    du capital surajoutes EN PERPETUITE, la ou se joue l'essentiel de la valeur."""
+    from quantbench.valuation.dcf import wacc_path
+    commun = dict(pretax_kd=0.06, terminal_pretax_kd=0.06, equity_value=1.0,
+                  debt_value=0.0, risk_free_rate=0.04, erp=0.05, marginal_tax=0.25,
+                  n_years=10, beta_converge_start=5, kd_converge_start=5)
+    # Beta qui DOUBLE sur l'horizon : le pire cas pour l'ancienne formule.
+    _w0, ke0, _b = wacc_path(unlevered_beta=0.5, terminal_unlevered_beta=1.0,
+                             size_premium=0.0, **commun)
+    _w1, ke1, _b1 = wacc_path(unlevered_beta=0.5, terminal_unlevered_beta=1.0,
+                              size_premium=0.035, **commun)
+    ecart = ke1 - ke0
+    assert abs(ecart[0] - 0.035) < 1e-12, ecart[0]
+    assert abs(ecart[-1] - 0.035) < 1e-12, (
+        f"la prime vaut {ecart[-1]:.4f} en annee terminale au lieu de 0,0350 : "
+        f"elle derive avec le beta")
+
+
+def test_la_prime_de_taille_n_entre_pas_dans_le_cout_de_la_dette():
+    """C'est une prime de risque ACTIONNAIRE : le preteur d'une petite societe se
+    remunere par son spread de credit, pas par elle."""
+    from quantbench.valuation.dcf import wacc_path
+    commun = dict(unlevered_beta=1.0, terminal_unlevered_beta=1.0, pretax_kd=0.06,
+                  terminal_pretax_kd=0.06, risk_free_rate=0.04, erp=0.05,
+                  marginal_tax=0.25, n_years=10, beta_converge_start=5,
+                  kd_converge_start=5)
+    # Societe financee INTEGRALEMENT par dette : la prime ne doit rien changer.
+    w0, _k, _b = wacc_path(equity_value=0.0, debt_value=1.0, size_premium=0.0, **commun)
+    w1, _k1, _b1 = wacc_path(equity_value=0.0, debt_value=1.0, size_premium=0.05,
+                             **commun)
+    assert abs(float(w1[0]) - float(w0[0])) < 1e-12
+
+
+def test_le_beta_n_est_pas_endette_deux_fois():
+    """Le moteur re-endette lui-meme le beta a partir du levier. Lui passer un beta
+    DEJA endette le leverait une seconde fois."""
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "valuation" / "build_universal.py").read_text(encoding="utf-8")
+    bloc = src.split("def build_dcf_from_fundamentals")[1]
+    assert "unlevered_beta=unlev" in bloc, (
+        "le moteur recoit un beta deja endette : il le levera une seconde fois")

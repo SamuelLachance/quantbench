@@ -306,9 +306,11 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         margin_converge_start=3,
         current_tax_rate=tx, marginal_tax_rate=tx, tax_converge_start=5,
         current_sales_to_capital=s2c, terminal_sales_to_capital=s2c, s2c_converge_start=3,
-        # La prime de taille est portee par l'ERP effectif pour qu'elle traverse
-        # tout le calcul du WACC, et non le seul cout des fonds propres affiche.
-        risk_free_rate=rf, erp=erp + prime_taille(fund.get("market_cap")) / max(lev_beta, 0.2),
+        # La prime de taille est passee TELLE QUELLE au moteur, qui l'ajoute au cout
+        # des fonds propres. Elle etait auparavant divisee par le beta puis injectee
+        # dans l'ERP — l'annulation n'etait exacte que la PREMIERE annee, le beta
+        # convergeant ensuite vers sa valeur terminale et emportant la prime avec lui.
+        risk_free_rate=rf, erp=erp, size_premium=prime_taille(fund.get("market_cap")),
         unlevered_beta=unlev, terminal_unlevered_beta=_clamp(unlev, 0.8, 1.2),
         beta_converge_start=5,
         current_pretax_kd=kd, terminal_pretax_kd=kd, kd_converge_start=5,

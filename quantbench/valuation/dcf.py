@@ -68,7 +68,8 @@ def wacc_path(unlevered_beta, terminal_unlevered_beta,
               pretax_kd, terminal_pretax_kd,
               equity_value, debt_value,
               risk_free_rate, erp, marginal_tax,
-              n_years, beta_converge_start, kd_converge_start):
+              n_years, beta_converge_start, kd_converge_start,
+              size_premium=0.0):
     """Trajectoire du cout du capital (WACC) et du cout des fonds propres.
 
     Beta leve = beta non-leve * (1 + (1 - t) * D/E). Beta et cout de la dette
@@ -85,7 +86,16 @@ def wacc_path(unlevered_beta, terminal_unlevered_beta,
     w_e = 1.0 if total == 0 else equity_value / total
     w_d = 0.0 if total == 0 else debt_value / total
 
-    cost_equity = risk_free_rate + betas * erp
+    # PRIME DE TAILLE : elle s'AJOUTE au cout des fonds propres, elle ne se
+    # multiplie pas par le beta. Elle etait auparavant injectee dans l'ERP sous la
+    # forme `erp + prime / beta_initial`, ce qui l'annulait exactement — mais la
+    # premiere annee SEULEMENT. Le beta CONVERGE ensuite vers sa valeur terminale :
+    # une societe dont le beta double sur l'horizon voyait sa prime de taille doubler
+    # avec lui, jusqu'a 3,5 points de cout du capital surajoutes en perpetuite, la ou
+    # se joue l'essentiel de la valeur.
+    # Elle n'entre pas dans le cout de la DETTE : c'est une prime de risque
+    # ACTIONNAIRE, le preteur d'une petite societe se remunere par son spread.
+    cost_equity = risk_free_rate + betas * erp + size_premium
     after_tax_kd = kd * (1.0 - marginal_tax)
     wacc = w_e * cost_equity + w_d * after_tax_kd
     return wacc, cost_equity, betas
@@ -130,6 +140,8 @@ class DcfInputs:
     # --- Cout du capital ---
     risk_free_rate: float = 0.03
     erp: float = 0.05
+    # Prime de TAILLE : s'ajoute au cout des fonds propres sans passer par le beta.
+    size_premium: float = 0.0
     unlevered_beta: float = 1.0
     terminal_unlevered_beta: float = 1.0
     beta_converge_start: int = 5
@@ -191,7 +203,7 @@ def value_dcf(x: DcfInputs) -> dict:
         x.current_pretax_kd, x.terminal_pretax_kd,
         x.equity_value, x.debt_value,
         x.risk_free_rate, x.erp, x.marginal_tax_rate,
-        n, x.beta_converge_start, x.kd_converge_start)
+        n, x.beta_converge_start, x.kd_converge_start, x.size_premium)
 
     # --- Flux ---
     ebit = revenues * margins
