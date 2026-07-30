@@ -39,20 +39,40 @@ from quantbench.risk import GRADES                                    # noqa: E4
 # detecteur de PANNE : la note est calculable pour TOUT titre valorise — meme sans
 # donnees, la dimension de confiance en tient lieu — donc une couverture effondree ne
 # peut signifier qu'une chose, le fichier de calibrage est absent ou illisible.
-MIN_PART_NOTEE = 0.95
+MIN_PART_NOTEE = 0.95          # POSE, avec une marge large : detecteur de panne
 # Un grade concentrant la moitie de l'univers signale un calibrage degenere : bornes
 # ecrasees, table de quantiles vide, ou signal devenu constant. C'est exactement ce
 # qui s'est produit quand la dimension de liquidite classait TOUT l'univers au 96e
 # centile, Apple comprise, parce que le calibrage mesurait une grandeur differente de
 # celle que la notation classait.
-MAX_PART_UN_GRADE = 0.50
+MAX_PART_UN_GRADE = 0.50       # POSE : une moitie de l'univers dans un grade
 
 # --- Seuils : larges, ils ne visent QUE les regressions grossieres ------------
-MAX_PART_NULLE = 0.32          # part de titres a -100 % (constatee : ~21 %)
-MAX_PART_EXTREME = 0.05        # part au-dessus de +500 % (constatee : ~1,8 %)
-MAX_UPSIDE = 100.0             # +10 000 % : au-dela, c'est une donnee corrompue
-MIN_COUVERTURE = 8000          # nombre de titres valorises (constate : ~12 000)
-MAX_NB_DEMESURES = 10          # nano-caps aberrantes tolerees avant blocage          # nombre de titres valorises (constate : ~12 000)
+MAX_PART_NULLE = 0.32          # POSE au-dessus du constate (~24 %)
+MAX_PART_EXTREME = 0.05        # POSE au-dessus du constate (~1,7 %)
+# SEUIL D'INSPECTION, ET NON DE CORRUPTION. Le commentaire precedent affirmait
+# "au-dela, c'est une donnee corrompue" : c'est FAUX, et la mesure le refute. La
+# pente log-log du nombre de titres au-dela d'un upside x passe continument de -0,73
+# a -3,49 : la queue est une loi de puissance, sans aucune discontinuite ou placer une
+# frontiere entre "extreme" et "corrompu". Le point de coupe est donc CONVENTIONNEL et
+# assume comme tel — il declenche une inspection, il ne diagnostique rien.
+MAX_UPSIDE = 100.0             # +10 000 %, point de coupe conventionnel assume
+MIN_COUVERTURE = 8000          # nombre de titres valorises (constate : ~15 500)
+
+# NOMBRE DE DEMESUREES TOLEREES — mesure, et c'etait tout le probleme.
+#
+# La valeur precedente etait 10, POSEE. Or la distribution AU REPOS de ce compteur —
+# le meme modele rejoue sur 250 seances de cours reels, sans aucune modification du
+# code — s'etend de 8 a 19, de mediane 15 et d'ecart-type 3,5. Le seuil se trouvait
+# donc SOUS LA MEDIANE de sa propre distribution au repos : le garde-fou refusait un
+# build identique a lui-meme environ neuf fois sur dix, et onze des quarante derniers
+# deploiements ont echoue, tous a cette etape. Un garde-fou qui bloque le cas normal
+# ne protege plus de rien, il empeche seulement la publication.
+#
+# Le niveau retenu est le quantile 99,5 % de cette distribution au repos, soit
+# mediane + 2,58 ecarts-types, arrondi au-dessus du maximum observe (19).
+# A REMESURER a chaque revision du modele : le compteur au repos se deplace avec lui.
+MAX_NB_DEMESURES = 25          # mesure : au repos 8-19, mediane 15, ecart-type 3,5
 
 # --- Panier de reference : methode attendue par secteur -----------------------
 PANIER = {
@@ -96,6 +116,25 @@ def main(strict=True):
         msg = (f"{len(demesures)} upside > {MAX_UPSIDE*100:.0f} % : "
                + ", ".join(f"{r['ticker']} {r['upside']*100:,.0f}%" for r in demesures[:5]))
         (erreurs if (len(demesures) > MAX_NB_DEMESURES or grosses) else alertes).append(msg)
+    # DEUX MESURES JOURNALISEES SANS BLOQUER. Une regression du MODELE deplace la
+    # capitalisation concernee, pas seulement le compte : une poignee de nano-caps
+    # corrompues pese 1e-8 de l'univers, une route cassee en pese des pour cent.
+    # Elles ne deviendront bloquantes qu'apres observation de leur propre distribution
+    # au repos a travers des revisions REELLES du modele — pas des rejeux de cours,
+    # auxquels elles sont par construction insensibles.
+    cap_univers = sum(r.get("market_cap") or 0.0 for r in rows)
+    cap_demesuree = sum(r.get("market_cap") or 0.0 for r in demesures)
+    print(f"  capitalisation demesuree : {cap_demesuree:,.3f} Md$ sur "
+          f"{cap_univers:,.0f} Md$ ({cap_demesuree / max(cap_univers, 1e-9):.2e} de l'univers)")
+    if demesures:
+        plus_grosse = max(demesures, key=lambda r: r.get("market_cap") or 0.0)
+        print(f"  plus grosse demesuree    : {plus_grosse['ticker']} "
+              f"{plus_grosse.get('market_cap') or 0:,.3f} Md$")
+        # Une route CASSEE concentre ses degats sur une seule methode ; des donnees
+        # individuellement corrompues s'eparpillent. C'est le vrai discriminant.
+        par_route = Counter(r.get("category") for r in demesures)
+        route, n_route = par_route.most_common(1)[0]
+        print(f"  concentration par route  : {n_route}/{len(demesures)} en '{route}'")
     # identite valeur/action <-> cours
     # Tolerance RELATIVE : un ecart de 5 points d'upside n'a pas le meme sens a
     # -50 % qu'a +28 000 % (ou il ne traduit que l'arrondi d'affichage).

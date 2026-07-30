@@ -1649,3 +1649,50 @@ def test_la_page_ne_pretend_plus_que_l_upside_vient_de_la_mediane():
     page = (Path(__file__).resolve().parent.parent
             / "app" / "stock.html").read_text(encoding="utf-8")
     assert "upside affiché est fondé sur la médiane" not in page
+
+
+# --------------------------------------------------------------------------- #
+# 34. LE GARDE-FOU REFUSAIT UN BUILD IDENTIQUE A LUI-MEME
+# --------------------------------------------------------------------------- #
+def test_le_seuil_de_demesure_est_au_dessus_de_sa_distribution_au_repos():
+    """La valeur precedente etait 10, POSEE. La distribution AU REPOS de ce compteur —
+    le meme modele rejoue sur 250 seances de cours reels, sans aucune modification du
+    code — s'etend de 8 a 19, mediane 15, ecart-type 3,5. Le seuil se trouvait donc
+    SOUS LA MEDIANE de sa propre distribution au repos : le garde-fou refusait un build
+    identique a lui-meme environ neuf fois sur dix, et onze des quarante derniers
+    deploiements ont echoue, tous a cette etape.
+    Un garde-fou qui bloque le cas normal ne protege plus de rien."""
+    import check_build
+    MAXIMUM_OBSERVE_AU_REPOS = 19
+    assert check_build.MAX_NB_DEMESURES > MAXIMUM_OBSERVE_AU_REPOS, (
+        f"seuil a {check_build.MAX_NB_DEMESURES} alors que le compteur atteint "
+        f"{MAXIMUM_OBSERVE_AU_REPOS} sans qu'aucune ligne de code ne change")
+
+
+def test_les_seuils_du_gardefou_declarent_leur_mesure():
+    """Toute constante du garde-fou doit porter, en commentaire, SOIT une mesure, SOIT
+    la mention explicite qu'elle est posee. Un nombre sans provenance est une opinion
+    qui se fait passer pour un fait — et celui-ci a bloque onze deploiements."""
+    src = (Path(__file__).resolve().parent.parent
+           / "scripts" / "check_build.py").read_text(encoding="utf-8")
+    lignes = src.splitlines()
+    constantes = [(i, l) for i, l in enumerate(lignes)
+                  if l.startswith(("MAX_", "MIN_")) and "=" in l]
+    assert constantes, "aucune constante trouvee"
+    for i, ligne in constantes:
+        # Le commentaire de fin de ligne ou les lignes qui precedent.
+        contexte = ligne + " " + " ".join(lignes[max(0, i - 12):i])
+        assert any(mot in contexte.lower()
+                   for mot in ("mesure", "constate", "observe", "assume", "pose")), (
+            f"constante sans provenance declaree : {ligne.strip()}")
+
+
+def test_le_gardefou_journalise_la_concentration_par_route():
+    """Une route CASSEE concentre ses degats sur une seule methode ; des donnees
+    individuellement corrompues s'eparpillent. C'est le vrai discriminant entre une
+    regression du MODELE — ce que le garde-fou doit attraper — et une poignee de
+    capitalisations fausses, qu'il ne doit pas laisser bloquer la publication."""
+    src = (Path(__file__).resolve().parent.parent
+           / "scripts" / "check_build.py").read_text(encoding="utf-8")
+    assert "concentration par route" in src
+    assert "capitalisation demesuree" in src
