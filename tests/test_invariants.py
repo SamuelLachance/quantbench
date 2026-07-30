@@ -2495,3 +2495,91 @@ def test_le_resume_publie_porte_bien_la_correction_du_survivant():
         "mesure publiee sans aucune societe radiee : biais du survivant non corrige"
     assert d["radiees"] / d["n"] > 0.05, \
         f"seulement {d['radiees']} radiees sur {d['n']} : correction trop faible"
+
+
+# --------------------------------------------------------------------------- #
+# Bande passante : le forfait est de 150 Go par mois
+# --------------------------------------------------------------------------- #
+def test_lhistorique_de_cours_est_borne_cote_serveur():
+    """Cet appel telechargeait cinq ans de seances pour n'en garder que 400.
+
+    Il pesait a lui seul 83 % de la bande passante du build ; sur seize mille
+    titres reconstruits chaque nuit, c'etait la difference entre tenir le forfait
+    mensuel et l'epuiser avant la fin du mois. Le bornage doit etre DEMANDE AU
+    SERVEUR (`&from=`), pas applique apres reception : trancher une liste deja
+    telechargee ne fait economiser aucun octet.
+    """
+    import inspect
+
+    from quantbench.data import fmp
+
+    src = inspect.getsource(fmp.history_ohlcv)
+    assert "&from=" in src, "l'historique n'est plus borne cote serveur"
+    assert "historical-price-eod/dividend-adjusted?symbol={symbol}{borne}" in src, \
+        "la borne n'est pas transmise a l'appel principal"
+    assert src.index("borne = \"\"") < src.index("_json("), \
+        "la borne est calculee apres l'appel"
+    # Le mode complet reste disponible : la validation historique en depend.
+    assert "if days:" in src, "le mode complet (days=None) a disparu"
+
+
+def test_le_bornage_couvre_bien_les_seances_demandees():
+    """Le facteur de conversion seances -> jours calendaires doit MAJORER.
+
+    Une annee compte environ 252 seances pour 365 jours, soit un facteur 1,45.
+    Sous-estimer tronquerait la serie juste avant le seuil dont depend le signal
+    court terme — un defaut qui ne se verrait que sur les titres peu liquides.
+    """
+    import inspect
+    import re
+
+    from quantbench.data import fmp
+
+    src = inspect.getsource(fmp.history_ohlcv)
+    m = re.search(r"int\(days \* ([\d.]+)\)", src)
+    assert m, "facteur de conversion introuvable"
+    facteur = float(m.group(1))
+    assert facteur >= 365 / 252, \
+        f"facteur {facteur} insuffisant : 365/252 = 1,449 minimum"
+
+
+def test_la_cle_api_ne_peut_pas_sortir_dans_un_message_derreur():
+    """`raise_for_status` construit son message a partir de l'URL COMPLETE.
+
+    Deux appelants historiques persistent `str(e)[:140]` dans le tableau `errors`
+    de `screener.json`, fichier PUBLIE sur le site : le prefixe du message fait
+    environ 78 caracteres, ce qui laisse la place d'y ecrire une cle entiere.
+    """
+    import os
+
+    import pytest as _pytest
+
+    from quantbench.data import fmp
+
+    ancienne = os.environ.get("FMP_API_KEY")
+    os.environ["FMP_API_KEY"] = "CLE_QUI_NE_DOIT_PAS_FUIR"
+    try:
+        with _pytest.raises(Exception) as e:
+            fmp._json("income-statement?symbol=CE_TICKER_NEXISTE_PAS_DU_TOUT")
+        msg = str(e.value)
+        assert "CLE_QUI_NE_DOIT_PAS_FUIR" not in msg, msg[:200]
+        assert "***" in msg, msg[:200]
+    finally:
+        if ancienne is None:
+            os.environ.pop("FMP_API_KEY", None)
+        else:
+            os.environ["FMP_API_KEY"] = ancienne
+
+
+def test_le_build_rend_compte_de_sa_bande_passante():
+    """Une regression de bande passante ne casse rien, ne ralentit rien, et ne se
+    voit que sur la facture — donc trop tard. Le build doit la publier a chaque
+    execution, avec sa projection sur trente jours."""
+    import importlib
+
+    mod = importlib.import_module("build_site_fmp")
+    assert hasattr(mod, "_rapport_bande_passante")
+    assert mod.PLAFOND_MENSUEL == 150e9
+    src = inspect.getsource(mod.main)
+    assert "_rapport_bande_passante(" in src, \
+        "le rapport existe mais n'est jamais appele"

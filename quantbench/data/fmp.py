@@ -125,11 +125,72 @@ def _key():
     return k
 
 
+# COMPTEUR DE BANDE PASSANTE, par point d'entree de l'API.
+#
+# Le forfait autorise 150 Go par mois et le build quotidien en consommait assez
+# pour epuiser le quota avant la fin du mois. Personne ne savait quel appel
+# telechargeait quoi : optimiser sans mesurer aurait consiste a deviner.
+#
+# `_get` est le passage OBLIGE de tous les appels FMP : un seul endroit a
+# instrumenter. On compte les octets reellement recus (`len(r.content)`), pas une
+# estimation, et on agrege par famille d'appel — le symbole varie, la famille non.
+_OCTETS = {}
+_OCTETS_VERROU = __import__("threading").Lock()
+
+
+def _famille(path):
+    """Nom d'appel sans le symbole ni les parametres : la famille de l'endpoint."""
+    return path.split("?")[0]
+
+
+def octets_consommes():
+    """{famille: (nombre d'appels, octets)}. Copie, pour lecture concurrente sure."""
+    with _OCTETS_VERROU:
+        return dict(_OCTETS)
+
+
+def reinitialiser_les_octets():
+    with _OCTETS_VERROU:
+        _OCTETS.clear()
+
+
+def _sans_la_cle(exc, cle):
+    """Meme exception, cle remplacee par des etoiles dans son message.
+
+    `raise_for_status` construit son message a partir de l'URL COMPLETE : la cle y
+    figure en clair. Ce message voyage ensuite loin — deux appelants historiques
+    persistent `str(e)[:140]` dans le tableau `errors` de `screener.json`, fichier
+    PUBLIE sur le site. Le prefixe du message fait environ 78 caracteres, ce qui
+    laisse la place d'y ecrire une cle entiere. Rien n'a fuite a ce jour, mais le
+    chemin etait ouvert, et il s'ouvre aussi dans toute trace locale.
+    """
+    if not cle:
+        return exc
+    msg = str(exc).replace(cle, "***")
+    nouvelle = type(exc)(msg) if not isinstance(exc, requests.HTTPError) else \
+        requests.HTTPError(msg, response=getattr(exc, "response", None))
+    return nouvelle
+
+
 def _get(path, retries=3):
+    cle = _key()
+    url = f"{_BASE}/{path}" + ("&" if "?" in path else "?") + f"apikey={cle}"
+    try:
+        return _get_brut(url, path, retries)
+    except Exception as exc:
+        raise _sans_la_cle(exc, cle) from None
+
+
+def _get_brut(url, path, retries=3):
     import time
-    url = f"{_BASE}/{path}" + ("&" if "?" in path else "?") + f"apikey={_key()}"
     for attempt in range(retries):
         r = requests.get(url, timeout=_TIMEOUT)
+        # Compte AVANT le test de statut : une reponse 429 ou 500 consomme aussi
+        # du transfert, et une boucle de reessai en consomme plusieurs fois.
+        n = len(r.content or b"")
+        with _OCTETS_VERROU:
+            k, o = _OCTETS.get(_famille(path), (0, 0))
+            _OCTETS[_famille(path)] = (k + 1, o + n)
         if r.status_code == 429:                    # rate limit -> backoff
             time.sleep(1.5 * (attempt + 1))
             continue
@@ -450,9 +511,26 @@ def history_ohlcv(symbol, days=400):
     qu'a des mesures relatives (volatilite, volume median). Toute question de la
     forme "que valait ce titre a telle date" — c'est-a-dire toute validation
     historique d'une note ou d'une valorisation — exige de savoir a quel jour
-    correspond chaque cours. `days=None` rend l'historique complet."""
+    correspond chaque cours. `days=None` rend l'historique complet.
+
+    LE BORNAGE EST DEMANDE AU SERVEUR, PAS APPLIQUE APRES COUP. Cet appel
+    telechargeait cinq ans de seances — 210 ko par titre — pour n'en garder que
+    les 400 dernieres, et il pesait a lui seul 83 % de toute la bande passante du
+    build. Sur seize mille titres reconstruits chaque nuit, c'etait la difference
+    entre tenir le forfait mensuel et l'epuiser avant la fin du mois.
+    Mesure sur cinq grandes valeurs : 211 ko -> 50 ko, soit 4,2 fois moins.
+
+    Le facteur 1,5 convertit des SEANCES en jours calendaires : une annee compte
+    environ 252 seances pour 365 jours. On majore volontairement — mieux vaut
+    quelques seances de trop que la serie tronquee juste avant le seuil dont
+    depend le signal court terme."""
+    borne = ""
+    if days:
+        from datetime import date as _date, timedelta as _td
+        depuis = _date.today() - _td(days=int(days * 1.5) + 10)
+        borne = f"&from={depuis.isoformat()}"
     try:
-        j = _json(f"historical-price-eod/dividend-adjusted?symbol={symbol}")
+        j = _json(f"historical-price-eod/dividend-adjusted?symbol={symbol}{borne}")
         lignes = [{"date": d.get("date"), "close": _num(d.get("adjClose")),
                    "volume": _num(d.get("volume"))}
                   for d in j][::-1]                           # ancien -> recent
@@ -462,7 +540,7 @@ def history_ohlcv(symbol, days=400):
     except Exception:
         pass
     try:                                                      # repli : cours brut
-        j = _json(f"historical-price-eod/light?symbol={symbol}")
+        j = _json(f"historical-price-eod/light?symbol={symbol}{borne}")
         lignes = [{"date": d.get("date"), "close": _num(d.get("price")),
                    "volume": _num(d.get("volume"))}
                   for d in j][::-1]

@@ -89,6 +89,41 @@ def _rapport_chrono(duree_totale, workers=1):
               f"{n:6} appels  {mur/max(n,1)*1000:7.0f} ms/appel")
 
 
+# PLAFOND MENSUEL DE TRANSFERT chez le fournisseur de donnees, en octets.
+# POSE, parce qu'il est contractuel et non mesure : c'est le forfait souscrit.
+PLAFOND_MENSUEL = 150e9
+
+
+def _rapport_bande_passante(n_titres, n_shards=1):
+    """Ce que le build a telecharge, et ce que cela donne sur un mois.
+
+    Le forfait autorise 150 Go par mois et le build en consommait assez pour
+    l'epuiser avant la fin du mois, sans que personne ne sache quel appel
+    telechargeait quoi. La mesure a designe un seul coupable : l'historique de
+    cours, 83 % du total, telecharge sur cinq ans pour n'en garder que 400
+    seances. Le bornage cote serveur a ramene le build de 2,44 Go a 1,03 Go.
+
+    Ce rapport existe pour que cela ne se reperde pas en silence : une
+    regression de bande passante ne casse rien, ne ralentit rien, et ne se voit
+    que sur la facture — donc trop tard.
+    """
+    d = fmp.octets_consommes()
+    if not d:
+        return
+    total = sum(o for _k, o in d.values())
+    print(f"\n  bande passante ({total/1e6:.0f} Mo pour {n_titres} titres, "
+          f"{total/max(n_titres,1)/1e3:.0f} ko/titre) :")
+    for fam, (k, o) in sorted(d.items(), key=lambda kv: -kv[1][1])[:8]:
+        print(f"    {fam:42} {k:6} appels {o/1e6:7.2f} Mo {o/total*100:5.1f} %")
+    # Projection : ce shard represente 1/n_shards du build quotidien.
+    mois = total * n_shards * 30
+    part = mois / PLAFOND_MENSUEL * 100
+    alerte = "" if part < 60 else ("   <-- SURVEILLER" if part < 90
+                                   else "   <-- PLAFOND MENSUEL EN DANGER")
+    print(f"    projection 30 jours : {mois/1e9:.0f} Go sur {PLAFOND_MENSUEL/1e9:.0f} Go "
+          f"({part:.0f} %){alerte}")
+
+
 def _arrondi(v):
     """Arrondi a precision constante en CHIFFRES SIGNIFICATIFS : 2 decimales
     au-dela de 1 $, 6 en dessous (penny stocks)."""
@@ -738,6 +773,7 @@ def main(exchanges, years=6, workers=20, with_news=True, with_pdf=True, limit=No
                 print(f"  {done+fail}/{len(syms)} (ok={done})")
 
     _rapport_chrono(time.time() - t0, workers)
+    _rapport_bande_passante(len(syms), shard[1] if shard else 1)
 
     if rejets:
         print("\n  motifs de non-couverture (donnees non verifiables) :")
