@@ -209,11 +209,19 @@ def _date_des_comptes(inc, bal):
     return None
 
 
-def _age_en_mois(date_cloture):
+def _age_en_mois(date_cloture, reference=None):
     """Age en MOIS depuis la cloture. Compte en mois et non en millesimes : le
     millesime d'exercice est decale chez le fournisseur pour 3 a 4 % des lignes — un
     exercice clos le 30 juin 2024 est etiquete 2023 — et comparer des annees civiles
-    cree une falaise au 1er janvier sans aucun sens economique."""
+    cree une falaise au 1er janvier sans aucun sens economique.
+
+    `reference` (AAAA-MM-JJ) remplace la date du jour. Le defaut sert la production,
+    ou "maintenant" est la bonne question. Toute reconstitution historique doit en
+    revanche demander l'age QU'AVAIENT les comptes a la date etudiee : compter depuis
+    aujourd'hui vieillit tout l'univers du meme nombre de mois, ce qui sature la
+    dimension de confiance dans la donnee et lui fait perdre le pouvoir de distinguer
+    des comptes frais de comptes perimes — puis fait conclure, a tort, qu'elle
+    n'apporte rien."""
     if not date_cloture:
         return None
     from datetime import datetime, timezone
@@ -221,7 +229,14 @@ def _age_en_mois(date_cloture):
         c = datetime.strptime(date_cloture, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError:
         return None
-    n = datetime.now(timezone.utc)
+    if reference:
+        try:
+            n = datetime.strptime(str(reference)[:10], "%Y-%m-%d").replace(
+                tzinfo=timezone.utc)
+        except ValueError:
+            n = datetime.now(timezone.utc)
+    else:
+        n = datetime.now(timezone.utc)
     return (n.year - c.year) * 12 + (n.month - c.month) - (n.day < c.day)
 
 
@@ -588,8 +603,12 @@ def financials_from_fmp(entry):
 _EX_CUR = {"NASDAQ": "USD", "NYSE": "USD", "AMEX": "USD", "TSX": "CAD", "TSXV": "CAD"}
 
 
-def fundamentals_from_fmp(symbol, sr, entry, desc):
-    """Dict compatible universal.get_fundamentals — montants convertis en USD."""
+def fundamentals_from_fmp(symbol, sr, entry, desc, reference=None):
+    """Dict compatible universal.get_fundamentals — montants convertis en USD.
+
+    `reference` fixe la date depuis laquelle l'age des comptes est compte.
+    None = aujourd'hui, ce que veut la production ; une date, ce qu'exige
+    toute reconstitution historique."""
     inc, bal = entry.get("income", {}), entry.get("balance", {})
     cf = entry.get("cashflow", {})
     yrs = sorted(set(inc) & set(bal), reverse=True)
@@ -764,7 +783,7 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         # l'information vieillit. Iridium World Communications, en faillite depuis
         # 1999, etait valorisee sur son bilan de 1998 vingt-huit ans plus tard.
         "date_des_comptes": _date_des_comptes(inc, bal),
-        "age_des_comptes_mois": _age_en_mois(_date_des_comptes(inc, bal)),
+        "age_des_comptes_mois": _age_en_mois(_date_des_comptes(inc, bal), reference),
         "cik": inc.get(y, {}).get("cik"), "sic": None,
     }
 

@@ -68,6 +68,9 @@ SEUIL_EFFONDREMENT = -0.70
 DEVISE_DE_LA_PLACE = {"NASDAQ": "USD", "NYSE": "USD", "AMEX": "USD",
                       "OTC": "USD", "TSX": "CAD", "TSXV": "CAD"}
 
+# Profondeur d'historique dont dispose la production (`fmp.statements`).
+PROFONDEUR_PRODUCTION = 6
+
 FAMILLES = ["A", "B", "C", "D", "F"]
 ORDRE = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F"]
 
@@ -109,15 +112,24 @@ def cours_a(serie, jour: str):
 # --------------------------------------------------------------------------- #
 # Une societe
 # --------------------------------------------------------------------------- #
-def evaluer(sym, sr, jour_t0: str, radiees: dict):
+def evaluer(sym, sr, jour_t0: str, radiees: dict, plafond_capi=None):
     """Note reconstituee a `jour_t0`, puis devenir du titre jusqu'a aujourd'hui."""
     try:
         entry = fmp.statements(sym, limit=14)
         if not entry or not entry.get("income"):
             return None
+        # On tire quatorze exercices pour pouvoir en jeter, puis on ne garde que
+        # les six derniers DEJA PUBLIES a la date — soit exactement la profondeur
+        # dont dispose la production. Sans ce recadrage, une societe de vingt ans
+        # d'anciennete offrirait ici quatorze exercices contre six en production,
+        # et la dimension de confiance dans la donnee, qui lit cette profondeur,
+        # serait mesuree sur une echelle qui n'existe nulle part.
         vieux = tronquer(entry, jour_t0)
         if len(vieux["income"]) < 2:
             return None                       # pas d'historique publie a la date
+        recents = sorted(vieux["income"], reverse=True)[:PROFONDEUR_PRODUCTION]
+        vieux = {b: {y: d for y, d in vieux[b].items() if y in recents}
+                 for b in ("income", "balance", "cashflow")}
 
         serie = fmp.history_ohlcv(sym, days=None)
         if not serie:
@@ -135,7 +147,9 @@ def evaluer(sym, sr, jour_t0: str, radiees: dict):
         # difficulte, celles qui emettent des actions pour survivre.
         sr_t0 = {k: v for k, v in (sr or {}).items()
                  if k not in ("price", "market_cap")}
-        f = fmp.fundamentals_from_fmp(sym, sr_t0, vieux, {})
+        # L'age des comptes se compte DEPUIS L'INSTANTANE, pas depuis
+        # aujourd'hui : sinon tout l'univers parait vieux de deux ans de plus.
+        f = fmp.fundamentals_from_fmp(sym, sr_t0, vieux, {}, reference=jour_t0)
         if not f:
             return None
 
@@ -158,6 +172,18 @@ def evaluer(sym, sr, jour_t0: str, radiees: dict):
         f["price"] = px_brut * fxp
         f["market_cap"] = px_brut * fxp * sh / 1e9
         f["exchange"] = sr_t0.get("exchange")
+
+        # LA RECONSTITUTION N'A PAS DE SECONDE SOURCE. La production deduit la base
+        # actionnaire du marche (capitalisation / cours) et ne se fie au nombre
+        # d'actions DEPOSE qu'a defaut ; ici, faute de capitalisation d'epoque, on
+        # n'a que le nombre depose, sans rien pour le contredire. Deux lignes l'ont
+        # montre : Repco Nickel, cotee de gre a gre, porte un cours de 10 000 $ dans
+        # sa serie, ce qui donne 18 468 Md$ pour 1,8 milliard d'actions.
+        # Le plafond n'est pas pose : c'est la plus grosse capitalisation REELLEMENT
+        # observee dans l'univers d'aujourd'hui. Rien ne peut la depasser d'un ordre
+        # de grandeur sans que les deux entrees se contredisent.
+        if plafond_capi and f["market_cap"] > plafond_capi:
+            return {"ticker": sym, "ecarte": "capitalisation impossible"}
 
         motifs = valider(f, F, vieux)
         rep = reparer(sym, f, F, vieux, motifs) if motifs else []
@@ -190,7 +216,13 @@ def evaluer(sym, sr, jour_t0: str, radiees: dict):
                  if x.get("date") and x["date"][:10] > jour_t0 and x.get("close")]
         creux = (min(apres) / px_brut - 1.0) if apres else rendement
 
-        return {"ticker": sym, "grade": grade, "famille": grade[0],
+        # Le rang de CHAQUE dimension, pour savoir laquelle porte le signal. La
+        # note les pese uniformement faute d'avoir jamais pu mesurer leur pouvoir
+        # respectif ; ces rangs le rendent mesurable.
+        dims = {d["cle"]: d["rang"] for d in (n.get("dimensions") or [])
+                if d.get("rang") is not None}
+
+        return {"ticker": sym, "grade": grade, "famille": grade[0], "dimensions": dims,
                 "score": n.get("score"), "regime": n.get("regime"),
                 "cap_t0": f["market_cap"], "rendement": rendement,
                 "creux": creux, "issue": issue,
@@ -342,6 +374,73 @@ def par_taille(res, n_paquets=3):
     return out
 
 
+def aire_sous_la_courbe(paires):
+    """AUC : probabilite qu'une societe effondree soit MOINS bien classee qu'une
+    societe intacte tiree au hasard. Calculee par la statistique de Mann-Whitney,
+    ex aequo comptes une demie.
+
+    0,50 signifie exactement aucune information — un tirage a pile ou face. C'est
+    la seule lecture qui compte ici : une dimension a 0,50 pese dans la note sans
+    rien y apporter, et la moyenne uniforme la fait entrer au meme titre qu'une
+    dimension qui separe vraiment.
+    """
+    pos = [r for r, y in paires if y]          # effondrees
+    neg = [r for r, y in paires if not y]
+    if not pos or not neg:
+        return None
+    neg_tries = sorted(neg)
+    import bisect
+    total = 0.0
+    for r in pos:
+        inf = bisect.bisect_left(neg_tries, r)
+        egaux = bisect.bisect_right(neg_tries, r) - inf
+        total += inf + 0.5 * egaux
+    return total / (len(pos) * len(neg))
+
+
+def pouvoir_des_dimensions(res):
+    """AUC de chaque dimension, comparee a celle de la note SUR LE MEME sous-echantillon.
+
+    La comparaison naive est faussee : la solvabilite n'est definissable que sur
+    82 % des societes, la note sur 100 %. Confronter 0,645 mesure sur 1 339 titres
+    a 0,651 mesure sur 1 631 revient a comparer deux epreuves differentes. Chaque
+    dimension est donc opposee a la note RESTREINTE aux memes titres, et l'ecart
+    qui en resulte est le seul qui reponde a la question posee : agreger huit
+    dimensions vaut-il mieux que garder la meilleure ?
+    """
+    from quantbench.risk.dimensions import DIMENSIONS
+    noms = {c: n for c, n, _f, _niv in DIMENSIONS}
+
+    out = []
+    for cle, nom, _f, _niv in DIMENSIONS:
+        sous = [r for r in res if cle in (r.get("dimensions") or {})]
+        paires = [(r["dimensions"][cle], r["effondre"]) for r in sous]
+        auc = aire_sous_la_courbe(paires)
+        if auc is None:
+            # Une dimension jamais definissable dans cette reconstitution n'est pas
+            # une dimension sans pouvoir : elle est NON TESTEE. La liquidite de
+            # sortie en fait partie — elle exige une serie de volumes a la date de
+            # l'instantane, que le calcul de note ne recoit pas ici. Le taire
+            # laisserait lire son absence comme une absence de signal.
+            out.append({"dimension": cle, "nom": noms[cle], "n": 0, "auc": None,
+                        "auc_note_meme_sous_echantillon": None, "couverture": 0.0,
+                        "verdict": "non testee dans cette reconstitution"})
+            continue
+        auc_note = aire_sous_la_courbe(
+            [(r["score"], r["effondre"]) for r in sous if r.get("score") is not None])
+        if auc < 0.53:
+            verdict = "n'apporte rien"
+        elif auc < 0.55:
+            verdict = "marginal"
+        else:
+            verdict = "porte du signal"
+        out.append({"dimension": cle, "nom": noms[cle], "n": len(paires), "auc": auc,
+                    "auc_note_meme_sous_echantillon": auc_note,
+                    "couverture": len(paires) / len(res), "verdict": verdict})
+    out.sort(key=lambda d: -(d["auc"] if d["auc"] is not None else -1))
+    return out
+
+
 # --------------------------------------------------------------------------- #
 def main(horizon=24, echantillon=900, workers=14, graine=20260730):
     t0 = time.time()
@@ -363,7 +462,8 @@ def main(horizon=24, echantillon=900, workers=14, graine=20260730):
     apres_t0 = {s: d for s, d in radiees.items()
                 if str(d.get("date"))[:10] > jour_t0
                 and (d.get("exchange") or "").upper() in DEVISE_DE_LA_PLACE
-                and not fmp._est_un_derive(s, d.get("name"))}
+                and not fmp._est_un_derive(s, d.get("name"))
+                and not fmp._is_preferred(s, d.get("name"))}
     print(f"  dont radiees depuis l'instantane (hors derives) : {len(apres_t0)}")
 
     random.seed(graine)
@@ -378,12 +478,23 @@ def main(horizon=24, echantillon=900, workers=14, graine=20260730):
                       "name": apres_t0[s].get("name")}) for s in mortes])
     print(f"  a evaluer : {len(cibles)} ({len(vivantes)} cotees + {len(mortes)} radiees)\n")
 
-    res = []
+    # Plafond MESURE sur l'univers du jour, majore d'un ordre de grandeur : au-dela,
+    # les deux entrees de la reconstitution (cours d'epoque, actions deposees) se
+    # contredisent, et aucune des deux ne prouve que l'autre a tort.
+    plus_grosse = max((u.get("market_cap") or 0.0) for u in uni.values()) / 1e9
+    plafond_capi = plus_grosse * 10.0
+    print(f"  plus grosse capitalisation observee : {plus_grosse:.0f} Md$ "
+          f"-> plafond de reconstitution {plafond_capi:.0f} Md$\n")
+
+    res, ecartes = [], 0
     with cf.ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = [ex.submit(evaluer, s, sr, jour_t0, radiees) for s, sr in cibles]
+        futs = [ex.submit(evaluer, s, sr, jour_t0, radiees, plafond_capi)
+                for s, sr in cibles]
         for i, fut in enumerate(cf.as_completed(futs), 1):
             r = fut.result()
-            if r:
+            if r and r.get("ecarte"):
+                ecartes += 1
+            elif r:
                 res.append(r)
             if i % 200 == 0:
                 print(f"  {i}/{len(cibles)} (notes reconstituees : {len(res)})")
@@ -446,14 +557,34 @@ def main(horizon=24, echantillon=900, workers=14, graine=20260730):
                 print(f"      {l['grade']:3} n={l['n']:4} effondrements "
                       f"{l['taux']*100:5.1f}%  creux med. {l['creux_median']*100:7.1f}%")
 
+    # --- Quelle dimension porte le signal ? --------------------------------
+    dims = pouvoir_des_dimensions(res)
+    if dims:
+        print("\n  POUVOIR DE CHAQUE DIMENSION (AUC ; 0,500 = aucune information) :")
+        print(f"    {'dimension':28} {'AUC':>6} {'note ici':>9} {'ecart':>7} "
+              f"{'couvre':>7}  verdict")
+        for d in dims:
+            if d["auc"] is None:
+                print(f"    {d['nom']:28} {'—':>6} {'—':>9} {'—':>7} {'—':>7}  "
+                      f"{d['verdict']}")
+                continue
+            an = d["auc_note_meme_sous_echantillon"]
+            print(f"    {d['nom']:28} {d['auc']:6.3f} {an:9.3f} "
+                  f"{an - d['auc']:+7.3f} {d['couverture']*100:6.1f}%  {d['verdict']}")
+        auc_note = aire_sous_la_courbe([(r["score"], r["effondre"]) for r in res
+                                        if r.get("score") is not None])
+        if auc_note is not None:
+            print(f"    {'NOTE COMPLETE (tous titres)':28} {auc_note:6.3f}")
+
     SORTIE.parent.mkdir(parents=True, exist_ok=True)
     SORTIE.write_text(json.dumps({
         "instantane": jour_t0, "horizon_mois": horizon,
         "seuil_effondrement": SEUIL_EFFONDREMENT,
         "n": len(res), "radiees": sum(1 for r in res if r["issue"] == "radiee"),
+        "ecartes_capitalisation_impossible": ecartes,
         "par_grade": par_grade, "par_famille": par_famille,
         "spearman_familles": rho, "spearman_creux": rho_creux,
-        "par_taille": strates,
+        "par_taille": strates, "dimensions": dims,
         "z_F_contre_A": z, "p_F_contre_A": pval,
         "genere": date.today().isoformat(),
         # Les lignes brutes : sans elles, toute anomalie du tableau agrege est

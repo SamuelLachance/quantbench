@@ -2133,8 +2133,9 @@ def test_les_chiffres_publies_correspondent_a_la_mesure():
     par_famille = {l["grade"]: l for l in d["par_famille"]}
 
     html = (racine / "app" / "stock.html").read_text(encoding="utf-8")
-    bloc = re.search(r'<table class="mini-table">(.*?)</table>', html, re.S)
-    assert bloc, "le tableau de validation a disparu de la fiche"
+    tables = re.findall(r'<table class="mini-table">(.*?)</table>', html, re.S)
+    assert tables, "le tableau de validation a disparu de la fiche"
+    bloc = type("B", (), {"group": lambda _s, _i: tables[0]})()
 
     lignes = re.findall(r"<tr><td>([ABCDF])</td>(.*?)</tr>", bloc.group(1), re.S)
     assert len(lignes) == 5, f"5 familles attendues, {len(lignes)} publiees"
@@ -2164,5 +2165,31 @@ def test_les_chiffres_publies_correspondent_a_la_mesure():
     assert d["spearman_familles"] == pytest.approx(1.0), \
         "la page annonce une monotonie parfaite : elle doit etre mesuree"
     assert d["p_F_contre_A"] < 0.0001, "la page annonce p < 0,0001"
-    assert d["radiees"] == 356, \
+    assert d["radiees"] == 361, \
         "le nombre de societes radiees est cite dans la page"
+
+    # Le second tableau publie le pouvoir de chaque dimension : lui aussi doit
+    # correspondre a la mesure, y compris pour les dimensions qui DESSERVENT le
+    # modele. C'est la clause la plus importante du test — elle empeche de
+    # republier une version d'ou l'AUC genante aurait discretement disparu.
+    assert len(tables) >= 2, "le tableau des dimensions a disparu de la fiche"
+    mesure_dims = {x["nom"]: x for x in d["dimensions"]}
+    publiees = re.findall(r"<tr><td>([^<]+)</td><td>([^<]+)</td><td>([^<]+)</td></tr>",
+                          tables[1])
+    assert publiees, "aucune dimension publiee"
+    vues = 0
+    for nom, auc, _couv in publiees:
+        ref = mesure_dims.get(nom.replace("’", "'"))
+        if ref is None:
+            continue                      # ligne de synthese (note complete)
+        vues += 1
+        if ref["auc"] is None:
+            assert auc.strip() == "—", (nom, "non testee mais chiffree")
+        else:
+            assert float(auc.replace(",", ".")) == pytest.approx(ref["auc"], abs=0.001), nom
+    assert vues == 8, f"8 dimensions attendues dans la page, {vues} trouvees"
+    faibles = [x["nom"] for x in d["dimensions"]
+               if x["auc"] is not None and x["auc"] < 0.53]
+    for nom in faibles:
+        assert nom.replace("'", "’") in html, \
+            f"{nom} n'apporte rien : la page doit le dire, pas le taire"

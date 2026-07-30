@@ -129,18 +129,42 @@ function detailRisque(r){
         à juger la note sur un univers vidé des faillites qu’elle prétend annoncer.</p>
         <table class="mini-table">
           <tr><th>note</th><th>n</th><th>perte ≥ 70 %</th><th>rend. médian</th><th>plus-bas médian</th></tr>
-          <tr><td>A</td><td>186</td><td>14,0 %</td><td>+13,1 %</td><td>−17,8 %</td></tr>
-          <tr><td>B</td><td>419</td><td>21,0 %</td><td>+17,7 %</td><td>−16,8 %</td></tr>
-          <tr><td>C</td><td>319</td><td>30,4 %</td><td>−7,1 %</td><td>−25,0 %</td></tr>
-          <tr><td>D</td><td>523</td><td>42,4 %</td><td>−53,6 %</td><td>−60,9 %</td></tr>
-          <tr><td>F</td><td>179</td><td>47,5 %</td><td>−50,0 %</td><td>−90,0 %</td></tr>
+          <tr><td>A</td><td>329</td><td>18,5 %</td><td>+11,3 %</td><td>−17,3 %</td></tr>
+          <tr><td>B</td><td>376</td><td>22,9 %</td><td>+13,7 %</td><td>−18,0 %</td></tr>
+          <tr><td>C</td><td>249</td><td>30,5 %</td><td>−7,1 %</td><td>−29,9 %</td></tr>
+          <tr><td>D</td><td>549</td><td>44,3 %</td><td>−54,3 %</td><td>−60,0 %</td></tr>
+          <tr><td>F</td><td>128</td><td>44,5 %</td><td>−50,0 %</td><td>−92,7 %</td></tr>
         </table>
-        <p>Monotonie parfaite de A vers F, écart de 33,5 points entre les extrêmes
-        (p&nbsp;&lt;&nbsp;0,0001). La note corrèle avec la taille — 3,6&nbsp;Md$ de
-        capitalisation médiane en A contre 1&nbsp;M$ en F — et la vraie question était donc
-        de savoir si elle dit quelque chose que la capitalisation ne dit pas déjà. À taille
-        comparable, la séparation tient : dans le tiers des plus grandes, A et B s’effondrent
-        à 11&nbsp;%, C et D à 27&nbsp;%.</p>
+        <p>Monotonie parfaite de A vers F, sur le taux d’effondrement comme sur le plus-bas
+        traversé, avec 26,0 points d’écart entre les extrêmes (p&nbsp;&lt;&nbsp;0,0001).
+        La note corrèle avec la taille — 3,2&nbsp;Md$ de capitalisation médiane en A contre
+        moins d’un million en F — et la vraie question était donc de savoir si elle dit
+        quelque chose que la capitalisation ne dit pas déjà. À taille comparable, la
+        séparation tient.</p>
+        <p><strong>Ce que chaque dimension apporte.</strong> Mesuré en aire sous la courbe :
+        la probabilité qu’une société qui s’est effondrée ait été moins bien classée qu’une
+        société intacte tirée au hasard. 0,500 signifie exactement aucune information.</p>
+        <table class="mini-table">
+          <tr><th>dimension</th><th>AUC</th><th>définissable sur</th></tr>
+          <tr><td>Solvabilité</td><td>0,643</td><td>81 %</td></tr>
+          <tr><td>Autonomie de trésorerie</td><td>0,642</td><td>89 %</td></tr>
+          <tr><td>Rentabilité de cycle</td><td>0,628</td><td>95 %</td></tr>
+          <tr><td>Volatilité d’exploitation</td><td>0,601</td><td>77 %</td></tr>
+          <tr><td>Dilution</td><td>0,580</td><td>100 %</td></tr>
+          <tr><td>Mur de refinancement</td><td>0,545</td><td>100 %</td></tr>
+          <tr><td>Confiance dans la donnée</td><td>0,491</td><td>100 %</td></tr>
+          <tr><td>Liquidité de sortie</td><td>—</td><td>non testée ici</td></tr>
+          <tr><td><strong>note complète</strong></td><td><strong>0,644</strong></td><td>100 %</td></tr>
+        </table>
+        <p>La note fait mieux que chacune de ses dimensions prise seule, y compris comparée
+        sur le même sous-ensemble de sociétés — agréger apporte donc quelque chose. Deux
+        constats vont contre le modèle et sont publiés tels quels : <em>la confiance dans
+        la donnée</em> n’a annoncé aucun effondrement sur cette fenêtre (0,491, soit un
+        tirage à pile ou face), et <em>le mur de refinancement</em> n’est que marginal. La
+        pondération reste pourtant uniforme : réajuster des poids sur les 1 631 sociétés qui
+        ont servi à les mesurer reviendrait à apprendre par cœur cette fenêtre-là. La
+        <em>liquidité de sortie</em> n’est pas absente de la note — elle n’a pas pu être
+        testée ici, faute de volumes d’échange à la date de l’instantané.</p>
         <p><strong>Ce que cette mesure ne prouve pas.</strong> Un seul instantané, un seul
         horizon : ce n’est pas un test multi-périodes, et rien ne garantit qu’une autre
         fenêtre donnerait le même résultat. La monotonie est aussi la plus faible chez les
