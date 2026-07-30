@@ -328,3 +328,190 @@ def test_le_monte_carlo_reflete_la_ponderation_du_routage():
             f"par run_mc : la simulation annulerait la ponderation")
     assert "probabilite_de_realisation" in src
 
+
+
+# --------------------------------------------------------------------------- #
+# 13. Les flux de TRESORERIE priment sur le resultat comptable
+#
+# Rapport annuel 2024 de Branicks Group : EBIT -288,7 M EUR, perte nette
+# -365,5 M EUR, mais FFO +52,2 M EUR et flux d'exploitation +54,8 M EUR — la perte
+# etant integralement due a la reevaluation IFRS du parc immobilier (-6,9 %).
+# Le modele lisait le resultat et envoyait cette fonciere a la LIQUIDATION.
+# --------------------------------------------------------------------------- #
+def _fonciere_ifrs(**kw):
+    """Fonciere IFRS depreciee : perte comptable massive, tresorerie positive."""
+    base = dict(sector="Real Estate", industry="Real Estate - Services",
+                country="DE", revenue=0.28, ebit=-0.34, net_income=-0.32,
+                dep_amort=0.01, cfo=0.055, book_equity=0.86, total_debt=2.63,
+                cash=0.19, total_assets=4.29, market_cap=0.088, price=1.05,
+                shares=8.36e7, operating_margin=-1.18)
+    base.update(kw)
+    return societe(**base)
+
+
+def test_une_perte_non_monetaire_ne_vaut_pas_detresse():
+    cat = route.classify(_fonciere_ifrs(), {"scores": {"altman_z": 0.5}}, etats())
+    assert cat == "fonciere", (
+        f"routee en '{cat}' : une depreciation d'actifs ne fait sortir aucun euro, "
+        f"elle ne peut pas declencher la liquidation d'une societe qui encaisse")
+
+
+def test_une_perte_monetaire_reste_une_detresse():
+    """Le garde-fou ne doit pas desarmer la detresse REELLE : meme perte, mais la
+    tresorerie sort aussi."""
+    f = _fonciere_ifrs(cfo=-0.20, sector="Technology", industry="Software",
+                       book_equity=-0.5)
+    assert route.classify(f, {"scores": {"altman_z": 0.5}}, etats()) == "detresse"
+
+
+def test_le_ffo_est_immunise_contre_les_reevaluations():
+    """Sous IFRS le resultat net porte les reevaluations, non monetaires. Le FFO
+    doit s'ancrer sur le flux d'exploitation, qui les neutralise par construction.
+    Reference publiee : Branicks annonce 52,2 M EUR de FFO pour 54,8 M EUR de flux."""
+    r = route.value_reit(_fonciere_ifrs())
+    assert r is not None, "une fonciere qui encaisse ses loyers doit etre valorisable"
+    assert abs(r["ffo"] - 0.055) < 1e-9, (
+        f"FFO={r['ffo']} : il doit valoir le flux d'exploitation, pas un resultat "
+        f"net creuse par une reevaluation")
+
+
+def test_le_ffo_reste_borne_par_la_formule_comptable():
+    """Quand le marche MONTE, le resultat net porte des plus-values de reevaluation
+    et le flux d'exploitation peut etre gonfle par le besoin en fonds de roulement :
+    la formule comptable, si elle est positive et plus basse, doit borner."""
+    r = route.value_reit(_fonciere_ifrs(net_income=0.10, dep_amort=0.01, cfo=0.50))
+    assert abs(r["ffo"] - 0.11) < 1e-9, f"FFO={r['ffo']} : la borne comptable a saute"
+
+
+def test_pas_de_ffo_sans_encaissement():
+    assert route.value_reit(_fonciere_ifrs(cfo=-0.05)) is None
+
+
+def test_l_erosion_suit_la_tresorerie_et_non_le_resultat():
+    """Une perte non monetaire ne ronge aucune autonomie."""
+    intacte, p = route.erosion_par_les_pertes(
+        societe(net_income=-1.0, cfo=0.2), 1.0)
+    assert p is None and intacte == 1.0
+    erodee, p2 = route.erosion_par_les_pertes(
+        societe(net_income=-1.0, cfo=-0.5), 1.0)
+    assert p2 is not None and erodee < 1.0
+
+
+# --------------------------------------------------------------------------- #
+# 14. Le levier n'est pas plafonne par une valeur d'opinion
+#
+# Branicks porte 2,63 Md$ de dette pour 88 M$ de capitalisation (D/E = 29,9). Le
+# levier etait borne a 5, ce qui revenait a decreter qu'au-dela d'un certain
+# endettement le risque cesse de croitre — l'inverse de la formule de Damodaran.
+# --------------------------------------------------------------------------- #
+def test_le_cout_des_fonds_propres_croit_avec_le_levier_extreme():
+    from quantbench.valuation.build_universal import beta_ascendant
+    b6, _, _ = beta_ascendant(societe(total_debt=6.0, market_cap=1.0), 0.25)
+    b30, _, _ = beta_ascendant(societe(total_debt=30.0, market_cap=1.0), 0.25)
+    assert b30 > b6 * 3, (
+        f"beta {b6:.2f} a D/E=6 contre {b30:.2f} a D/E=30 : le levier est plafonne, "
+        f"l'equite d'une societe surendettee ressort artificiellement peu risquee")
+
+
+# --------------------------------------------------------------------------- #
+# 15. Un benefice jamais encaisse ne finance aucune croissance
+#
+# FDCTech : dix ans, 3 M$ de resultat d'exploitation cumule, 31 M$ de tresorerie
+# CONSOMMEE, chiffre d'affaires multiplie par 76. Le modele capitalisait ce
+# benefice comptable a l'infini (+937 %).
+# --------------------------------------------------------------------------- #
+def _hist(ebit, rev, cfo):
+    n = len(rev)
+    return {"years": [2025 - i for i in range(n)], "revenue": list(rev),
+            "ebit": list(ebit), "cfo": list(cfo),
+            "net_income": [0.0] * n, "equity": [1.0] * n,
+            "total_assets": [2.0] * n, "net_ppe": [1.0] * n}
+
+
+def test_conversion_en_tresorerie_mesuree_sur_le_cumul():
+    F = _hist([5.9, -0.8, 1.6, -1.0, -1.7], [35, 27, 13, 6.5, 0.5],
+              [-41, -7.2, 21, -0.5, -2.6])
+    c = route.conversion_en_tresorerie(F)
+    assert c is not None and c < 0, f"conversion={c} : le cumul de tresorerie est negatif"
+    # Non mesurable quand il n'y a aucun benefice cumule a convertir.
+    assert route.conversion_en_tresorerie(
+        _hist([-1, -1, -1, -1], [10, 10, 10, 10], [1, 1, 1, 1])) is None
+
+
+def test_une_tresorerie_jamais_degagee_bride_le_rendement_du_capital():
+    from quantbench.valuation.build_universal import build_dcf_from_fundamentals
+    sain, _ = build_dcf_from_fundamentals(societe(conversion_tresorerie=1.3))
+    creux, _ = build_dcf_from_fundamentals(societe(conversion_tresorerie=-11.0))
+    assert creux.current_roic < sain.current_roic, (
+        "un benefice jamais encaisse doit rendre la croissance plus chere a financer")
+
+
+def test_une_financiere_de_bilan_echappe_a_la_mesure_de_conversion():
+    """Le flux d'exploitation d'une banque suit les encours de credit, pas
+    l'exploitation : JPMorgan ressort a 0,41 sans anomalie aucune. Le test est
+    STRUCTUREL — FDCTech est etiquetee Financial Services alors qu'elle vend des
+    logiciels, et une exclusion par libelle laissait passer le cas meme a corriger."""
+    from quantbench.valuation.build_universal import build_dcf_from_fundamentals
+    banque = dict(sector="Financial Services", industry="Banks - Diversified",
+                  revenue=5.0, book_equity=4.0, total_assets=60.0)
+    a, _ = build_dcf_from_fundamentals(societe(conversion_tresorerie=1.3, **banque))
+    b, _ = build_dcf_from_fundamentals(societe(conversion_tresorerie=0.05, **banque))
+    assert a.current_roic == b.current_roic
+
+
+# --------------------------------------------------------------------------- #
+# 16. Une marge est un RAPPORT DE SOMMES, non la moyenne de rapports
+#
+# Pop Culture Group a triple son chiffre d'affaires en deux ans en perdant de
+# l'argent. Ses marges anciennes, gagnees sur un dixieme du volume actuel, pesaient
+# autant que les recentes dans une moyenne : le modele appliquait 18 % de marge a
+# un chiffre d'affaires qui n'en a jamais degage (+2 002 %).
+# --------------------------------------------------------------------------- #
+def test_la_marge_de_cycle_est_ponderee_par_le_volume():
+    F = _hist([-6.4, -13.6, -24.4, 1.4, 5.8], [107.6, 47.4, 18.5, 32.3, 25.5],
+              [0.2, -5.2, -6.0, -19.4, -4.0])
+    m = route.marge_de_cycle(F)
+    attendu = sum(F["ebit"]) / sum(F["revenue"])
+    assert abs(m - attendu) < 1e-12
+    assert m < 0, (
+        f"marge de cycle={m:.3f} : une societe dont le cumul est deficitaire ne peut "
+        f"pas ressortir rentable parce que ses petites annees l'etaient")
+
+
+def test_la_normalisation_inclut_les_exercices_deficitaires():
+    """Ne moyenner que les annees benificiaires definit la rentabilite normale comme
+    ce que la societe gagne quand elle gagne, et garantit une reponse optimiste."""
+    F = _hist([2.0, -8.0, 2.0, -8.0], [100, 100, 100, 100], [1, 1, 1, 1])
+    assert route.marge_de_cycle(F) == pytest.approx(-0.03)
+    r = route.value_mature_loss(societe(operating_margin=-0.08), F)
+    assert r is None or r["norm_margin"] < 0
+
+
+# --------------------------------------------------------------------------- #
+# 17. Un redressement se pondere par sa probabilite, sur TOUTES les routes
+#
+# La ponderation ne s'appliquait qu'aux cycliques et aux societes matures en perte.
+# La route standard, qui normalise pourtant dans les memes termes, tenait le retour
+# a la marge de cycle pour ACQUIS.
+# --------------------------------------------------------------------------- #
+def test_la_route_standard_pondere_aussi_le_redressement():
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "valuation" / "route.py").read_text(encoding="utf-8")
+    bloc = src.split("mn = marge_normalisee(fund, F)")[1].split("except Exception")[0]
+    assert "_pondere_par_realisation" in bloc, (
+        "la route standard valorise une marge normalisee sans ponderer le "
+        "redressement par sa probabilite")
+
+
+def test_une_equite_negative_traverse_la_ponderation():
+    """Une equite negative signale l'ECHEC de l'approche entreprise (dette de
+    financement captive), pas un redressement improbable. La ponderation la ramenait
+    a zero puis la melangeait a une liquidation, masquant l'echec et empechant la
+    bascule vers le modele cote equite : General Motors ressortait a -78 % au lieu
+    de -4 %."""
+    r = {"equity_value": -3.0, "method": "DCF FCFF", "confidence": "moyenne"}
+    out = route._pondere_par_realisation(r, societe(operating_margin=0.01),
+                                         etats(), 0.20)
+    assert out["equity_value"] < 0, (
+        "l'equite negative a ete masquee : la bascule cote equite ne se declenchera "
+        "plus")

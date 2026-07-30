@@ -163,7 +163,16 @@ def beta_ascendant(fund, tx):
         de0 = _safe_div(fund.get("total_debt"), fund.get("market_cap")) or 0.0
         return b, b / (1 + (1 - tx) * de0), "beta publie"
     de = _safe_div(fund.get("total_debt"), fund.get("market_cap")) or 0.0
-    de = _clamp(de, 0.0, 5.0)
+    # Le levier n'est PAS plafonne a une valeur d'opinion. Il etait borne a 5, ce qui
+    # revenait a decreter qu'au-dela d'un certain endettement le risque cesse de
+    # croitre — l'inverse de la formule de Damodaran, dont c'est tout le propos.
+    # Branicks porte 2,63 Md$ de dette pour 88 M$ de capitalisation, soit un D/E de
+    # 29,9 : son equite est une lame sous une montagne de dette, et c'est CE levier
+    # qui la rend presque sans valeur. Le plafond ramenait son cout des fonds propres
+    # de 64 % a 16 % et sa valeur de 96 M$ a 280 M$.
+    # La borne restante ne protege que d'une donnee fausse (capitalisation erronee
+    # sur une micro-cap), pas d'un levier reellement eleve.
+    de = _clamp(de, 0.0, 50.0)
     return bu * (1 + (1 - tx) * de), bu, "industrie"
 
 
@@ -215,6 +224,34 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         roic_ind = repere(fund, "roic")
         if roic_ind and roic_ind > 0:
             cur_roic = _clamp(min(cur_roic, roic_ind * 1.5), 0.02, 0.40)
+
+    # --- LE ROIC EST BORNE PAR LA TRESORERIE REELLEMENT DEGAGEE ---------------
+    # Le ROIC ci-dessus est un ratio purement COMPTABLE. Il commande, par
+    # l'identite g = reinvestissement x ROIC, tout ce que le modele juge finançable
+    # : un ROIC eleve signifie une croissance bon marche, donc une valeur elevee.
+    # Or FDCTech affiche sur dix ans 3 M$ de resultat d'exploitation cumule pour
+    # 31 M$ de tresorerie CONSOMMEE — le modele lui accordait une croissance quasi
+    # gratuite sur la foi d'un benefice jamais encaisse.
+    # Corriger le NIVEAU des benefices serait faux : la valeur terminale suppose a
+    # juste titre qu'une societe qui cesse de croitre finit par encaisser ce qu'elle
+    # gagne. C'est le RENDEMENT DU CAPITAL qui doit etre demontre, pas postule.
+    # Calibrage mesure sur 1 094 societes : la conversion mediane vaut 1,27 et le
+    # premier quartile 0,92 — le regime normal est donc largement au-dessus de 0,6
+    # (impot et besoin en fonds de roulement expliquent seuls l'ecart a 1). En deca
+    # la penalite croit lineairement et n'atteint son maximum qu'a conversion nulle,
+    # cas de 3,8 % de l'univers seulement.
+    # Exclusion des financieres DE BILAN : leur flux d'exploitation suit les
+    # variations d'encours de credit ou de depots, pas leur exploitation — JPMorgan
+    # ressort a 0,41 sans rien devoir a une quelconque anomalie. Le routage les
+    # envoie deja au rendement excedentaire ; le test STRUCTUREL reste en garde-fou.
+    # Il porte sur le BILAN et non sur le libelle sectoriel : FDCTech est etiquetee
+    # "Financial Services" alors qu'elle vend des logiciels, et une exclusion par
+    # libelle laissait passer precisement le cas que la mesure devait attraper.
+    conv = fund.get("conversion_tresorerie")
+    actif = fund.get("total_assets") or 0.0
+    de_bilan = (actif > 0 and equity_book / actif < 0.15 and actif / rev >= 4)
+    if conv is not None and conv < 0.60 and not de_bilan:
+        cur_roic = _clamp(cur_roic * _clamp(conv / 0.60, 0.0, 1.0), 0.02, 0.40)
 
     # --- CONTRAINTE DE CROISSANCE FINANCABLE (identite de Damodaran) ----------
     # g = taux de reinvestissement x ROIC. Cette identite n'etait utilisee que pour

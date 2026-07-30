@@ -144,6 +144,32 @@ def _hist_margins(F):
             if e is not None and r]
 
 
+def conversion_en_tresorerie(F):
+    """Part du benefice comptable cumule qui s'est reellement transformee en
+    TRESORERIE, mesuree sur tout l'historique disponible.
+
+    Un benefice qui n'est jamais encaisse n'a pas de valeur. FDCTech affiche sur dix
+    ans 3 M$ de resultat d'exploitation cumule pour 31 M$ de tresorerie CONSOMMEE :
+    son chiffre d'affaires a ete multiplie par 76 sans qu'un dollar ne rentre. Le
+    modele capitalisait ce benefice comptable a l'infini.
+
+    On mesure sur le CUMUL et non annee par annee : un decalage de besoin en fonds
+    de roulement se resorbe d'un exercice a l'autre, une decennie de non-conversion
+    non. Retourne None quand la mesure n'a pas de sens (moins de quatre exercices,
+    ou benefice cumule negatif — il n'y a alors rien a convertir)."""
+    if not F:
+        return None
+    eb = [x for x in (F.get("ebit") or []) if x is not None]
+    cf = [x for x in (F.get("cfo") or []) if x is not None]
+    n = min(len(eb), len(cf))
+    if n < 4:
+        return None
+    somme_ebit = sum(eb[:n])
+    if somme_ebit <= 0:
+        return None
+    return sum(cf[:n]) / somme_ebit
+
+
 def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
     sec = (fund.get("sector") or "").lower()
     ebit, ni = fund.get("ebit"), fund.get("net_income")
@@ -161,6 +187,20 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
     # structurellement un Z bas sans etre en detresse.
     z_ok = z is not None and not any(s in sec for s in _NO_ALTMAN)
 
+    # LA DETRESSE SE MESURE EN TRESORERIE, PAS EN RESULTAT COMPTABLE.
+    # Une depreciation d'actifs ne fait sortir aucun euro de la societe. Branicks a
+    # publie en 2024 un EBIT de -288,7 M EUR et une perte nette de -365,5 M EUR pour
+    # un flux d'exploitation de +54,8 M EUR et un FFO de +52,2 M EUR : la perte etait
+    # integralement due a la reevaluation de son parc (-6,9 %), et son propre rapport
+    # annuel precise que le resultat "reflete des ajustements de valorisation, non une
+    # faiblesse operationnelle". Juger la detresse sur le resultat envoyait donc a la
+    # LIQUIDATION une fonciere qui encaisse ses loyers.
+    # Le defaut est structurel, non anecdotique : sous IFRS l'immobilier est inscrit a
+    # la JUSTE VALEUR, si bien que toute correction de marche traverse le compte de
+    # resultat de TOUTES les foncieres europeennes, canadiennes et asiatiques. Il en
+    # va de meme de toute depreciation de goodwill, dans n'importe quel secteur.
+    encaisse = (fund.get("cfo") or 0) > 0
+
     # --- LA DETRESSE PRIME SUR LE SECTEUR -----------------------------------
     # Une societe dont les pertes ont absorbe les fonds propres, ou dont le Z-score
     # signale un risque de defaut avere, ne se valorise pas comme une consoeur en
@@ -169,9 +209,9 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
     # ordinaire a +2 116 % : la branche "energie" repondait avant tout controle de
     # solvabilite. Le meme angle mort touchait l'immobilier, les services publics et
     # les financieres.
-    if deficitaire and be is not None and be <= 0:
+    if deficitaire and not encaisse and be is not None and be <= 0:
         return "detresse"                      # fonds propres absorbes par les pertes
-    if deficitaire and z_ok and z < Z_DETRESSE_ROUTE:
+    if deficitaire and not encaisse and z_ok and z < Z_DETRESSE_ROUTE:
         return "detresse"
 
     # --- Routage sectoriel : societes en continuite d'exploitation -----------
@@ -192,25 +232,51 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
         if sum(1 for m in _hist_margins(F) if m > 0) >= 2:
             return "mature_deficitaire"
         return "jeune/deficitaire"
-    if z_ok and z < Z_DETRESSE_ROUTE:
+    if z_ok and z < Z_DETRESSE_ROUTE and not encaisse:
         return "detresse"
     return "standard"
 
 
+def marge_de_cycle(F):
+    """MARGE NORMALISEE SUR LE CYCLE = somme des EBIT / somme des chiffres d'affaires.
+
+    Une marge est un RAPPORT DE DEUX SOMMES, non la moyenne de rapports annuels.
+    Nous prenions la moyenne (ou la mediane) des marges de chaque exercice, ce qui
+    accorde le meme poids a une annee de 8,6 M$ de CA qu'a une annee de 107,6 M$.
+    Pop Culture a triple son chiffre d'affaires en deux ans en perdant de l'argent :
+    ses marges anciennes, gagnees sur un dixieme du volume actuel, dominaient la
+    moyenne et le modele appliquait 18 % de marge a un CA qui n'en a jamais degage.
+    Le rapport des sommes est naturellement pondere par le volume, donc insensible
+    a un changement d'echelle.
+
+    Toutes les annees comptent, y compris deficitaires : normaliser SUR LE CYCLE est
+    precisement l'objet de la manoeuvre chez Damodaran. Ne moyenner que les
+    exercices benificiaires — ce que faisait la route des societes matures en perte
+    — revient a definir la rentabilite normale comme "ce que la societe gagne quand
+    elle gagne", et garantit une reponse optimiste.
+
+    Retourne None si la mesure n'a pas de sens (moins de trois exercices)."""
+    if not F:
+        return None
+    eb, rv = F.get("ebit") or [], F.get("revenue") or []
+    paires = [(e, r) for e, r in zip(eb, rv) if e is not None and r]
+    if len(paires) < 3:
+        return None
+    ca = sum(r for _, r in paires)
+    return (sum(e for e, _ in paires) / ca) if ca > 0 else None
+
+
 def marge_normalisee(fund, F):
-    """Marge NORMALISEE : mediane des marges historiques quand la marge du dernier
-    exercice s'en ecarte fortement. Un produit exceptionnel (accord de licence,
+    """Marge NORMALISEE appliquee quand la marge du dernier exercice s'ecarte
+    fortement de la marge de cycle. Un produit exceptionnel (accord de licence,
     cession) gonfle la marge de l'annee et, extrapole a l'infini, multiplie la
     valeur. Damodaran normalise systematiquement dans ce cas."""
-    ms = _hist_margins(F)
+    cyc = marge_de_cycle(F)
     cur = fund.get("operating_margin")
-    if len(ms) < 3 or cur is None:
+    if cyc is None or cur is None or cyc <= 0:
         return None
-    med = float(np.median(ms))
-    if med <= 0:
-        return None
-    if cur > 1.5 * med or cur < 0.5 * med:
-        return med
+    if cur > 1.5 * cyc or cur < 0.5 * cyc:
+        return cyc
     return None
 
 
@@ -363,8 +429,15 @@ def erosion_par_les_pertes(fund, valeur):
     pondere par une PROBABILITE DE SURVIE deduite du temps avant epuisement : au-dela
     de cinq ans, la societe a le temps de se redresser et garde toute sa valeur ; en
     deca, son actif est proportionnellement menace. Meme logique que la probabilite
-    de survie des societes jeunes, appliquee ici a l'actif."""
-    perte = fund.get("net_income")
+    de survie des societes jeunes, appliquee ici a l'actif.
+
+    La consommation se mesure en TRESORERIE et non en resultat comptable : une
+    depreciation d'actifs reduit le resultat sans faire sortir un euro, elle ne
+    ronge donc aucune autonomie. Brancher l'erosion sur le resultat net faisait
+    perdre deux tiers de sa valeur a une societe qui ENCAISSAIT."""
+    perte = fund.get("cfo")
+    if perte is None:
+        perte = fund.get("net_income")          # a defaut, meilleure approximation
     if perte is None or perte >= 0 or valeur is None or valeur <= 0:
         return valeur, None
     annees = valeur / abs(perte)
@@ -380,28 +453,30 @@ def value_reit(fund):
     valeur d'entreprise inférieure à la dette. On capitalise le FFO (résultat net +
     amortissements), mesure de flux propre à l'immobilier. Valorisation CÔTÉ ÉQUITÉ
     (le FFO est après intérêts) : aucune dette n'est soustraite."""
-    ni, da, ebit = fund.get("net_income"), fund.get("dep_amort"), fund.get("ebit")
-    if ni is None or da is None:
+    ni, da = fund.get("net_income"), fund.get("dep_amort")
+    cfo = fund.get("cfo")
+    # Le FFO n'a de sens que si l'exploitation ENCAISSE. C'est le flux de tresorerie,
+    # et non l'EBIT, qui en juge : un promoteur en defaut affiche un resultat net
+    # positif issu d'un abandon de creances alors qu'il ne rentre pas un euro, et
+    # inversement une fonciere IFRS affiche un EBIT tres negatif tout en encaissant
+    # ses loyers. Subordonner cette route a un EBIT positif ecartait Branicks, dont
+    # l'EBIT 2024 est de -288,7 M EUR pour un FFO PUBLIE de +52,2 M EUR.
+    if cfo is None or cfo <= 0:
         return None
-    # Le FFO n'a de sens que si l'EXPLOITATION est benificiaire. Un promoteur en
-    # defaut affiche un resultat net positif issu d'un abandon de creances (gain
-    # exceptionnel) alors que son EBIT est tres negatif : capitaliser ce FFO
-    # reviendrait a valoriser une faillite comme une rente perenne.
-    if ebit is not None and ebit <= 0:
-        return None
-    ffo = ni + da
     # FFO = resultat net + amortissements est une formule US GAAP, ou l'immobilier
     # est AMORTI. Sous IFRS il est inscrit a la JUSTE VALEUR : il n'est pas amorti
-    # (amortissements quasi nuls) et le resultat net contient des PLUS-VALUES DE
-    # REEVALUATION, non monetaires. Le FFO ainsi calcule surestime alors largement
-    # la generation de tresorerie recurrente — Fibra UNO affichait 1,41 Md$ de FFO
-    # pour 0,26 Md$ de flux d'exploitation reel. On borne donc le FFO par le flux
-    # d'exploitation, qui est immunise contre les reevaluations comptables.
-    cfo = fund.get("cfo")
-    if cfo is not None and cfo > 0:
-        ffo = min(ffo, cfo)
-    if ffo <= 0:
-        return None
+    # (amortissements quasi nuls) et le resultat net porte les REEVALUATIONS, non
+    # monetaires et dans les deux sens. La formule surestime alors la generation de
+    # tresorerie quand le marche monte (Fibra UNO : 1,41 Md$ de FFO annonce pour
+    # 0,26 Md$ de flux reel) et la rend absurdement negative quand il baisse.
+    # Le FLUX D'EXPLOITATION est, lui, immunise : le tableau de flux commence par
+    # neutraliser toute variation de juste valeur. C'est donc lui l'ancrage, la
+    # formule comptable ne servant plus qu'a le BORNER lorsqu'elle reste positive
+    # (elle protege alors d'un flux gonfle par le besoin en fonds de roulement).
+    # Verification sur comptes publies : Branicks 2024 annonce un FFO de 52,2 M EUR
+    # pour 54,8 M EUR de flux d'exploitation — 5 % d'ecart.
+    gaap = (ni + da) if (ni is not None and da is not None) else None
+    ffo = min(gaap, cfo) if (gaap is not None and gaap > 0) else cfo
     ke, rf = _coe(fund)
     g = min(rf, 0.028)
     ke = max(ke, g + 0.02)                      # écart minimal pour un multiple fini
@@ -440,6 +515,15 @@ def _pondere_par_realisation(r, fund, F, marge_visee):
     la valeur de liquidation de l'autre."""
     if not r or r.get("equity_value") is None:
         return r
+    # Une equite NEGATIVE ne signale pas un redressement improbable mais l'ECHEC de
+    # l'approche entreprise — typiquement une dette de financement captive (GM
+    # Financial, Ford Credit) soustraite comme si elle etait operationnelle. La
+    # ponderation la ramenait a zero puis la melangeait a une valeur de liquidation,
+    # produisant un resultat positif qui masquait l'echec et empechait la bascule
+    # vers le modele cote equite : General Motors ressortait a -78 % au lieu de -4 %.
+    # On laisse donc passer le signal intact.
+    if r["equity_value"] <= 0:
+        return r
     p = probabilite_de_realisation(fund, F, marge_visee)
     if p >= 0.999:
         return r
@@ -452,12 +536,14 @@ def _pondere_par_realisation(r, fund, F, marge_visee):
 
 def value_mature_loss(fund, F):
     """Société MATURE en perte temporaire : Damodaran valorise sur bénéfices
-    NORMALISÉS (moyenne des marges positives passées) plutôt que d'extrapoler une
-    perte conjoncturelle à l'infini."""
-    ms = [m for m in _hist_margins(F) if m > 0]
-    if not ms:
+    NORMALISÉS plutôt que d'extrapoler une perte conjoncturelle à l'infini.
+
+    La marge normale est celle du CYCLE ENTIER. Ne moyenner que les exercices
+    benificiaires selectionnait la moitie favorable de l'histoire et rendait toute
+    societe deficitaire mecaniquement sous-evaluee."""
+    norm = marge_de_cycle(F)
+    if norm is None:
         return None
-    norm = float(np.mean(ms))
     r = _dcf_value(fund, margin_override=norm,
                    method="DCF sur bénéfices normalisés (perte temporaire)")
     r["norm_margin"] = round(norm, 4)
@@ -465,15 +551,18 @@ def value_mature_loss(fund, F):
 
 
 def value_cyclical(fund, F):
-    if F:
-        margins = [e / r for e, r in zip(F["ebit"], F["revenue"])
-                   if e is not None and r]
-        if margins:
-            navg = float(np.mean(margins))
-            r = _dcf_value(fund, margin_override=navg,
-                           method="DCF sur bénéfices normalisés (cyclique)")
-            r["norm_margin"] = round(navg, 4)
-            return _pondere_par_realisation(r, fund, F, navg)
+    """Cyclique : Damodaran valorise sur la marge MOYENNE DE CYCLE, un exercice
+    isole ne disant rien de la rentabilite normale d'une mine ou d'un raffineur.
+    Le rapport des sommes pondere chaque exercice par son volume — indispensable
+    ici, les cycles de matieres premieres faisant varier le chiffre d'affaires du
+    simple au triple : CITIC Resources, negociant petrolier, degage 2 % de marge
+    sur son cycle la ou la mediane de son secteur declare en affiche 15 %."""
+    navg = marge_de_cycle(F)
+    if navg is not None:
+        r = _dcf_value(fund, margin_override=navg,
+                       method="DCF sur bénéfices normalisés (cyclique)")
+        r["norm_margin"] = round(navg, 4)
+        return _pondere_par_realisation(r, fund, F, navg)
     return _dcf_value(fund, method="DCF FCFF")
 
 
@@ -544,6 +633,10 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
         F = get_financials(ticker)
     if forensic is None:
         forensic = forensic_analyze(ticker, financials=F) if F else None
+    # Mesure portee sur `fund` pour que le moteur DCF y accede sans dependre du
+    # module de routage. Neutre par construction quand elle n'est pas mesurable.
+    if fund.get("conversion_tresorerie") is None:
+        fund["conversion_tresorerie"] = conversion_en_tresorerie(F)
     cat = classify(fund, forensic, F)
 
     try:
@@ -570,6 +663,17 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
             r = _dcf_value(fund, margin_override=mn,
                            method="DCF FCFF sur marge normalisee" if mn is not None
                            else "DCF FCFF (standard)")
+            # Des lors qu'on valorise sur une marge que la societe N'ATTEINT PAS,
+            # on suppose un redressement — et un redressement se pondere par sa
+            # probabilite. La ponderation n'etait appliquee qu'aux cycliques et aux
+            # societes matures en perte ; la route standard, qui normalise pourtant
+            # dans les memes termes, tenait le retour a la marge de cycle pour
+            # ACQUIS. Yiren Digital, dont le resultat a chute de 96,5 % en 2025
+            # apres l'interdiction du pret entre particuliers en Chine, etait ainsi
+            # valorisee sur les 16,7 % de marge de la decennie ecoulee comme s'ils
+            # devaient revenir a coup sur.
+            if mn is not None:
+                r = _pondere_par_realisation(r, fund, F, mn)
     except Exception:                              # noqa: BLE001
         r = None
 
