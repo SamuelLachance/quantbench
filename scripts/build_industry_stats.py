@@ -67,10 +67,22 @@ def mesure(sym, sr):
             # d'ACTIVITE, seul repere comparable entre societes d'une industrie.
             if b and 0.1 <= b <= 3.5 and de >= 0:
                 out["beta_desendette"] = b / (1 + (1 - tax_rate(f.get("country"))) * de)
-        ta = f.get("total_assets")
-        ppe = (F or {}).get("net_ppe", [None])[0]
-        if ta and ta > 0 and ppe is not None:
-            out["corporel"] = max(0.0, min(1.0, (ppe / 1e9) / ta))
+        # Part d'actifs REALISABLES : ce qui se revend en cas de liquidation, soit
+        # l'actif total DIMINUE du goodwill et des incorporels. Mesurer les seules
+        # immobilisations corporelles nettes etait faux pour l'immobilier, dont la
+        # plupart des foncieres inscrivent leurs immeubles en "investment property"
+        # et non en immobilisations : le secteur ressortait a 0,6 % d'actifs
+        # corporels alors que ses actifs sont, precisement, les plus realisables.
+        # Ratio de deux champs du MEME bilan, donc independant de la devise.
+        bal = e.get("balance", {})
+        if bal:
+            b0 = bal[max(bal)]
+            ta_b = fmp._num(b0.get("totalAssets"))
+            incorp = (fmp._num(b0.get("goodwillAndIntangibleAssets"))
+                      or ((fmp._num(b0.get("goodwill")) or 0.0)
+                          + (fmp._num(b0.get("intangibleAssets")) or 0.0)))
+            if ta_b and ta_b > 0 and incorp is not None:
+                out["corporel"] = max(0.0, min(1.0, 1.0 - incorp / ta_b))
         return out
     except Exception:
         return None

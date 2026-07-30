@@ -55,11 +55,14 @@ def _sane_beta(b, sector=None):
     b = _num(b)
     if b is not None and 0.1 <= b <= 3.5:
         return b
+    # Repli sur le beta d'activite MESURE du secteur, via la source unique de
+    # reperes. (Ce repli ne sert plus qu'aux rares cas ou le beta ascendant lui-meme
+    # est indisponible : le moteur utilise desormais le beta d'industrie re-endette.)
     try:
-        from ..valuation.route import SECTEURS
-        s = SECTEURS.get(sector or "")
-        if s and s.get("beta"):
-            return float(s["beta"])
+        from ..valuation.build_universal import _STATS
+        s = _STATS.get("secteurs", {}).get(sector or "")
+        if s and s.get("beta_desendette"):
+            return float(s["beta_desendette"])
     except Exception:
         pass
     return 1.1
@@ -442,7 +445,12 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
     # deduisent (Fannie Mae : 140 Md$ de privilegiees senior du Tresor).
     if eq is not None:
         eq -= (_num(bal.get(y, {}).get("preferredStock")) or 0.0)
-    cash = g(bal, "cashAndCashEquivalents")
+    # TRESORERIE REALISABLE : liquidites ET placements court terme. Une societe de
+    # biotechnologie place l'essentiel de ses fonds en titres negociables plutot
+    # qu'en depots — Revolution Medicines detient 0,38 Md$ de liquidites pour
+    # 1,64 Md$ de placements court terme. N'en retenir que les liquidites
+    # sous-estimait sa tresorerie de 80 % et lui appliquait a tort une decote.
+    cash = g(bal, "cashAndShortTermInvestments") or g(bal, "cashAndCashEquivalents")
     tot_assets = g(bal, "totalAssets")
     # Garde-fou données FMP corrompues (ex. RDZN cash=6.6e12 pour 55 M$ de CA) :
     # trésorerie et dette ne peuvent PAS dépasser l'actif total -> on plafonne.

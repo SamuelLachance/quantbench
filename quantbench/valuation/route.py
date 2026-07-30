@@ -67,19 +67,14 @@ _NO_ALTMAN = ("financial", "real estate", "utilities")
 Z_DETRESSE_ROUTE = 3.20
 
 
-_SECT_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "sector_stats.json")
-try:
-    with open(_SECT_PATH, encoding="utf-8") as _f:
-        SECTEURS = _json.load(_f)
-except Exception:
-    SECTEURS = {}
-
-
 def sect(fund, cle, defaut):
-    """Repere MESURE du secteur (medianes calculees sur l'univers reel par
-    scripts/build_sector_stats.py) plutot qu'une constante identique pour tous."""
-    s = SECTEURS.get(fund.get("sector") or "")
-    v = s.get(cle) if s else None
+    """Repere MESURE, du plus fin au plus large : INDUSTRIE -> SECTEUR -> GLOBAL.
+    Source UNIQUE, partagee avec le moteur DCF. Deux fichiers de statistiques
+    coexistaient et le routage lisait le plus ancien : le taux de recuperation de la
+    sante y valait 0,354 au lieu de 0,624, et celui de l'immobilier 0,303 au lieu de
+    0,795. Un repere doit avoir une seule definition."""
+    from .build_universal import repere
+    v = repere(fund, cle)
     return defaut if v is None else v
 
 
@@ -355,6 +350,30 @@ def value_holding(fund, F=None):
             "actif_net": round(be, 2), **diag}
 
 
+def erosion_par_les_pertes(fund, valeur):
+    """Une valeur d'ACTIF ne tient que si la societe ne consume pas ses fonds propres.
+
+    Les routes fondees sur l'actif retournaient les capitaux propres comme s'ils
+    etaient intacts. Or une societe qui PERD de l'argent les absorbe : la fonciere
+    allemande Branicks perd 322 M EUR par an sur 863 M EUR d'actif realisable, soit
+    un peu plus de deux ans d'autonomie.
+
+    On ne retranche pas les pertes de facon mecanique — cela aneantirait une biotech
+    disposant de quatre ans de tresorerie, dont la valeur EST cette tresorerie. On
+    pondere par une PROBABILITE DE SURVIE deduite du temps avant epuisement : au-dela
+    de cinq ans, la societe a le temps de se redresser et garde toute sa valeur ; en
+    deca, son actif est proportionnellement menace. Meme logique que la probabilite
+    de survie des societes jeunes, appliquee ici a l'actif."""
+    perte = fund.get("net_income")
+    if perte is None or perte >= 0 or valeur is None or valeur <= 0:
+        return valeur, None
+    annees = valeur / abs(perte)
+    p_survie = min(1.0, annees / 5.0)
+    if p_survie >= 0.999:
+        return valeur, None
+    return valeur * p_survie, round(p_survie, 2)
+
+
 def value_reit(fund):
     """Foncières (REIT) — méthode Damodaran : le FCFF est inapplicable car les
     amortissements immobiliers, purement comptables, écrasent l'EBIT et rendent la
@@ -497,9 +516,23 @@ def value_assetbased(fund):
     nav = be if (be is not None and be > 0) else (cash - debt)
     if nav is None or nav <= 0:
         return None
-    return {"equity_value": nav,
-            "method": "Valeur d'actif net (pré-revenu / holding)",
-            "confidence": "faible"}
+    # VALEUR REALISABLE, pas valeur comptable. Cette route s'applique justement aux
+    # societes incapables de degager des flux : leur actif ne vaut que ce qu'on en
+    # tirerait. La tresorerie est realisable a 100 %, le reste subit la decote du
+    # secteur selon son intensite d'actifs CORPOREL (une centrale ou un immeuble se
+    # revend, un portefeuille de brevets beaucoup moins). Les autres routes de
+    # liquidation appliquaient deja cette decote — celle-ci retournait la valeur
+    # comptable INTEGRALE, une incoherence interne du modele.
+    liquide = min(nav, max(cash, 0.0))
+    reste = max(nav - liquide, 0.0)
+    realisable = liquide + sect(fund, "recuperation", 0.5) * reste
+    realisable, consomme = erosion_par_les_pertes(fund, realisable)
+    return {"equity_value": realisable,
+            **({"probabilite_survie": consomme} if consomme else {}),
+            "method": "Valeur d'actif net réalisable (pré-revenu / holding)",
+            "confidence": "faible",
+            "actif_net_comptable": round(nav, 3),
+            "taux_recuperation": round(sect(fund, "recuperation", 0.5), 2)}
 
 
 def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
