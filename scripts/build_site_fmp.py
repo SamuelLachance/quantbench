@@ -202,18 +202,16 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
         else:
             margin = _route_margin(fund, category, F)
             base, _ = build_dcf_from_fundamentals(fund, margin_override=margin, rf=rf)
-            dists = {
-                "g1_begin": stats.norm(base.g1_begin, max(0.02, abs(base.g1_begin) * 0.35)),
-                "terminal_operating_margin": stats.norm(
-                    base.terminal_operating_margin, max(0.015, abs(base.terminal_operating_margin) * 0.15)),
-                "erp": stats.norm(base.erp, 0.005),
-                "unlevered_beta": stats.norm(base.unlevered_beta, 0.15),
-                "current_roic": stats.norm(base.current_roic, max(0.03, abs(base.current_roic) * 0.2)),
-                "terminal_roic": stats.norm(base.terminal_roic, 0.01),
-                "g3_end": stats.norm(base.g3_end, 0.003),
-            }
-            eq = monte_carlo_dcf(base, dists, n=n, current_market_cap=mcap,
-                                 seed=42)["equity_values"]
+            # SOURCE UNIQUE des lois ET des correlations. La copie locale ne
+            # transmettait aucune correlation : la matrice restait l'identite et la
+            # copule gaussienne annoncee par la documentation ne tournait pas. Deux
+            # erreurs independantes se compensent, deux erreurs correlees
+            # s'additionnent — la simulation SOUS-ESTIMAIT donc la dispersion, c'est-
+            # a-dire exactement la grandeur qu'elle existe pour mesurer.
+            from quantbench.valuation.build_universal import lois_de_tirage
+            lois, correlations = lois_de_tirage(base)
+            eq = monte_carlo_dcf(base, lois, n=n, correlations=correlations,
+                                 current_market_cap=mcap, seed=42)["equity_values"]
             eq = np.maximum(eq, 0.0)                    # responsabilité limitée : équité ≥ 0
             # Pondération de la catégorie (miroir de route.value_young/value_distressed)
             # LES PONDERATIONS SONT CELLES DU ROUTAGE, APPELEES et non recopiees.

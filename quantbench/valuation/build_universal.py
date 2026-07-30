@@ -375,3 +375,50 @@ def _safe_div(a, b):
 
 
 __all__ = ["build_dcf_from_fundamentals"]
+
+
+# --------------------------------------------------------------------------- #
+# Lois de tirage du Monte Carlo — SOURCE UNIQUE
+# --------------------------------------------------------------------------- #
+def lois_de_tirage(base):
+    """(lois, correlations) pour la simulation, deduites du cas de base.
+
+    Elles etaient DECLAREES DEUX FOIS — une copie locale dans le script de build, une
+    autre dans la couche de donnees SEC — et les deux divergeaient sur les
+    dispersions. Pire : la copie utilisee par le build ne transmettait AUCUNE
+    correlation, si bien que la matrice restait l'identite et que la copule gaussienne
+    annoncee par la documentation du module ne tournait pas. Les parametres etaient
+    tires INDEPENDAMMENT.
+
+    Ce n'est pas un detail de presentation. Deux erreurs independantes se compensent
+    en moyenne ; deux erreurs correlees s'additionnent. Tirer la marge et le rendement
+    du capital sans lien SOUS-ESTIME donc la dispersion de la valeur — precisement la
+    grandeur que la simulation existe pour mesurer.
+
+    Les deux correlations retenues sont des IDENTITES ECONOMIQUES, non des
+    ajustements : une marge durablement plus elevee produit mecaniquement un meilleur
+    rendement du capital a intensite capitalistique donnee, et deux phases de
+    croissance consecutives partagent la meme erreur d'appreciation sur la demande.
+
+    Les dispersions sont PROPORTIONNELLES au cas de base, avec un plancher absolu :
+    une societe a 2 % de marge n'a pas la meme incertitude absolue qu'une societe a
+    40 %, mais aucune n'est connue a mieux que le plancher pres."""
+    from scipy import stats as _st
+    lois = {
+        "g1_begin": _st.norm(base.g1_begin, max(0.02, abs(base.g1_begin) * 0.35)),
+        "g2_end": _st.norm(base.g2_end, 0.02),
+        "terminal_operating_margin": _st.norm(
+            base.terminal_operating_margin,
+            max(0.015, abs(base.terminal_operating_margin) * 0.15)),
+        "erp": _st.norm(base.erp, 0.005),
+        "unlevered_beta": _st.norm(base.unlevered_beta, 0.15),
+        "current_roic": _st.norm(base.current_roic,
+                                 max(0.03, abs(base.current_roic) * 0.20)),
+        "terminal_roic": _st.norm(base.terminal_roic, 0.01),
+        "g3_end": _st.norm(base.g3_end, 0.003),
+    }
+    correlations = [
+        ("terminal_operating_margin", "current_roic", 0.30),
+        ("g1_begin", "g2_end", 0.40),
+    ]
+    return lois, correlations

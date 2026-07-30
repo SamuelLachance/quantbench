@@ -1735,3 +1735,81 @@ def test_le_tireur_ecarte_les_scenarios_infinis():
     assert "~np.isnan(equity)" not in src, "le filtre laisse passer les infinis"
     assert "np.isfinite(equity)" in src
     assert "taux_validite" in src, "le taux de validite des tirages n'est pas publie"
+
+
+# --------------------------------------------------------------------------- #
+# 36. La copule gaussienne ne tournait pas
+# --------------------------------------------------------------------------- #
+def test_la_simulation_transmet_bien_les_correlations():
+    """Les lois etaient declarees DEUX FOIS, et la copie utilisee par le build ne
+    transmettait AUCUNE correlation : la matrice restait l'identite et la copule
+    gaussienne annoncee par la documentation du module ne tournait pas. Les parametres
+    etaient tires INDEPENDAMMENT.
+    Ce n'est pas cosmetique : deux erreurs independantes se compensent en moyenne,
+    deux erreurs correlees s'additionnent. La simulation SOUS-ESTIMAIT donc la
+    dispersion — exactement la grandeur qu'elle existe pour mesurer."""
+    src = (Path(__file__).resolve().parent.parent
+           / "scripts" / "build_site_fmp.py").read_text(encoding="utf-8")
+    corps = src.split("def run_mc(")[1].split(chr(10) + "def ")[0]
+    assert "correlations=correlations" in corps, (
+        "la simulation ne transmet pas les correlations : la copule ne tourne pas")
+    assert "stats.norm(" not in corps, (
+        "les lois sont redeclarees dans le script de build")
+
+
+def test_les_correlations_deplacent_reellement_la_dispersion():
+    """Verification par le COMPORTEMENT et non par la lecture du source : deux
+    parametres correles doivent produire une dispersion differente de deux parametres
+    independants."""
+    from quantbench.valuation.dcf import DcfInputs
+    from quantbench.valuation.montecarlo import sample_inputs
+    from scipy import stats as st
+    lois = {"a": st.norm(0.10, 0.03), "b": st.norm(0.10, 0.03)}
+    seul = sample_inputs(lois, 4000, None, seed=1)
+    lie = sample_inputs(lois, 4000, [("a", "b", 0.8)], seed=1)
+    import numpy as np
+    r_seul = float(np.corrcoef(seul["a"], seul["b"])[0, 1])
+    r_lie = float(np.corrcoef(lie["a"], lie["b"])[0, 1])
+    assert abs(r_seul) < 0.10, f"tirage cense etre independant : correlation {r_seul:.2f}"
+    assert r_lie > 0.7, f"correlation demandee 0,8, obtenue {r_lie:.2f}"
+    # Et la somme des deux — proxy de la valeur — est bien plus dispersee.
+    assert (lie["a"] + lie["b"]).std() > (seul["a"] + seul["b"]).std() * 1.2
+
+
+def test_une_matrice_de_correlation_impossible_ne_fait_pas_echouer_le_tirage():
+    """Trois correlations de 0,9 entre trois variables ne definissent pas une matrice
+    admissible. Le module doit la ramener a la plus proche matrice valide, pas
+    s'effondrer sur la decomposition de Cholesky."""
+    from quantbench.valuation.montecarlo import sample_inputs
+    from scipy import stats as st
+    lois = {n: st.norm(0.1, 0.02) for n in ("a", "b", "c")}
+    ech = sample_inputs(lois, 500, [("a", "b", 0.9), ("b", "c", 0.9),
+                                    ("a", "c", -0.9)], seed=3)
+    import numpy as np
+    assert all(np.isfinite(v).all() for v in ech.values())
+
+
+def test_les_lois_de_tirage_ont_une_seule_declaration():
+    """`lois_de_tirage` est la source unique. Les dispersions sont PROPORTIONNELLES au
+    cas de base avec un plancher absolu : une societe a 2 % de marge n'a pas la meme
+    incertitude absolue qu'une societe a 40 %, mais aucune n'est connue a mieux que le
+    plancher pres."""
+    from quantbench.valuation.build_universal import lois_de_tirage
+    from quantbench.valuation.dcf import DcfInputs
+    base = DcfInputs(revenue_base=5.0, g1_begin=0.08, g1_end=0.06, g2_begin=0.06,
+                     g2_end=0.04, g3_begin=0.04, g3_end=0.025,
+                     current_roic=0.15, terminal_roic=0.10)
+    lois, cor = lois_de_tirage(base)
+    assert set(lois) >= {"g1_begin", "terminal_operating_margin", "current_roic"}
+    assert cor, "aucune correlation declaree"
+    # Proportionnalite : une marge deux fois plus grande, une dispersion plus grande.
+    petite = lois_de_tirage(DcfInputs(revenue_base=5.0, g1_begin=0.08, g1_end=0.06,
+                                      g2_begin=0.06, g2_end=0.04, g3_begin=0.04,
+                                      g3_end=0.025, terminal_operating_margin=0.04,
+                                      current_roic=0.15, terminal_roic=0.10))[0]
+    grande = lois_de_tirage(DcfInputs(revenue_base=5.0, g1_begin=0.08, g1_end=0.06,
+                                      g2_begin=0.06, g2_end=0.04, g3_begin=0.04,
+                                      g3_end=0.025, terminal_operating_margin=0.40,
+                                      current_roic=0.15, terminal_roic=0.10))[0]
+    assert (grande["terminal_operating_margin"].std()
+            > petite["terminal_operating_margin"].std())
