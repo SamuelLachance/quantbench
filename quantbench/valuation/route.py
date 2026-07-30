@@ -107,6 +107,25 @@ def _financiere_de_bilan(fund) -> bool:
     return True
 
 
+def _trop_leger_pour_une_fonciere(fund) -> bool:
+    """Un CHIFFRE D'AFFAIRES de plusieurs fois l'actif exclut la route immobiliere.
+
+    Une fonciere est, par construction, l'activite la plus capitalistique qui soit :
+    son chiffre d'affaires est le loyer de son parc et ne peut en depasser une
+    fraction. Une societe du secteur "immobilier" qui encaisse dix a quinze fois son
+    actif ne detient pas d'immeubles — elle vend un SERVICE immobilier : courtage,
+    administration de biens, promotion pour compte de tiers. Capitaliser son flux
+    comme une rente perpetuelle de loyers revient a valoriser un courtier comme un
+    immeuble ; The Real Brokerage (15,5 fois son actif) et AGNT (10,8) ressortaient
+    ainsi a +144 % et +188 %.
+
+    Le seuil n'est pas une opinion de valorisation mais une impossibilite physique :
+    aucun parc immobilier ne tourne trois fois par an. Ces societes rejoignent le DCF
+    d'entreprise, qui convient a une activite de service."""
+    rev, ta = fund.get("revenue"), fund.get("total_assets")
+    return bool(rev and ta and ta > 0 and (rev / ta) > 3.0)
+
+
 def _est_holding(fund) -> bool:
     """Societe de PORTEFEUILLE (holding d'investissement) : son "chiffre
     d'affaires" est le revenu de ses participations, pas une activite. Un DCF y
@@ -215,7 +234,7 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
         return "detresse"
 
     # --- Routage sectoriel : societes en continuite d'exploitation -----------
-    if "real estate" in sec:
+    if "real estate" in sec and not _trop_leger_pour_une_fonciere(fund):
         return "fonciere"                      # REIT : FFO/NAV, jamais le FCFF
     if "utilities" in sec:
         return "reglementee"                   # service public : cote equite

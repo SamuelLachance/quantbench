@@ -27,7 +27,18 @@ _PREF_NAME = re.compile(
     r"\bPFD\b|\bPREF(ERRED)?\s+(STOCK|SHARES|SHS|SEC|SERIES|EQUITY)"
     r"|PERPETUAL\s+(RED\s+)?PREF|CUM\s+PERP|\bRATE\s+RESET\b|\bRST\s+PFD\b"
     r"|\b(SUB(ORDINATED)?|JR|JUNIOR|SR|SENIOR)\s+(NOTES?|DEBENT)"
-    r"|\bDEBENTURES?\b|\bTRUST\s+PREF|\d+(\.\d+)?\s*%\s", re.I)
+    r"|\bDEBENTURES?\b|\bTRUST\s+PREF"
+    # Coupon : le "%" ne doit PAS exiger d'espace apres lui — les libelles se
+    # terminent souvent par le taux. Six lignes obligataires entraient dans
+    # l'univers pour ce seul caractere, dont Duke Energy pour 17,5 Md$.
+    r"|\d+(\.\d+)?\s*%"
+    # "JR SUB" et "SUB DB" sans mot suivant : le motif exigeait NOTES ou DEBENT
+    # apres, ce que le libelle de DTE Energy ("JR SUB DB 2017 E") ne porte pas.
+    r"|\bJR\s+SUB\b|\bSUB\s+DB\b"
+    # Millesime de serie obligataire, dans les DEUX ordres rencontres : "2021
+    # Series" comme "Series 2021". Attention a ne pas retenir "Series" seul, qui
+    # apparie "Pattern Group Inc. Series A Common Stock" — une action ordinaire.
+    r"|\b(19|20)\d\d\s+SERIES\b|\bSERIES\s+(19|20)\d\d\b", re.I)
 # Privilégiées par ticker : canadiennes (TD-PFA.TO, ENB-PN.TO) ET américaines
 # (FITB-PM, OAK-PB). Motif -P + 1-2 lettres de série. Les actions de CLASSE
 # (BRK-B, BF-B, HEI-A) utilisent -A/-B/-C, jamais -P -> non touchées.
@@ -225,8 +236,16 @@ def screener(exchanges=("NASDAQ",)):
                 continue
             if _est_un_derive(sym, r.get("companyName")):       # warrants / units / droits
                 continue
-            if ex == "OTC" and (_num(r.get("volume")) or 0) <= 0:   # OTC : exclure dead stocks
-                continue
+            # Le volume de la DERNIERE SEANCE d'une ligne de cotation ne dit rien de
+            # l'existence de l'emetteur. Ce filtre n'etait ni necessaire — ITT
+            # Educational, liquidee en 2016, affiche 66 400 titres echanges, et 2 314
+            # des 9 510 lignes de gre a gre a volume non nul n'ont aucun compte
+            # recent — ni suffisant : il ecartait 490 lignes et 1 725 Md$ de
+            # capitalisation, dont 189 au-dessus du milliard. SoftBank (161,6 Md$),
+            # Bank of Communications (81,3), Generali (71,8), Volvo (69,4),
+            # Brookfield (56,8) et Ryanair (30,7) etaient absentes du site pour cette
+            # seule raison. Une societe morte se constate sur un FAIT DATE — radiation
+            # ou cessation de depot — jamais sur l'activite d'une seance.
             out[sym] = {"name": r.get("companyName"), "sector": r.get("sector"),
                         "industry": r.get("industry"), "beta": _num(r.get("beta")),
                         "price": _num(r.get("price")),
@@ -553,6 +572,17 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         "price": price * fxp if price else None,
         "market_cap": mcap * fxp / B if mcap else None,
         "shares": shares, "beta": _sane_beta(sr.get("beta"), sr.get("sector")),
+        # DESACCORD ENTRE DEUX SOURCES sur la base actionnaire : le nombre d'actions
+        # DEDUIT du marche (capitalisation / cours) contre celui DEPOSE aux comptes.
+        # On le MESURE sans jamais en tirer un rejet ni une reecriture : quand deux
+        # sources se contredisent, aucune ne prouve que l'autre a tort. Mesure sur
+        # l'univers : ecart median 3,4 %, neuvieme decile 64 % — un rachat d'actions
+        # ou une emission suffit a l'expliquer, et la distribution est CONTINUE, donc
+        # aucun seuil ne s'y lit. Les corrections tentees allaient d'ailleurs neuf
+        # fois sur douze dans le mauvais sens, et toujours celui qui gonfle la valeur.
+        # L'ecart est donc publie tel quel : c'est une information sur la CONFIANCE
+        # que merite la donnee, pas un verdict sur la societe.
+        "actions_publiees": g(inc, "weightedAverageShsOutDil") or g(inc, "weightedAverageShsOut"),
         "country": sr.get("country"),
         "currency_ok": not fx_ko, "fx_indisponible": fx_ko,
         "price_currency": price_cur, "financial_currency": rep_cur,

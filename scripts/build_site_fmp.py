@@ -292,7 +292,12 @@ def _results_summary(F):
 def build_one(symbol, sr, with_news=True, with_pdf=True):
     entry = fmp.statements(symbol)                 # 3 appels par-ticker (débit élevé)
     if len(set(entry["income"]) & set(entry["balance"])) < 1:   # ≥1 an suffit (actif net)
-        return None, None
+        # Abandon SILENCIEUX auparavant : environ six cents lignes disparaissaient
+        # sans laisser de trace, dont les certificats canadiens (Eli Lilly, Micron,
+        # General Electric) et la cotation de gre a gre de TSMC. Une absence de
+        # donnee est un fait a AFFICHER, pas a taire.
+        return None, {"__rejet__": ["comptes indisponibles chez le fournisseur"],
+                      "ticker": symbol}
     prof = fmp.profile(symbol)
     desc = {"description": prof.get("description"), "industry": prof.get("industry")}
     F = fmp.financials_from_fmp(entry)
@@ -300,7 +305,7 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     # Plus d'exigence de CA : les sociétés pré-revenu (biotech, mines, holdings) sont
     # valorisées sur l'actif net. Il faut juste un prix (pour l'upside).
     if not fund or not fund.get("price"):
-        return None, None
+        return None, {"__rejet__": ["cours indisponible"], "ticker": symbol}
     # VALIDATION DES ENTREES : une donnee non verifiee ne donne pas une valorisation
     # approximative mais une valorisation FAUSSE. On ne valorise que ce dont on
     # peut repondre, et on RETOURNE le motif quand ce n'est pas le cas.
@@ -313,10 +318,19 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
         if reparations:
             motifs = valider(fund, F, entry)          # revalidation apres reparation
     sh, mc0 = fund.get("shares"), fund.get("market_cap")
-    if not sh or sh < 100_000:
-        motifs.append("nombre d'actions implausible")
-    if not mc0 or mc0 < 0.002:
-        motifs.append("capitalisation inferieure a 2 M$")
+    # LE NOMBRE D'ACTIONS N'EST PAS UNE QUESTION DE TAILLE MAIS DE COHERENCE.
+    # Le seuil de 100 000 titres eliminait des societes parfaitement saines au
+    # flottant minuscule : LICT (19 188 actions a 11 775 $, 226 M$ de
+    # capitalisation), Beaver Coal, Merchants' National, CIBL. Toutes affichent un
+    # nombre d'actions ENTIER — signe que capitalisation et cours se reconcilient.
+    # Il rendait toutefois un vrai service en arretant les capitalisations
+    # corrompues, qui donnent une base implicite FRACTIONNAIRE : 16 316,3 actions
+    # pour une societe qui en a depose 36 177 712. C'est cette fracture, et non la
+    # taille, qui signale la donnee fausse.
+    if not sh or (sh < 100_000 and abs(sh - round(sh)) > max(1e-6 * sh, 1e-3)):
+        motifs.append("nombre d'actions implausible (base implicite fractionnaire)")
+    if not mc0 or mc0 <= 0:
+        motifs.append("capitalisation indisponible")
     if motifs:
         return None, {"__rejet__": motifs, "ticker": symbol,
                       "reparations_tentees": reparations}
@@ -333,17 +347,19 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     # 19,5 Md$ de CA pour 1 Md$ d'actif et 14 M$ de fonds propres — c'est une
     # obligation cotee du groupe KKR, pas une action.
 
-    # Un SERVICE PUBLIC REGULE se traite entre 1 et 2,5 fois ses fonds propres :
-    # sa rentabilite est FIXEE par le regulateur. Un titre "de service public" cote
-    # au quart de ses capitaux propres n'est donc pas une action ordinaire mais une
-    # OBLIGATION COTEE de filiale -- Entergy Mississippi "1M BD 66" et Entergy New
-    # Orleans cotent ~20 $ avec un coupon FIXE de 1,22 $, soit 6,1 % de rendement.
-    if (fund.get("sector") or "").lower().startswith("utilit") and be0 and mc0 and be0 > 3 * mc0:
-        return None, None
+    # Une regle ecartait tout "service public" cotant sous le tiers de ses fonds
+    # propres, au motif qu'il s'agissait d'obligations de filiales (Entergy
+    # Mississippi, Entergy New Orleans). Le raisonnement etait une OPINION DE
+    # VALORISATION — "un regule se traite entre 1 et 2,5 fois ses fonds propres" —
+    # executee de surcroit en abandon SILENCIEUX, sans motif ni trace. Ce qui
+    # distingue ces lignes n'est pas leur decote mais leur NATURE : ce sont des
+    # emissions obligataires, reconnaissables a leur libelle, et c'est la que le
+    # filtre appartient.
     forensic = analyze(symbol, financials=F) if F else None
     val = value_stock(symbol, fund=fund, forensic=forensic, F=F)
     if not val.get("ok"):
-        return None, None
+        return None, {"__rejet__": [val.get("reason") or "valorisation impossible"],
+                      "ticker": symbol, "reparations_tentees": reparations}
     # Monte Carlo : l'upside affiché est basé sur la MÉDIANE de la simulation
     mc = run_mc(fund, val.get("category"), F=F, forensic=forensic,
                 method=val.get("method"))

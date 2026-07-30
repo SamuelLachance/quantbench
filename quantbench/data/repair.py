@@ -25,18 +25,67 @@ from __future__ import annotations
 from . import fmp
 
 
-def _fonds_propres_recalcules(fund, F):
-    """Identite fondamentale : actif - passif = fonds propres. Quand le champ
-    publie contredit le bilan, l'identite fait foi."""
-    ta = fund.get("total_assets")
-    tl = fund.get("total_liab")              # deja converti en USD, comme ta
-    if not ta or ta <= 0 or tl is None:
+def _champ_imputable(fund, F):
+    """Quand actif != passif + fonds propres, UN des trois nombres est faux — mais
+    l'identite seule ne dit pas lequel. On le determine par l'EXERCICE PRECEDENT,
+    source independante et deja chargee : le champ corrompu est celui dont la valeur
+    RECALCULEE par l'identite colle a l'annee passee alors que la valeur PUBLIEE s'en
+    ecarte. On ne repare que si un seul champ repond a ce critere.
+
+    Reparer globalement en posant fonds propres = actif - passif serait pire que le
+    mal : l'identite boucle alors PAR CONSTRUCTION et le controle s'eteint pour
+    toujours. Mesure sur l'univers, cette voie attribuait 258,93 Md$ de fonds propres
+    a une societe de 11,6 M$ de capitalisation, dont l'ecart de bilan atteint 1 210 %
+    et n'est imputable a aucun champ : sa valorisation ressortait a +16 598 %, et seul
+    le maintien du motif l'empechait d'etre publiee.
+
+    Retourne (nom_du_champ, valeur_corrigee) ou None."""
+    ta, tl = fund.get("total_assets"), fund.get("total_liab")
+    fp = fund.get("total_equity")
+    if not ta or ta <= 0 or tl is None or fp is None:
         return None
-    recalcule = ta - tl
-    ancien = fund.get("book_equity")
-    if ancien is None or abs(recalcule - ancien) / max(ta, 1e-9) > 0.05:
-        return recalcule
-    return None
+    if abs(ta - (tl + fp)) / ta <= 0.05:
+        return None
+    precedent = _exercice_precedent(F, fund)
+    if not precedent:
+        return None
+    candidats = []
+    for cle, publie, recalcule in (("total_assets", ta, tl + fp),
+                                   ("total_liab", tl, ta - fp),
+                                   ("total_equity", fp, ta - tl)):
+        ref = precedent.get(cle)
+        if ref is None or abs(ref) < 1e-12:
+            continue
+        ecart_publie = abs(publie - ref) / abs(ref)
+        ecart_recalcule = abs(recalcule - ref) / abs(ref)
+        # Le champ est impute quand la valeur recalculee colle a l'an passe (moins de
+        # 25 % d'ecart) alors que la publiee s'en eloigne d'au moins le double.
+        if ecart_recalcule < 0.25 and ecart_publie > 2 * max(ecart_recalcule, 0.05):
+            candidats.append((cle, recalcule))
+    return candidats[0] if len(candidats) == 1 else None
+
+
+def _exercice_precedent(F, fund):
+    """Valeurs de l'exercice N-1, ramenees dans l'UNITE DE `fund` (dollars, milliards).
+
+    `F` est publie en devise locale et en unites, `fund` en dollars et en milliards :
+    les comparer directement reviendrait a confronter des roupies a des dollars. Le
+    facteur se DEDUIT de l'exercice courant, qui figure dans les deux et provient de
+    la meme ligne source — il vaut donc exactement le change, que la valeur soit
+    corrompue ou non."""
+    if not F or not fund:
+        return None
+    courant, serie = fund.get("total_assets"), F.get("total_assets") or []
+    if not courant or not serie or not serie[0]:
+        return None
+    k = courant / serie[0]
+    out = {}
+    for cle, nom in (("total_assets", "total_assets"), ("total_liab", "total_liab"),
+                     ("total_equity", "equity")):
+        v = F.get(nom) or []
+        if len(v) >= 2 and v[1] is not None:
+            out[cle] = v[1] * k
+    return out or None
 
 
 def _ttm_depuis_trimestres(symbol):
@@ -48,6 +97,17 @@ def _ttm_depuis_trimestres(symbol):
     except Exception:
         return None
     if not inc or len(inc) < 4 or not bal:
+        return None
+    # Le trimestriel doit etre RECENT. Sans ce controle, quatre trimestres clos en
+    # 2017 produisaient de paisibles "douze mois glissants" en 2026 : la reparation
+    # rajeunissait des comptes de neuf ans au lieu de les signaler.
+    from datetime import datetime, timezone
+    dernier = str(inc[0].get("date") or "")[:10]
+    try:
+        clos = datetime.strptime(dernier, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    if (datetime.now(timezone.utc) - clos).days > 400:
         return None
     som = lambda k: sum((fmp._num(q.get(k)) or 0.0) for q in inc[:4])
     return {"revenue": som("revenue"), "operatingIncome": som("operatingIncome"),
@@ -84,12 +144,22 @@ def reparer(symbol, fund, F, entry, motifs):
         return faites
     texte = " | ".join(motifs)
 
-    # 1. Fonds propres contredisant le bilan -> identite comptable
+    # 1. Bilan qui ne boucle pas -> imputation du champ fautif
+    #    Cette reparation ecrivait `book_equity` alors que le controle lit
+    #    `total_equity` : elle n'effacait donc jamais son propre motif. Cent
+    #    soixante-quinze titres le portaient, un seul le franchissait.
     if "identite du bilan" in texte:
-        v = _fonds_propres_recalcules(fund, F)
-        if v is not None:
-            fund["book_equity"] = v
-            faites.append("fonds propres recalcules par l'identite actif - passif")
+        impute = _champ_imputable(fund, F)
+        if impute:
+            cle, valeur = impute
+            if cle == "total_equity" and fund.get("book_equity") is not None:
+                # `book_equity` est la part ATTRIBUABLE : on lui reporte la correction
+                # en preservant l'ecart des minoritaires et des privilegiees.
+                minoritaires = (fund.get("total_equity") or 0.0) - fund["book_equity"]
+                fund["book_equity"] = valeur - minoritaires
+            fund[cle] = valeur
+            faites.append(f"{cle} impute par l'identite du bilan "
+                          f"(seul champ contredisant l'exercice precedent)")
 
     # 2. Taux de change introuvable -> devise pivot
     if "taux de change indisponible" in texte:

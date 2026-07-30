@@ -27,14 +27,37 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-# Seuils : bornes de PLAUSIBILITE larges, pas des opinions de valorisation.
-MIN_CAP_SUR_CA = 0.03          # une societe ne se traite pas a 3 % de ses ventes
-MIN_CAP_SUR_FONDS_PROPRES = 0.05
-MIN_CAP_SUR_EBIT = 2.0         # une societe rentable vaut plus de 2x son EBIT
-MAX_CA_SUR_ACTIF = 5.0         # les activites les plus legeres tournent a 2-3x
-MAX_FONDS_PROPRES_SUR_CAP = 200.0
-TOLERANCE_BILAN = 0.05         # 5 % d'ecart admis sur l'identite comptable
-ANCIENNETE_MAX = 2             # exercices
+# QUATRE SEUILS ONT ETE SUPPRIMES ICI, ET C'EST UNE CORRECTION DE PRINCIPE.
+#
+#   MIN_CAP_SUR_CA = 0.03            "on ne cote pas a 3 % de ses ventes"
+#   MIN_CAP_SUR_FONDS_PROPRES = 0.05 "ni a 5 % de ses fonds propres"
+#   MIN_CAP_SUR_EBIT = 2.0           "une societe rentable vaut plus de 2x son EBIT"
+#   MAX_CA_SUR_ACTIF = 5.0           "aucune activite ne tourne a 5x son actif"
+#
+# Ces quatre regles ne controlaient pas une DONNEE mais un RESULTAT. Elles
+# confrontaient une grandeur d'ACTIONNAIRE — la capitalisation — a des grandeurs
+# d'ENTREPRISE — chiffre d'affaires, resultat operationnel, actif net — sans jamais
+# ajouter la dette : elles mesuraient donc le LEVIER, et rejetaient les societes
+# endettees. Charter Communications, 19,57 Md$ de capitalisation pour 12,73 Md$ de
+# resultat operationnel, etait ecartee au motif que le rapport valait 1,54 — c'est-a-
+# dire uniquement parce qu'elle porte 95,8 Md$ de dette. Sa valeur d'entreprise
+# rapportee au resultat operationnel vaut 9,0.
+# Sur les titres de cette famille dont la capitalisation a ete CONFIRMEE par une
+# source independante, 76 % repassent le seuil des qu'on raisonne en valeur
+# d'entreprise. Et les depassements du rapport chiffre d'affaires sur actif sont
+# reels, confirmes au dollar pres par les depots : World Kinect 6,3 fois
+# (distributeur de carburant), The Real Brokerage 15,5 (commissions brutes),
+# Bullish 61,9 (volume negocie).
+# 601 titres etaient ecartes par ces seuils, dont 456 sans aucun autre motif.
+#
+# Ce qu'ils attrapaient LEGITIMEMENT — des lignes obligataires prises pour des
+# actions — releve du TYPE DE TITRE et est desormais traite a la source, dans
+# `fmp._is_preferred`, sur le libelle de l'emission.
+#
+# Ne subsistent que des IDENTITES et des impossibilites physiques.
+MAX_FONDS_PROPRES_SUR_CAP = 200.0   # erreur d'unites, pas un jugement de valeur
+TOLERANCE_BILAN = 0.05              # 5 % d'ecart admis sur l'identite comptable
+ANCIENNETE_MAX = 2                  # exercices
 
 
 def valider(fund: dict, F: dict | None, entry: dict | None = None) -> list[str]:
@@ -61,27 +84,13 @@ def valider(fund: dict, F: dict | None, entry: dict | None = None) -> list[str]:
     be = fund.get("book_equity")
     ta = fund.get("total_assets")
 
-    # --- Coherence capitalisation <-> comptes -------------------------------
-    if cap and cap > 0:
-        if rev and rev > 0 and cap < MIN_CAP_SUR_CA * rev:
-            motifs.append(f"capitalisation incoherente avec le chiffre d'affaires "
-                          f"({cap/rev:.1%} du CA) — porte probablement sur une ligne ADR")
-        if be and be > 0:
-            if cap < MIN_CAP_SUR_FONDS_PROPRES * be:
-                motifs.append(f"capitalisation incoherente avec les fonds propres "
-                              f"({cap/be:.1%} des capitaux propres)")
-            elif be > MAX_FONDS_PROPRES_SUR_CAP * cap:
-                motifs.append("fonds propres hors d'echelle face a la capitalisation")
-
-    # Une societe RENTABLE en continuite d'exploitation ne se traite pas sous deux
-    # fois son resultat operationnel — Apple vaut 37 fois le sien, Coca-Cola 28,
-    # General Motors 28. En dessous, soit les benefices ne reviennent pas a
-    # l'actionnaire, soit la capitalisation porte sur une AUTRE entite que les
-    # comptes : ligne de warrants, de droits, d'unites, ou ligne ADR.
-    ebit = fund.get("ebit")
-    if cap and cap > 0 and ebit and ebit > 0 and cap < MIN_CAP_SUR_EBIT * ebit:
-        motifs.append(f"capitalisation de {cap/ebit:.2f}x le resultat operationnel — "
-                      f"elle ne porte pas sur la meme entite que les comptes")
+    # --- Erreur d'UNITES sur les fonds propres ------------------------------
+    # Seul controle conserve de cette famille, et il ne juge aucune valorisation :
+    # des fonds propres deux cents fois superieurs a la capitalisation ne traduisent
+    # pas une decote mais un montant hors d'echelle — Oncotelic declarait 262 000
+    # milliards de dollars de capitaux propres pour 16 M$ de capitalisation.
+    if cap and cap > 0 and be and be > MAX_FONDS_PROPRES_SUR_CAP * cap:
+        motifs.append("fonds propres hors d'echelle face a la capitalisation")
 
     # --- Identites comptables ----------------------------------------------
     if ta and ta > 0:
@@ -89,9 +98,6 @@ def valider(fund: dict, F: dict | None, entry: dict | None = None) -> list[str]:
             motifs.append("tresorerie superieure a l'actif total")
         if (fund.get("total_debt") or 0) > ta * 1.001:
             motifs.append("dette superieure a l'actif total")
-        if rev and rev > MAX_CA_SUR_ACTIF * ta:
-            motifs.append(f"chiffre d'affaires de {rev/ta:.0f}x l'actif total — "
-                          f"entite de financement publiant les comptes du groupe")
         tl = fund.get("total_liab")          # deja converti en USD, comme ta et be
         # Le bilan equilibre sur les fonds propres TOTAUX, minoritaires inclus.
         # `book_equity` ne retient que la part attribuable aux actionnaires — c'est
@@ -101,7 +107,11 @@ def valider(fund: dict, F: dict | None, entry: dict | None = None) -> list[str]:
         fp = fund.get("total_equity")
         if fp is None:
             fp = be
-        if tl and fp is not None:
+        # `tl` est compare a None et non teste en verite : un passif NUL est falsy,
+        # si bien que le bilan des societes sans dettes n'etait jamais controle. Vingt-
+        # cinq lignes de l'univers y echappaient, dont quinze a fonds propres nuls ou
+        # negatifs — exactement la population que les routes de liquidation traitent.
+        if tl is not None and fp is not None:
             ecart = abs(ta - (tl + fp)) / ta
             if ecart > TOLERANCE_BILAN:
                 motifs.append(f"identite du bilan violee (ecart {ecart:.0%} entre "
