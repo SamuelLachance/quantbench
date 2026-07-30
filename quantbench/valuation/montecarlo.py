@@ -20,6 +20,7 @@ import numpy as np
 from scipy import stats
 
 from .dcf import DcfInputs, value_dcf
+from .dcf_vectorise import champs_vectorisables, equites_dcf
 
 
 def _nearest_psd(corr: np.ndarray) -> np.ndarray:
@@ -80,17 +81,30 @@ def monte_carlo_dcf(base: DcfInputs, distributions: dict, *,
     Les scenarios qui font echouer le DCF (ex. WACC terminal <= g) sont ignores.
     """
     samples = sample_inputs(distributions, n, correlations, seed)
-    equity = np.full(n, np.nan)
 
-    for d in range(n):
-        overrides = {}
-        for name, arr in samples.items():
-            v = arr[d]
-            overrides[name] = int(round(v)) if name in _INT_FIELDS else float(v)
-        try:
-            equity[d] = value_dcf(replace(base, **overrides))["equity_value"]
-        except (ValueError, ZeroDivisionError, FloatingPointError):
-            continue  # scenario incoherent -> ecarte
+    # CHEMIN RAPIDE, ET UNIQUEMENT QUAND IL EST PROUVE IDENTIQUE. La boucle
+    # ci-dessous coute 1,2 seconde par societe — mesure a un thread, c'est plus
+    # d'une heure de calcul par shard, non parallelisable puisque du Python pur.
+    # Evaluer les scenarios d'un seul coup revient au meme calcul sur des tableaux
+    # (scenarios x annees) : 88 fois plus vite, et les memes chiffres au bit pres,
+    # ce qu'un test verifie sur les dix mille tirages d'une societe reelle ET sur
+    # des milliers de jeux de parametres aleatoires.
+    # Des qu'un champ tire sort de ce que le module vectorise sait traiter — un
+    # champ entier, une structure de phases qui varierait d'un tirage a l'autre —
+    # on retombe ici, sur la reference. Jamais sur une approximation.
+    if champs_vectorisables(samples.keys()):
+        equity = equites_dcf(base, samples, n)
+    else:
+        equity = np.full(n, np.nan)
+        for d in range(n):
+            overrides = {}
+            for name, arr in samples.items():
+                v = arr[d]
+                overrides[name] = int(round(v)) if name in _INT_FIELDS else float(v)
+            try:
+                equity[d] = value_dcf(replace(base, **overrides))["equity_value"]
+            except (ValueError, ZeroDivisionError, FloatingPointError):
+                continue  # scenario incoherent -> ecarte
 
     # `np.isnan(inf)` vaut FALSE : le filtre precedent laissait donc passer les
     # infinis, qui contaminent ensuite moyenne et ecart-type. Le build en etait

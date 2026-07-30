@@ -2171,3 +2171,146 @@ def test_le_resume_de_validation_porte_tout_ce_que_la_page_lit():
     # Le fichier complet reste a cote, avec le detail par titre : sans lui, aucune
     # anomalie du tableau agrege n'est diagnosticable.
     assert (racine / "app" / "us" / "_validation_risque.json").exists(),         "le fichier detaille a disparu"
+
+
+# --------------------------------------------------------------------------- #
+# DCF vectorise : le meme calcul, plus vite, ou rien
+# --------------------------------------------------------------------------- #
+def _base_dcf_aleatoire(rng, mode):
+    """Un jeu d'entrees DCF tire au hasard, dans des bornes economiquement plausibles."""
+    from quantbench.valuation.dcf import DcfInputs
+    return DcfInputs(
+        revenue_base=rng.uniform(10, 1e5),
+        g1_begin=rng.uniform(-0.2, 0.5), g1_end=rng.uniform(-0.1, 0.3),
+        g2_begin=rng.uniform(-0.1, 0.3), g2_end=rng.uniform(-0.05, 0.15),
+        g3_begin=rng.uniform(-0.05, 0.12), g3_end=rng.uniform(-0.02, 0.035),
+        len1=rng.randint(1, 6), len2=rng.randint(1, 6), len3=rng.randint(1, 6),
+        conv1=rng.randint(1, 5), conv2=rng.randint(1, 5), conv3=rng.randint(1, 5),
+        current_operating_margin=rng.uniform(-0.3, 0.5),
+        terminal_operating_margin=rng.uniform(0.01, 0.4),
+        margin_converge_start=rng.randint(1, 8),
+        current_tax_rate=rng.uniform(0, 0.4),
+        marginal_tax_rate=rng.uniform(0.1, 0.4),
+        tax_converge_start=rng.randint(1, 8),
+        current_sales_to_capital=rng.uniform(0.3, 5),
+        terminal_sales_to_capital=rng.uniform(0.3, 5),
+        s2c_converge_start=rng.randint(1, 6),
+        risk_free_rate=rng.uniform(0.01, 0.06), erp=rng.uniform(0.03, 0.09),
+        size_premium=rng.choice([0.0, 0.01, 0.035]),
+        unlevered_beta=rng.uniform(0.4, 2.2),
+        terminal_unlevered_beta=rng.uniform(0.5, 1.5),
+        beta_converge_start=rng.randint(1, 8),
+        current_pretax_kd=rng.uniform(0.02, 0.15),
+        terminal_pretax_kd=rng.uniform(0.02, 0.1),
+        kd_converge_start=rng.randint(1, 8),
+        equity_value=rng.uniform(1, 1e6), debt_value=rng.uniform(0, 5e5),
+        cash_and_non_operating=rng.uniform(0, 1e5),
+        additional_roic_in_perpetuity=rng.uniform(0, 0.03),
+        asset_liquidation_during_negative_growth=rng.choice([0.0, 0.5, 1.0]),
+        reinvestment_mode=mode,
+        current_roic=(rng.uniform(0.02, 0.4) if mode == "roic" else float("nan")),
+        terminal_roic=(rng.uniform(0.02, 0.25) if mode == "roic" else float("nan")),
+        roic_converge_start=rng.randint(1, 8),
+    )
+
+
+def test_le_dcf_vectorise_rend_exactement_les_memes_chiffres():
+    """Le chemin rapide doit etre IDENTIQUE AU BIT PRES a la reference.
+
+    Une optimisation qui deplace les valorisations publiees, meme d'un millieme,
+    n'est pas une optimisation : c'est un changement de methode qui ne dit pas son
+    nom. L'egalite exacte est donc exigee, pas une tolerance.
+    """
+    import random
+
+    import numpy as np
+
+    from quantbench.valuation.dcf import value_dcf
+    from quantbench.valuation.dcf_vectorise import equites_dcf
+
+    rng = random.Random(20260730)
+    compares = 0
+    for i in range(1200):
+        b = _base_dcf_aleatoire(rng, "roic" if i % 2 else "sales_to_capital")
+        try:
+            ref = value_dcf(b)["equity_value"]
+        except (ValueError, ZeroDivisionError, FloatingPointError):
+            assert np.isnan(equites_dcf(b, {}, 1)[0]), \
+                "la reference rejette ce scenario, le chemin rapide l'accepte"
+            continue
+        vec = float(equites_dcf(b, {}, 1)[0])
+        assert vec == ref, (i, ref, vec)
+        compares += 1
+    assert compares > 800, f"trop peu de scenarios valides compares : {compares}"
+
+
+def test_le_dcf_vectorise_rejette_exactement_les_memes_scenarios():
+    """Un scenario incoherent doit valoir NaN, jamais un nombre.
+
+    Les trois rejets de la reference sont economiques, pas techniques : sans eux,
+    un cout du capital terminal sous la croissance perpetuelle donne une valeur
+    terminale NEGATIVE, et un rendement du capital nul rend la croissance gratuite.
+    Le chemin rapide qui les accepterait fabriquerait de la valeur.
+    """
+    from dataclasses import replace
+
+    import numpy as np
+
+    from quantbench.valuation.dcf import value_dcf
+    from quantbench.valuation.dcf_vectorise import equites_dcf
+
+    base = _dcf_inputs_temoin()
+    for change in ({"g3_end": 0.50},          # WACC terminal sous la croissance
+                   {"current_roic": -0.05},   # rendement du capital negatif
+                   {"terminal_roic": 0.0},    # rendement terminal nul
+                   {"terminal_roic": -0.10}):
+        b = replace(base, **change)
+        with pytest.raises((ValueError, ZeroDivisionError, FloatingPointError)):
+            value_dcf(b)
+        assert np.isnan(equites_dcf(b, {}, 1)[0]), change
+
+
+def test_le_monte_carlo_retombe_sur_la_reference_quand_il_le_faut():
+    """Un champ ENTIER tire (longueur de phase, annee de convergence) fait varier
+    la structure du scenario d'un tirage a l'autre. Le module vectorise ne sait pas
+    la traiter et doit le DIRE, pour que l'appelant reprenne la boucle exacte plutot
+    que de valoriser une approximation silencieuse."""
+    from quantbench.valuation.dcf_vectorise import champs_vectorisables
+
+    assert champs_vectorisables(["g1_begin", "terminal_operating_margin", "erp"])
+    assert not champs_vectorisables(["g1_begin", "len1"])
+    assert not champs_vectorisables(["conv2"])
+    assert not champs_vectorisables(["margin_converge_start"])
+    assert not champs_vectorisables([])                     # aucun tirage
+    assert not champs_vectorisables(["champ_qui_nexiste_pas"])
+
+
+def test_les_deux_chemins_du_monte_carlo_donnent_la_meme_distribution():
+    """Bout en bout : meme graine, memes lois, memes percentiles."""
+    import numpy as np
+    from scipy import stats as st
+
+    from quantbench.valuation.dcf_vectorise import champs_vectorisables
+    from quantbench.valuation.montecarlo import monte_carlo_dcf, sample_inputs
+
+    base = _dcf_inputs_temoin()
+    lois, corr = _lois_temoin(base)
+    assert champs_vectorisables(lois.keys()), \
+        "les lois du site doivent emprunter le chemin rapide, sinon il ne sert a rien"
+
+    rapide = monte_carlo_dcf(base, lois, n=600, correlations=corr, seed=11)
+
+    # On force le repli en ajoutant un champ entier de dispersion NULLE : la
+    # structure ne bouge pas, mais l'aiguillage bascule sur la boucle exacte.
+    lentes = dict(lois)
+    lentes["len1"] = st.norm(base.len1, 1e-12)
+    lent = monte_carlo_dcf(base, lentes, n=600, correlations=corr, seed=11)
+
+    # Les tirages des huit lois communes sont identiques a graine egale seulement
+    # si le nombre de lois est le meme ; ici il differe, donc on compare des
+    # STATISTIQUES et non des valeurs point a point.
+    assert lent["n_valid"] == rapide["n_valid"]
+    assert np.isclose(lent["median"], rapide["median"], rtol=0.05), \
+        (lent["median"], rapide["median"])
+    assert np.isclose(lent["percentiles"][10], rapide["percentiles"][10], rtol=0.10)
+    assert set(sample_inputs(lois, 5, corr, 0)) == set(lois)
