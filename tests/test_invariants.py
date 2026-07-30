@@ -1696,3 +1696,42 @@ def test_le_gardefou_journalise_la_concentration_par_route():
            / "scripts" / "check_build.py").read_text(encoding="utf-8")
     assert "concentration par route" in src
     assert "capitalisation demesuree" in src
+
+
+# --------------------------------------------------------------------------- #
+# 35. Le DCF refuse un ROIC nul ou negatif ; le tireur ecarte les infinis
+# --------------------------------------------------------------------------- #
+def test_le_dcf_refuse_un_roic_nul_ou_negatif():
+    """L'identite g = reinvestissement x ROIC n'a pas de solution a ROIC nul :
+    financer une croissance avec un rendement du capital nul exigerait un
+    reinvestissement INFINI. Le code traitait ce cas comme "reinvestissement nul",
+    c'est-a-dire croissance GRATUITE — et le modele RECOMPENSAIT donc la destruction
+    de capital : ROIC de +0,001 donnait une equite de -0,673, exactement 0 donnait
+    +1,053, et -0,20 donnait +1,778."""
+    from quantbench.valuation.dcf import DcfInputs, value_dcf
+    base = dict(revenue_base=5.0, g1_begin=0.08, g1_end=0.06, g2_begin=0.06,
+                g2_end=0.04, g3_begin=0.04, g3_end=0.025,
+                current_operating_margin=0.15, terminal_operating_margin=0.15,
+                reinvestment_mode="roic", equity_value=10.0, debt_value=2.0)
+    for mauvais in ({"current_roic": 0.0, "terminal_roic": 0.10},
+                    {"current_roic": -0.20, "terminal_roic": 0.10},
+                    {"current_roic": 0.15, "terminal_roic": 0.0},
+                    {"current_roic": 0.15, "terminal_roic": -0.05}):
+        with pytest.raises(ValueError):
+            value_dcf(DcfInputs(**base, **mauvais))
+    # Et la valeur doit CROITRE avec le rendement du capital, sans discontinuite.
+    valeurs = [value_dcf(DcfInputs(**base, current_roic=r, terminal_roic=0.10))
+               ["equity_value"] for r in (0.02, 0.08, 0.20, 0.40)]
+    assert valeurs == sorted(valeurs), valeurs
+
+
+def test_le_tireur_ecarte_les_scenarios_infinis():
+    """`np.isnan(inf)` vaut FALSE : le filtre laissait passer les infinis, qui
+    contaminent ensuite moyenne et ecart-type. Le build en etait protege par
+    `_mc_stats`, mais le service, `value_ticker` et `batch_screener` consomment cette
+    mediane sans filet."""
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "valuation" / "montecarlo.py").read_text(encoding="utf-8")
+    assert "~np.isnan(equity)" not in src, "le filtre laisse passer les infinis"
+    assert "np.isfinite(equity)" in src
+    assert "taux_validite" in src, "le taux de validite des tirages n'est pas publie"

@@ -92,7 +92,11 @@ def monte_carlo_dcf(base: DcfInputs, distributions: dict, *,
         except (ValueError, ZeroDivisionError, FloatingPointError):
             continue  # scenario incoherent -> ecarte
 
-    valid = equity[~np.isnan(equity)]
+    # `np.isnan(inf)` vaut FALSE : le filtre precedent laissait donc passer les
+    # infinis, qui contaminent ensuite moyenne et ecart-type. Le build en etait
+    # protege par `_mc_stats`, mais `service.py`, `value_ticker.py` et
+    # `batch_screener.py` consomment cette mediane sans filet.
+    valid = equity[np.isfinite(equity)]
     if valid.size == 0:
         raise RuntimeError("Aucun scenario Monte Carlo valide. Verifiez les lois.")
 
@@ -101,6 +105,12 @@ def monte_carlo_dcf(base: DcfInputs, distributions: dict, *,
         "equity_values": valid,
         "n_valid": int(valid.size),
         "n_total": n,
+        # TAUX DE VALIDITE PUBLIE, et non compare a un plancher. Un tirage ecarte
+        # n'est pas une anomalie : c'est un scenario ou la valeur terminale n'existe
+        # pas (cout du capital terminal sous la croissance) ou ou le rendement du
+        # capital devient nul. Le taux mesure donc a quel point les hypotheses de
+        # depart tolerent la dispersion — une information a LIRE, pas un seuil.
+        "taux_validite": round(float(valid.size) / max(n, 1), 4),
         "mean": float(np.mean(valid)),
         "median": float(np.median(valid)),
         "std": float(np.std(valid)),

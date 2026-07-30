@@ -215,6 +215,22 @@ def value_dcf(x: DcfInputs) -> dict:
         # (erosion des rentes de situation). Favorise les entreprises capital-legeres.
         if np.isnan(x.current_roic) or np.isnan(x.terminal_roic):
             raise ValueError("reinvestment_mode='roic' exige current_roic et terminal_roic.")
+        # UN ROIC NUL OU NEGATIF N'EST PAS UNE VALEUR ADMISSIBLE.
+        # L'identite g = reinvestissement x ROIC n'a pas de solution : financer une
+        # croissance avec un rendement du capital nul exigerait un reinvestissement
+        # INFINI. Le code traitait ce cas comme "reinvestissement nul", c'est-a-dire
+        # croissance GRATUITE — la meme famille que les quatre pieges falsy du jour,
+        # sauf qu'ici c'est le tireur Monte Carlo qui produit la valeur interdite.
+        # Discontinuite mesuree : ROIC de +0,001 donne une equite de -0,673 ;
+        # exactement 0 donne +1,053 ; -0,20 donne +1,778. Le modele RECOMPENSE la
+        # destruction de capital.
+        # Le moteur deterministe n'en produit jamais — les bornes de
+        # `build_universal` garantissent au moins 0,02 — donc le cout de cette garde
+        # est nul et son filet reel.
+        if x.current_roic <= 0 or x.terminal_roic <= 0:
+            raise ValueError(
+                f"ROIC nul ou negatif (courant {x.current_roic:.4f}, terminal "
+                f"{x.terminal_roic:.4f}) : la croissance n'y est pas finançable.")
         roic_path = converge_path(x.current_roic, x.terminal_roic, n, x.roic_converge_start)
         # Damodaran : taux de reinvestissement = croissance de l'EBIT APRES IMPOT / ROIC
         # (pas la croissance du CA — elles different quand marge/impot varient).
@@ -256,7 +272,12 @@ def value_dcf(x: DcfInputs) -> dict:
         roic_t = min(x.terminal_roic, wacc_t + 0.02)
     else:
         roic_t = wacc_t + x.additional_roic_in_perpetuity
-    if terminal_growth <= 0 or roic_t == 0:
+    if roic_t <= 0:
+        # Meme raison qu'a l'horizon explicite : un rendement terminal nul ou negatif
+        # rend le taux de reinvestissement indefini, et un roic_t negatif produisait
+        # un taux NEGATIF, donc un flux terminal GONFLE.
+        raise ValueError(f"ROIC terminal nul ou negatif ({roic_t:.4f}).")
+    if terminal_growth <= 0:
         reinv_rate_t = 0.0
     else:
         reinv_rate_t = terminal_growth / roic_t
