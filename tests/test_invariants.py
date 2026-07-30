@@ -736,3 +736,135 @@ def test_une_societe_ancienne_et_deficitaire_n_est_pas_une_jeune_pousse():
     # Historique court : la route descendante reste legitime, faute de reference.
     courte = {k: (v[:3] if isinstance(v, list) else v) for k, v in longue.items()}
     assert route.classify(f, None, courte) == "jeune/deficitaire"
+
+
+# --------------------------------------------------------------------------- #
+# 24. Un controle rejette une DONNEE FAUSSE, jamais un RESULTAT
+# --------------------------------------------------------------------------- #
+def test_aucun_controle_ne_compare_la_capitalisation_aux_comptes():
+    """Quatre seuils confrontaient la capitalisation — grandeur d'ACTIONNAIRE — au
+    chiffre d'affaires, au resultat operationnel et a l'actif net — grandeurs
+    d'ENTREPRISE — sans jamais ajouter la dette : ils mesuraient le LEVIER. Charter
+    Communications, 19,57 Md$ de capitalisation pour 12,73 Md$ de resultat
+    operationnel, etait ecartee au seul motif qu'elle porte 95,8 Md$ de dette."""
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "data" / "validate.py").read_text(encoding="utf-8")
+    corps = src.split("def valider(")[1].split("def fraicheur_des_comptes")[0]
+    for interdit in ("MIN_CAP_SUR_CA", "MIN_CAP_SUR_FONDS_PROPRES", "MIN_CAP_SUR_EBIT",
+                     "MAX_CA_SUR_ACTIF", "incoherente avec"):
+        assert interdit not in corps, f"seuil d'opinion reintroduit : {interdit}"
+
+
+def test_une_valorisation_extreme_mais_exacte_n_est_pas_censuree():
+    """Une societe endettee peut legitimement coter sous deux fois son resultat
+    operationnel, ou sous 3 % de ses ventes."""
+    from quantbench.data.validate import valider
+    f = societe(market_cap=0.02, price=1.0, shares=2e7, revenue=5.0, ebit=1.0,
+                book_equity=4.0, total_assets=9.0, total_liab=5.0, total_equity=4.0,
+                cash=1.0, total_debt=2.0)
+    assert valider(f, etats(), None) == []
+
+
+def test_l_age_des_comptes_ne_rejette_plus():
+    """Des comptes anciens sont les derniers comptes CONNUS. Treize pour cent des
+    lignes ecartees pour cette raison deposaient encore a la SEC."""
+    from quantbench.data.validate import valider, fraicheur_des_comptes
+    entry = {"income": {2019: {"date": "2019-12-31"}}, "balance": {2019: {}}}
+    assert not [m for m in valider(societe(), etats(), entry) if "perim" in m]
+    date, mois = fraicheur_des_comptes(entry)
+    assert date == "2019-12-31" and mois > 60
+
+
+def test_la_fraicheur_se_compte_en_mois_pas_en_millesimes():
+    """Le millesime est decale chez le fournisseur pour 3 a 4 % des lignes — un
+    exercice clos le 30 juin 2024 est etiquete 2023 — et comparer des annees civiles
+    cree une falaise au 1er janvier sans aucun sens economique."""
+    from datetime import datetime, timezone
+    from quantbench.data.validate import fraicheur_des_comptes
+    entry = {"income": {2023: {"date": "2024-06-30"}}, "balance": {2023: {}}}
+    ref = datetime(2026, 7, 30, tzinfo=timezone.utc)
+    _, mois = fraicheur_des_comptes(entry, ref)
+    assert mois == 25, mois
+    # AUCUNE FALAISE AU 1er JANVIER : deux clotures separees d'un seul jour ne
+    # peuvent pas differer d'un exercice entier. La regle par millesime les faisait
+    # basculer ensemble chaque 1er janvier — 34 lignes perdues en juillet, 428 en
+    # janvier, pour des societes strictement inchangees.
+    ref = datetime(2026, 7, 30, tzinfo=timezone.utc)
+    veille = fraicheur_des_comptes(
+        {"income": {2023: {"date": "2023-12-31"}}, "balance": {2023: {}}}, ref)[1]
+    lendemain = fraicheur_des_comptes(
+        {"income": {2024: {"date": "2024-01-01"}}, "balance": {2024: {}}}, ref)[1]
+    assert abs(veille - lendemain) <= 1, (veille, lendemain)
+
+
+def test_les_emissions_obligataires_restent_hors_univers():
+    """Ce que les seuils supprimes attrapaient LEGITIMEMENT releve du TYPE DE TITRE
+    et se traite sur le libelle."""
+    from quantbench.data.fmp import _is_preferred
+    for sym, nom in [("DUKB", "Duke Energy Corporation 5.625% Junior Subordinated Debentures"),
+                     ("DTW", "DTE Energy Company JR SUB DB 2017 E"),
+                     ("DTG", "DTE Energy Company 2021 Series"),
+                     ("DTB", "DTE Energy Company Series 2021"),
+                     ("EAI", "Entergy Arkansas 4.875%")]:
+        assert _is_preferred(sym, nom), f"{sym} devrait etre exclue"
+    for sym, nom in [("PTRN", "Pattern Group Inc. Series A Common Stock"),
+                     ("AAPL", "Apple Inc."), ("HEI-A", "HEICO Corporation"),
+                     ("ET", "Energy Transfer LP")]:
+        assert not _is_preferred(sym, nom), f"{sym} ne doit pas etre exclue"
+
+
+def test_un_courtier_immobilier_n_est_pas_valorise_comme_un_immeuble():
+    """Aucun parc immobilier ne tourne trois fois par an : un chiffre d'affaires de
+    plusieurs fois l'actif exclut la route du FFO capitalise."""
+    courtier = societe(sector="Real Estate", industry="Real Estate - Services",
+                       revenue=1.5, total_assets=0.1)
+    assert route.classify(courtier, None, etats()) != "fonciere"
+    fonciere = societe(sector="Real Estate", industry="REIT - Retail",
+                       revenue=0.3, total_assets=4.0)
+    assert route.classify(fonciere, None, etats()) == "fonciere"
+
+
+# --------------------------------------------------------------------------- #
+# 25. Le temps ecoule depuis l'observation se retranche de l'autonomie
+# --------------------------------------------------------------------------- #
+def test_le_temps_ecoule_erode_l_autonomie():
+    """Un bilan est une PHOTOGRAPHIE datee. Iridium World Communications, en faillite
+    depuis 1999, publiait en 1998 119,7 M$ de fonds propres pour 107,6 M$ de perte
+    annuelle. Nous la valorisions vingt-huit ans plus tard sur ces memes fonds
+    propres, a +5 360 %."""
+    frais = societe(cash=1.0, cfo=-0.2, capex=0.0, age_des_comptes_mois=3)
+    vieux = societe(cash=1.0, cfo=-0.2, capex=0.0, age_des_comptes_mois=28 * 12)
+    assert route.probabilite_de_survie(frais) > 0.5
+    assert route.probabilite_de_survie(vieux) == 0.0
+
+
+def test_le_temps_ne_penalise_pas_une_societe_qui_encaisse():
+    """Ce n'est pas un seuil d'anciennete deguise : le temps ecoule n'ecarte rien par
+    lui-meme."""
+    f = societe(cash=1.0, cfo=0.5, capex=-0.1, age_des_comptes_mois=30 * 12)
+    assert route.probabilite_de_survie(f) == 1.0
+
+
+def test_un_tableau_de_flux_entierement_nul_est_un_tableau_absent():
+    """Iridium publie pour 1998 une perte de 107,6 M$ et des flux tous a zero : nous
+    en concluions qu'elle ne consommait rien."""
+    f = societe(cfo=0.0, capex=0.0, net_income=-0.1076)
+    assert abs(route.consommation_de_tresorerie(f) - 0.1076) < 1e-12
+    # Une societe reellement a l'equilibre, elle, ne consomme rien.
+    assert route.consommation_de_tresorerie(
+        societe(cfo=0.0, capex=0.0, net_income=0.0)) == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# 26. Le Monte Carlo delegue la marge au routage au lieu de la reimplementer
+# --------------------------------------------------------------------------- #
+def test_la_simulation_ne_reimplemente_pas_la_marge_normalisee():
+    """Le miroir avait silencieusement diverge : il moyennait encore les RATIOS
+    annuels, ne retenait que les exercices benificiaires et posait 12 % de marge
+    cible en dur. La simulation aurait actualise des flux differents de ceux de la
+    valorisation affichee, et sa mediane ecrase l'upside."""
+    src = (Path(__file__).resolve().parent.parent
+           / "scripts" / "build_site_fmp.py").read_text(encoding="utf-8")
+    corps = src.split("def _route_margin(")[1].split("\ndef ")[0]
+    assert "marge_de_cycle" in corps, "la simulation reimplemente la marge normalisee"
+    assert "0.12" not in corps, "marge cible codee en dur dans la simulation"

@@ -23,7 +23,7 @@ import numpy as np
 from scipy import stats
 
 from quantbench.data import fmp
-from quantbench.data.validate import valider
+from quantbench.data.validate import valider, fraicheur_des_comptes
 from quantbench.data.repair import reparer
 from quantbench.data.sec_fundamentals import annual_report_docs
 from quantbench.data.market import risk_free_rate
@@ -68,21 +68,21 @@ def _mc_stats(eq, mcap, shares):
 
 
 def _route_margin(fund, category, F):
-    """Marge opérationnelle normalisée selon la catégorie (miroir de route.py) :
-    cyclique = marge moyenne du cycle ; mature en perte = moyenne des marges
-    POSITIVES passées ; jeune/déficitaire = marge cible (pas la marge courante
-    négative, sinon valeur nulle à l'infini). Sinon None (marge brute)."""
-    ms = [e / r for e, r in zip((F or {}).get("ebit", []), (F or {}).get("revenue", []))
-          if e is not None and r]
-    if category == "cyclique" and ms:
-        return float(np.mean(ms))
-    if category == "mature_deficitaire":
-        pos = [m for m in ms if m > 0]
-        if pos:
-            return float(np.mean(pos))
+    """Marge normalisee — MIROIR STRICT de route.py, par DELEGATION et non par copie.
+
+    Cette fonction reimplementait la regle au lieu de l'appeler, et avait donc
+    silencieusement divergé : elle moyennait encore les RATIOS annuels au lieu de
+    rapporter les sommes, ne retenait pour les societes matures en perte que les
+    exercices BENEFICIAIRES, et posait 12 % de marge cible en dur la ou le routage
+    lit la mediane MESUREE du secteur. La simulation aurait donc actualise des flux
+    differents de ceux de la valorisation affichee, et sa mediane ecrase l'upside.
+    Une regle n'a le droit qu'a une seule ecriture."""
+    from quantbench.valuation.route import marge_de_cycle, sect
+    if category in ("cyclique", "mature_deficitaire"):
+        return marge_de_cycle(F)
     if category == "jeune/deficitaire":
         om = fund.get("operating_margin")
-        return om if (om is not None and om > 0.05) else 0.12
+        return om if (om is not None and om > 0.05) else sect(fund, "marge", 0.10)
     return None
 
 
@@ -309,14 +309,28 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     # VALIDATION DES ENTREES : une donnee non verifiee ne donne pas une valorisation
     # approximative mais une valorisation FAUSSE. On ne valorise que ce dont on
     # peut repondre, et on RETOURNE le motif quand ce n'est pas le cas.
+    # FRAICHEUR : mesuree et PUBLIEE, jamais un motif de rejet. Des comptes anciens
+    # sont les derniers comptes CONNUS ; Damodaran valorise dessus en signalant leur
+    # date. Au-dela de trente mois on tente d'abord la reconstitution sur douze mois
+    # glissants, puis on affiche la date retenue quoi qu'il arrive.
+    date_comptes, age_mois = fraicheur_des_comptes(entry)
+    fund["date_des_comptes"] = date_comptes
+    fund["age_des_comptes_mois"] = age_mois
     motifs = valider(fund, F, entry)
     reparations = []
-    if motifs:
+    declencheurs = list(motifs)
+    if age_mois is not None and age_mois > 30:
+        declencheurs.append("comptes perimes")
+    if declencheurs:
         # On tente de CORRIGER avant de renoncer : capitalisation de la cotation
         # d'origine, identite du bilan, douze mois glissants, devise pivot.
-        reparations = reparer(symbol, fund, F, entry, motifs)
+        reparations = reparer(symbol, fund, F, entry, declencheurs)
         if reparations:
             motifs = valider(fund, F, entry)          # revalidation apres reparation
+            for r in reparations:
+                if "douze mois glissants" in r:
+                    fund["date_des_comptes"] = fund.get("date_ttm") or date_comptes
+                    fund["age_des_comptes_mois"] = 0
     sh, mc0 = fund.get("shares"), fund.get("market_cap")
     # LE NOMBRE D'ACTIONS N'EST PAS UNE QUESTION DE TAILLE MAIS DE COHERENCE.
     # Le seuil de 100 000 titres eliminait des societes parfaitement saines au

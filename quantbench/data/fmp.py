@@ -199,10 +199,73 @@ def fx_to_usd(currency: str):
 # --------------------------------------------------------------------------- #
 # Univers (screener)
 # --------------------------------------------------------------------------- #
+def _date_des_comptes(inc, bal):
+    """Date de CLOTURE du dernier exercice publie (chaine AAAA-MM-JJ) ou None."""
+    for src in (inc, bal):
+        if src:
+            d = str((src or {}).get(max(src), {}).get("date") or "")[:10]
+            if len(d) == 10:
+                return d
+    return None
+
+
+def _age_en_mois(date_cloture):
+    """Age en MOIS depuis la cloture. Compte en mois et non en millesimes : le
+    millesime d'exercice est decale chez le fournisseur pour 3 a 4 % des lignes — un
+    exercice clos le 30 juin 2024 est etiquete 2023 — et comparer des annees civiles
+    cree une falaise au 1er janvier sans aucun sens economique."""
+    if not date_cloture:
+        return None
+    from datetime import datetime, timezone
+    try:
+        c = datetime.strptime(date_cloture, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    n = datetime.now(timezone.utc)
+    return (n.year - c.year) * 12 + (n.month - c.month) - (n.day < c.day)
+
+
+@functools.lru_cache(maxsize=1)
+def societes_radiees():
+    """Tickers RADIES, avec leur date — le seul fait qui atteste qu'une ligne n'est
+    plus une societe cotee.
+
+    C'est le pendant indispensable de la suppression du rejet sur l'age des comptes.
+    Une societe ne se declare pas morte parce que ses comptes datent : elle se
+    declare morte parce qu'elle a ete RADIEE, a une date certaine et verifiable.
+    ITT Educational Services a ete liquidee en 2016 ; il n'existe aucune "bonne
+    valorisation" de cette ligne, et son exclusion ne releve pas du controle de
+    donnee mais de la DEFINITION DE L'UNIVERS.
+
+    Garde-fou : le fournisseur marque aussi des societes bien vivantes, le plus
+    souvent a quelques jours d'un changement de place ou de code. On n'exclut donc
+    qu'au-dela d'un TRIMESTRE, delai apres lequel une radiation erronee aurait ete
+    corrigee."""
+    from datetime import datetime, timedelta, timezone
+    limite = (datetime.now(timezone.utc) - timedelta(days=90)).strftime("%Y-%m-%d")
+    out = {}
+    for page in range(200):                       # ~9 500 lignes, 100 par page
+        try:
+            rows = _json(f"delisted-companies?page={page}&limit=100")
+        except Exception:
+            break
+        if not rows:
+            break
+        for r in rows:
+            sym, d = r.get("symbol"), str(r.get("delistedDate") or "")[:10]
+            if sym and d and d < limite:
+                out[sym] = d
+    return out
+
+
 def screener(exchanges=("NASDAQ",)):
     """Sociétés tangibles (hors ETF/fonds) des bourses données. Retourne
     {symbol: {sector, industry, beta, price, market_cap, currency, exchange, name}}."""
     out = {}
+    try:
+        radiees = societes_radiees()
+    except Exception:
+        radiees = {}
     for ex in exchanges:
         try:
             rows = _json(f"company-screener?exchange={ex}&isEtf=false&isFund=false"
@@ -235,6 +298,8 @@ def screener(exchanges=("NASDAQ",)):
             if _is_preferred(sym, r.get("companyName")):   # actions privilégiées / notes : exclues
                 continue
             if _est_un_derive(sym, r.get("companyName")):       # warrants / units / droits
+                continue
+            if sym in radiees:                    # radiee a date certaine : hors univers
                 continue
             # Le volume de la DERNIERE SEANCE d'une ligne de cotation ne dit rien de
             # l'existence de l'emetteur. Ce filtre n'etait ni necessaire — ITT
@@ -616,6 +681,14 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         # mine de Bakubung : juger son autonomie sur le seul flux d'exploitation
         # revenait a ignorer les deux tiers de la consommation.
         "capex": b(g(cf, "capitalExpenditure")),
+        # DATE d'observation des comptes, portee par `fund` pour voyager partout.
+        # Ce n'est pas un critere de rejet — des comptes anciens sont les derniers
+        # comptes CONNUS — mais une information indispensable a la valorisation :
+        # une tresorerie qui se consume continue de se consumer pendant que
+        # l'information vieillit. Iridium World Communications, en faillite depuis
+        # 1999, etait valorisee sur son bilan de 1998 vingt-huit ans plus tard.
+        "date_des_comptes": _date_des_comptes(inc, bal),
+        "age_des_comptes_mois": _age_en_mois(_date_des_comptes(inc, bal)),
         "cik": inc.get(y, {}).get("cik"), "sic": None,
     }
 

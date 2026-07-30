@@ -131,17 +131,46 @@ def valider(fund: dict, F: dict | None, entry: dict | None = None) -> list[str]:
         motifs.append(f"flux d'exploitation de {abs(cfo)/rev:.0f}x le chiffre d'affaires")
 
     # --- Fraicheur ----------------------------------------------------------
-    if entry:
-        annees = set(entry.get("income", {})) & set(entry.get("balance", {}))
-        if not annees:
-            motifs.append("aucun exercice complet (compte de resultat + bilan)")
-        else:
-            dernier = max(annees)
-            courante = datetime.now(timezone.utc).year
-            if dernier < courante - ANCIENNETE_MAX:
-                motifs.append(f"comptes perimes (dernier exercice {dernier})")
+    # L'ANCIENNETE N'EST PLUS UN MOTIF DE REJET. Des comptes vieux de trois ans ne
+    # sont pas des comptes FAUX : ce sont les derniers comptes connus, et Damodaran
+    # valorise sur les derniers comptes disponibles quels qu'ils soient, en signalant
+    # leur date. Rejeter revenait a declarer mortes des societes bien vivantes — 13 %
+    # des lignes ainsi ecartees deposaient encore a la SEC, dont Brookfield
+    # Infrastructure Bermuda pour 13,3 Md$.
+    # Le seuil separait de surcroit les clotures de juin des clotures de decembre et
+    # non les vivantes des mortes : trente-six lignes tombaient exactement a la
+    # bascule, toutes closes le 30 juin. Il oscillait avec le calendrier — 34 lignes
+    # perdues en juillet, 428 en janvier.
+    # La date est desormais MESUREE et PUBLIEE (`fraicheur_des_comptes`), et elle
+    # declenche la reconstitution sur douze mois glissants. Une societe morte se
+    # constate sur un fait date, pas sur l'age d'une donnee du fournisseur.
+    if entry and not (set(entry.get("income", {})) & set(entry.get("balance", {}))):
+        motifs.append("aucun exercice complet (compte de resultat + bilan)")
 
     return motifs
 
 
-__all__ = ["valider"]
+def fraicheur_des_comptes(entry, reference=None):
+    """(date de cloture du dernier exercice, age en MOIS). (None, None) si inconnu.
+
+    L'age se compte en MOIS depuis la CLOTURE, non en millesimes d'exercice. Le
+    millesime est decale chez le fournisseur pour 3 a 4 % des lignes — un exercice
+    clos le 30 juin 2024 est etiquete 2023 — et la comparaison d'annees civiles cree
+    une falaise au 1er janvier qui n'a aucun sens economique."""
+    if not entry:
+        return None, None
+    annees = set(entry.get("income", {})) & set(entry.get("balance", {}))
+    if not annees:
+        return None, None
+    ligne = entry["income"][max(annees)]
+    brut = str(ligne.get("date") or "")[:10]
+    try:
+        clos = datetime.strptime(brut, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None, None
+    ref = reference or datetime.now(timezone.utc)
+    mois = (ref.year - clos.year) * 12 + (ref.month - clos.month) - (ref.day < clos.day)
+    return brut, mois
+
+
+__all__ = ["valider", "fraicheur_des_comptes"]

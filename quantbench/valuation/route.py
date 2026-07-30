@@ -548,12 +548,20 @@ def consommation_de_tresorerie(fund):
     2025 porte une reserve sur la continuite d'exploitation.
 
     Retourne un nombre POSITIF quand la societe consomme, 0 quand elle degage."""
-    cfo, capex = fund.get("cfo"), fund.get("capex")
+    cfo, capex, ni = fund.get("cfo"), fund.get("capex"), fund.get("net_income")
+    # UN TABLEAU DE FLUX ENTIEREMENT NUL EST UN TABLEAU ABSENT, pas une societe a
+    # l'equilibre parfait. Iridium World Communications publie pour 1998 une perte de
+    # 107,6 M$ et des flux tous a zero : nous en concluions qu'elle ne consommait
+    # rien, et sa valeur d'actif traversait intacte vingt-huit ans de faillite.
+    # Le test ne porte pas sur l'age mais sur la COHERENCE INTERNE de la liasse : un
+    # resultat non nul avec des flux exactement nuls ne peut pas etre vrai.
+    if cfo in (None, 0.0) and (capex in (None, 0.0)) and ni:
+        return max(-ni, 0.0)
     flux = None
     if cfo is not None:
         flux = cfo - abs(capex) if capex is not None else cfo
-    elif fund.get("net_income") is not None:
-        flux = fund["net_income"]               # a defaut, meilleure approximation
+    elif ni is not None:
+        flux = ni                              # a defaut, meilleure approximation
     return max(-(flux or 0.0), 0.0)
 
 
@@ -583,7 +591,23 @@ def probabilite_de_survie(fund, valeur_en_jeu=None):
         reference = max(fund.get("cash") or 0.0, 0.0)
     if reference <= 0:
         return 0.0
-    return min(1.0, (reference / conso) / 5.0)
+    autonomie = reference / conso
+    # LE TEMPS ECOULE DEPUIS L'OBSERVATION SE RETRANCHE DE L'AUTONOMIE.
+    # Un bilan est une PHOTOGRAPHIE datee. Une societe qui consommait sa tresorerie
+    # a la date de la photo a continue de la consommer depuis : lui preter aujourd'hui
+    # l'autonomie qu'elle avait alors revient a arreter le temps.
+    # Iridium World Communications, en faillite depuis 1999, publiait en 1998
+    # 119,7 M$ de fonds propres pour 107,6 M$ de perte annuelle — soit onze mois
+    # d'autonomie. Nous la valorisions vingt-huit ans plus tard sur ces memes fonds
+    # propres, a +5 360 %. GSV (comptes de 2008), CannaBusiness (2013) et Maudore
+    # Minerals (2014) relevaient du meme aveuglement.
+    # Ce n'est pas un seuil d'anciennete deguise : le temps ecoule n'ecarte rien par
+    # lui-meme. Une societe qui ENCAISSE traverse trente ans sans perdre un centime
+    # de valeur ici, et une societe qui consomme est penalisee des le premier mois.
+    mois = fund.get("age_des_comptes_mois")
+    if mois and mois > 0:
+        autonomie -= mois / 12.0
+    return max(0.0, min(1.0, autonomie / 5.0))
 
 
 def value_reit(fund):

@@ -203,6 +203,7 @@ def reparer(symbol, fund, F, entry, motifs):
                     fund["operating_margin"] = fund["ebit"] / fund["revenue"]
             if ttm.get("netIncome") is not None:
                 fund["net_income"] = ttm["netIncome"] * fx / B
+            fund["date_ttm"] = ttm.get("date")
             faites.append(f"comptes reconstitues sur douze mois glissants "
                           f"(dernier trimestre {ttm.get('date')})")
 
