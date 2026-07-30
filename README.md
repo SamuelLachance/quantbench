@@ -1,119 +1,147 @@
-# QuantBench — banc d'essai de valorisation honnête
+# QuantBench — valorisation intrinsèque, honnêtement
 
 [![CI](https://github.com/SamuelLachance/quantbench/actions/workflows/ci.yml/badge.svg)](https://github.com/SamuelLachance/quantbench/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 
-Valorisation intrinsèque **probabiliste** (DCF FCFF multi-phase à la Damodaran + Monte Carlo)
-sur **données réelles gratuites** (SEC EDGAR, FRED, marché), plus un volet **court terme**
-(mean-reversion + régimes) avec **évaluation anti-surajustement** (Deflated Sharpe + PBO).
-
-> Inspiré de la discipline du fonds Medallion de Jim Simons : ne pas produire une fausse
-> précision, mais **mesurer honnêtement l'incertitude** — et refuser de rationaliser le
-> prix du marché quand les hypothèses ne le justifient pas.
+Valorisation intrinsèque de **~16 800 sociétés** — NASDAQ, NYSE, TSX, TSXV et gré à gré —
+selon la méthode d'Aswath Damodaran, reconstruite chaque jour. Chaque titre reçoit une
+**valeur intrinsèque** et une **note de risque de A+ à F**.
 
 ⚠️ Outil de recherche **éducatif** — ceci n'est **pas** un conseil d'investissement.
 
-## Aperçu
+## Le principe
 
-![Architecture QuantBench](docs/architecture.svg)
+Deux questions distinctes, deux réponses distinctes.
 
-Deux interfaces web (design commun, thèmes clair/sombre, chiffres monospace) :
+**Combien vaut cette société ?** Pas de DCF universel : le flux de trésorerie disponible
+n'a aucun sens pour une banque, dont la dette est la matière première, ni pour une
+foncière, dont les amortissements immobiliers écrasent le résultat sans faire sortir un
+euro. Chaque titre est donc **routé** vers la méthode que Damodaran prescrit pour son cas.
 
-- **Page ticker** — verdict (valeur médiane vs cours, upside, probabilité de sous-valorisation),
-  distribution Monte Carlo interactive (SVG), hypothèses tracées, trajectoires projetées, et une
-  **barre de recherche** qui valorise n'importe quel titre en direct via l'API.
-- **Screener NASDAQ** — tableau triable de dizaines de titres classés par upside, avec fourchette
-  de valeur, probabilité de sous-valorisation, croissance, marge et ROIC ; résultats implausibles
-  (splits, données aberrantes) isolés au lieu d'être classés en tête.
+| route | méthode | pourquoi |
+|---|---|---|
+| financière | rendement excédentaire, côté équité | la valeur d'entreprise n'a pas de sens quand la dette est un intrant |
+| foncière | FFO capitalisé | l'amortissement immobilier est comptable, pas économique |
+| service public régulé | bénéfices capitalisés côté équité | rentabilité fixée par le régulateur |
+| cyclique | marge moyenne **du cycle** | un exercice isolé ne dit rien d'une mine |
+| mature en perte | bénéfices normalisés × probabilité de redressement | une perte passagère n'est pas une faillite |
+| jeune | descendant sur le chiffre d'affaires × probabilité de survie | pas d'historique à normaliser |
+| détresse | pondérée par la probabilité de défaut + liquidation | |
+| pré-revenu, holding | actif net **réalisable** | aucun flux à actualiser |
+| standard | DCF FCFF | |
 
-> _Captures d'écran :_ lancez l'app (voir ci-dessous), ouvrez `http://localhost:8000`, et
-> déposez vos images dans `docs/` — elles s'afficheront ici.
+**Quelle est la probabilité de perdre durablement sa mise ?** C'est une autre question, et
+un titre peut être très décoté *parce qu'il est* très dangereux. La note de risque la
+traite séparément, sur huit dimensions — solvabilité, autonomie de trésorerie, rentabilité
+de cycle, volatilité, dilution, liquidité, **confiance dans la donnée**, mur de
+refinancement.
 
-## Résultats d'exemple
+## Trois règles qui structurent tout le dépôt
 
-Screener NASDAQ (cas de base conservateur, données du dernier exercice déposé) — extrait
-trié par valeur :
+**Un contrôle rejette une donnée fausse, jamais un résultat qui déplaît.** Quatre seuils
+de validation confrontaient la capitalisation — grandeur d'actionnaire — au chiffre
+d'affaires et au résultat opérationnel — grandeurs d'entreprise — sans jamais ajouter la
+dette : ils mesuraient donc le **levier**. Charter Communications, 19,6 Md$ de
+capitalisation pour 12,7 Md$ de résultat opérationnel, était écartée au seul motif qu'elle
+porte 95,8 Md$ de dette. Supprimés.
 
-| Titre | Upside médian | P(sous-val.) | Lecture |
-|-------|--------------:|-------------:|---------|
-| PYPL  | +20 %         | 88 %         | sous-valorisé selon la base |
-| ADBE  | +19 %         | 89 %         | sous-valorisé |
-| NVDA  | −5 %          | 43 %         | ~juste valeur (croissance +45 % calibrée) |
-| META  | −1 %          | 47 %         | ~juste valeur |
-| AAPL  | −67 %         | 0 %          | richement valorisé vs historique |
+**Aucun seuil d'opinion dans le code.** Les repères sont **mesurés** sur l'univers réel :
+bêta désendetté, marge, ventes sur capital, ROIC et taux de récupération par industrie
+(`scripts/build_industry_stats.py`), quantiles de risque par dimension
+(`scripts/build_risk_stats.py`). Un test refuse l'introduction d'une constante qui
+dirait ce qu'est une *bonne* couverture d'intérêts.
 
-Volet court terme sur BTC-USD (72 configurations mean-reversion balayées) :
+**Toute correction se termine par un test.** `tests/test_invariants.py` encode
+**84 invariants** — 135 cas de test une fois les paramétrages développés —
+chacun correspondant à un défaut réellement observé en production.
+C'est le test, et non le correctif, qui rend la chose permanente.
 
-```
-Meilleur Sharpe brut : +0.31   |   PSR naïf : 75 %
-Deflated Sharpe : 30 %   ·   PBO : 70 %   →   PROBABLE ARTEFACT DU DATA-SNOOPING
-```
+## Ce que la discipline a trouvé
+
+Quelques défauts corrigés, tous au niveau de la **méthode** et jamais du titre :
+
+- **La décote de liquidation portait sur l'équité au lieu de l'actif.** Elle revenait à
+  supposer que les dettes subissent la même décote au bénéfice de l'actionnaire. L'erreur
+  vaut (1 − taux) × passif : nulle sans dette — d'où son invisibilité — et maximale
+  précisément là où la liquidation se pose.
+- **La détresse se mesurait en résultat comptable.** Branicks publie −288,7 M€ d'EBIT pour
+  +54,8 M€ de flux d'exploitation, la perte étant une réévaluation IFRS de son parc. Nous
+  envoyions cette foncière à la liquidation.
+- **Un bénéfice jamais encaissé finançait une croissance gratuite.** FDCTech affiche sur
+  dix ans 3 M$ de résultat cumulé pour 31 M$ de trésorerie **consommée**.
+- **Une marge est un rapport de sommes, pas la moyenne de rapports.** Pop Culture a triplé
+  son chiffre d'affaires en perdant de l'argent : ses marges anciennes, gagnées sur un
+  dixième du volume, dominaient la moyenne.
+- **Un historique en pesos traité comme des dollars.** La valeur d'Edenor était
+  surestimée d'exactement le taux de change.
+- **279 Md$ de foncières absentes de l'univers** parce que le fournisseur marque `isFund`
+  toute société dont la raison sociale contient « Trust ».
 
 ## Structure
 
 ```
 quantbench/
-  valuation/   dcf.py (moteur FCFF, numpy) + montecarlo.py (copule gaussienne)
-  data/        edgar.py (SEC XBRL) + market.py (prix/bêta/taux/splits) + build.py
-  eval/        deflated_sharpe.py (DSR/PSR/MinTRL) + pbo.py (CSCV)
-  backtest/    engine.py (délai 1 barre + coûts, sans look-ahead)
-  shortterm/   signals.py (mean-reversion + Ornstein-Uhlenbeck) + regime.py (GMM)
-  service.py   payload complet d'un ticker (CLI + API)
-  api/app.py   FastAPI : /api/value/{ticker}, /api/screener + pages statiques
-app/           index.html (page ticker) + screener.html + data.json/screener.json
-scripts/       value_ticker.py · batch_screener.py · shortterm_demo.py · demo_valuation.py
-tests/         18 tests (pytest)
+  valuation/  route.py        routage sectoriel + les neuf méthodes
+              build_universal.py  moteur DCF, bêta ascendant, primes pays et taille
+              industry_stats.json repères MESURÉS par industrie et secteur
+  risk/       dimensions.py   les huit dimensions de risque
+              score.py        agrégation, plafonds, treize grades
+              risk_calibration.json  quantiles gelés, datés, versionnés
+  data/       fmp.py          univers, fondamentaux, change
+              validate.py     contrôles d'entrée — identités comptables uniquement
+              repair.py       réparation avant renoncement
+  forensics/  Altman, Beneish, Piotroski — signaux statistiques neutres
+scripts/      build_site_fmp.py     build quotidien, 5 shards parallèles
+              build_industry_stats.py · build_risk_stats.py   calibrages
+              check_build.py        garde-fou qui BLOQUE un déploiement défectueux
+              mesurer_les_notes.py  juge la note de risque contre les faits
+app/          index.html · stock.html · screener.html · shortterm.html
+tests/        test_invariants.py — 84 invariants hors ligne, 135 cas
 ```
 
-## Installation & lancement
+## Lancement
 
 ```bash
 pip install -r requirements.txt
+python -m pytest tests/ -q
 ```
 
-Configurez (optionnel) le contact du User-Agent SEC :
+Construire le site (clé FMP requise) :
+
 ```bash
-export QUANTBENCH_SEC_UA="Votre Nom votre.email@example.com"
+FMP_API_KEY=... python scripts/build_site_fmp.py --limit 200
 ```
 
-Valoriser un titre (écrit `app/data.json`) :
+Recalibrer les repères sectoriels et les quantiles de risque :
+
 ```bash
-python scripts/value_ticker.py MSFT
+FMP_API_KEY=... python scripts/build_industry_stats.py
+FMP_API_KEY=... python scripts/build_risk_stats.py --limite 3000
 ```
 
-Screener d'un univers (écrit `app/screener.json`) :
+Servir le site :
+
 ```bash
-python scripts/batch_screener.py
+python -m http.server 8765 --directory app
 ```
 
-Site live (API + pages) :
-```bash
-uvicorn quantbench.api.app:app --reload --port 8000
-# http://localhost:8000  (ticker)  ·  /screener.html  (NASDAQ)  ·  /api/value/NVDA
-```
+## Ce que le modèle ne sait pas, et le dit
 
-Volet court terme (banc d'essai honnête, anti-overfitting) :
-```bash
-python scripts/shortterm_demo.py BTC-USD
-```
-
-Tests :
-```bash
-python -m pytest tests/ -q      # 18 tests (DCF + eval + backtest)
-```
-
-## Méthode & limites
-
-- **Croissance** calibrée sur l'historique récent (mélange dernier YoY / CAGR 3 ans / CAGR complet, bornée).
-- **Réinvestissement** lié au ROIC déclinant (mode Damodaran), pas seulement au ratio ventes/capital.
-- **ERP** implicite fixe (~4,5 %), pas le rendement passé du marché (biais rétrospectif corrigé).
-- **Splits** corrigés via les événements de fractionnement (actions du 10-K × facteur).
-- **Honnêteté** : le cas de base est conservateur ; le Deflated Sharpe et le PBO mesurent le risque
-  de surajustement au lieu de le masquer.
-- Univers limité aux **grandes capitalisations non-financières** (le DCF FCFF ne convient ni aux
-  banques/assureurs ni aux sociétés déficitaires).
+- **Les poids de la note de risque sont uniformes**, et ce n'est pas un oubli. Nos
+  fondamentaux ne sont pas historisés : corréler les notes d'aujourd'hui aux cours passés
+  mesurerait un biais, pas un pouvoir prédictif. Le build **archive les notes chaque
+  mois** ; `scripts/mesurer_les_notes.py` les confrontera aux faits dans douze mois et
+  refuse explicitement de conclure si l'intervalle de confiance contient 0,50.
+- **Le signal court terme ne publie aucune probabilité** tant qu'une calibration hors
+  échantillon n'a pas démontré de pouvoir prédictif. Elle n'en a pas démontré.
+- **Certaines coquilles de gré à gré n'ont pas de fait daté de radiation** — ni SEC, ni
+  liste du fournisseur. Elles sont publiées avec la date de leurs derniers comptes plutôt
+  que cachées, et l'érosion temporelle les ramène à leur valeur réelle.
+- **Une note excellente n'empêche aucune perte.** Elle mesure la fragilité *observable
+  dans les comptes* ; ce qu'ils ne contiennent pas, elle ne le voit pas.
 
 ## Licence
 
-[MIT](LICENSE) © 2026 Samuel Lachance. Outil de recherche éducatif, sans conseil d'investissement.
+[MIT](LICENSE) © 2026 Samuel Lachance. Outil de recherche éducatif, sans conseil
+d'investissement.

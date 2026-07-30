@@ -1335,3 +1335,33 @@ def test_le_controle_des_valeurs_non_finies_ne_confond_pas_un_nom_avec_un_nombre
     for mauvais in ('{"v": Infinity}', '{"v": -Infinity}', '{"v": NaN}'):
         with pytest.raises(ValueError):
             json.loads(mauvais, parse_constant=refuser)
+
+
+def test_le_readme_decrit_le_depot_reel():
+    """Un README perime est pire qu'absent : il affirme. Celui-ci a decrit pendant des
+    mois un univers limite aux "grandes capitalisations non-financieres" alors que le
+    depot route les banques, les foncieres et les societes deficitaires vers des
+    methodes dediees, et annoncait 18 tests quand il y en a plus de cent trente."""
+    racine = Path(__file__).resolve().parent.parent
+    txt = (racine / "README.md").read_text(encoding="utf-8")
+    perimes = ["univers limité aux **grandes capitalisations non-financières**",
+               "18 tests", "app/data.json"]
+    presents = [p for p in perimes if p in txt]
+    assert not presents, f"affirmations perimees dans le README : {presents}"
+    # Les modules cites doivent exister.
+    for chemin in ("quantbench/valuation/route.py", "quantbench/risk/dimensions.py",
+                   "quantbench/risk/score.py", "quantbench/data/validate.py",
+                   "scripts/build_risk_stats.py", "scripts/check_build.py",
+                   "scripts/mesurer_les_notes.py"):
+        assert chemin.split("/")[-1] in txt, f"{chemin} absent du README"
+        assert (racine / chemin).exists(), f"{chemin} cite mais introuvable"
+    # Le nombre d'invariants annonce doit correspondre a la realite, a 5 pres.
+    import re
+    m = re.search(r"\*\*(\d+) invariants\*\*", txt)
+    if m:
+        annonce = int(m.group(1))
+        reel = len([l for l in (racine / "tests" / "test_invariants.py")
+                    .read_text(encoding="utf-8").splitlines()
+                    if l.startswith("def test")])
+        assert abs(annonce - reel) <= 5, (
+            f"le README annonce {annonce} invariants, il y en a {reel}")

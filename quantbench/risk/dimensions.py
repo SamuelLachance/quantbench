@@ -351,6 +351,20 @@ def d7_confiance(fund, F, reg, motifs=None, reparations=None):
     publiees, deduites = fund.get("actions_publiees"), fund.get("shares")
     if publiees and deduites and publiees > 0 and deduites > 0:
         points.append(abs(math.log10(deduites / publiees)))
+    # DESACCORD ENTRE LE MARCHE ET LE BILAN. mF International declare 3,66 Md HKD de
+    # placements a court terme — 92 % de son actif — pour 34 M HKD de chiffre
+    # d'affaires, et cote 108 M HKD. Toutes les identites comptables tiennent, la
+    # liasse est coherente avec elle-meme : nous ne pouvons pas trancher avec une
+    # seule source.
+    # C'est precisement pourquoi ce constat n'est PAS un motif de rejet — nous avons
+    # supprime ces seuils, qui confondaient une valorisation extreme avec une donnee
+    # fausse. Il est ici MESURE et CLASSE parmi les autres : un ecart de cet ordre
+    # entre ce que le bilan affirme et ce que le marche paie signale soit un actif
+    # qui n'existe pas, soit un actionnaire qui n'y aura jamais acces. Les deux sont
+    # des risques, et aucun ne se lit dans l'upside.
+    fp, cap = fund.get("book_equity"), fund.get("market_cap")
+    if fp and cap and fp > 0 and cap > 0:
+        points.append(max(math.log10(fp / cap), 0.0))
     if fund.get("fx_indisponible"):
         points.append(1.0)
     if (fund.get("financial_currency") or "USD") != "USD":
