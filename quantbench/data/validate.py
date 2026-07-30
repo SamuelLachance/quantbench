@@ -93,6 +93,17 @@ def valider(fund: dict, F: dict | None, entry: dict | None = None) -> list[str]:
         motifs.append("fonds propres hors d'echelle face a la capitalisation")
 
     # --- Identites comptables ----------------------------------------------
+    # UN ACTIF TOTAL NUL AVEC UN PASSIF OU DES FONDS PROPRES NON NULS EST IMPOSSIBLE.
+    # Le controle d'identite ci-dessous est garde par `if ta and ta > 0`, si bien
+    # qu'un actif a ZERO le desactivait entierement — meme angle mort que celui du
+    # passif nul. Entergy New Orleans publie 0 d'actif total pour 91 M$ de passif et
+    # 16,9 Md$ de fonds propres, en realite ceux du groupe Entergy entier : la liasse
+    # ne decrit pas l'entite cotee. Elle ressortait a +2 566 %.
+    tl_, fp_ = fund.get("total_liab"), fund.get("total_equity")
+    if (not ta) and ((tl_ and abs(tl_) > 1e-9) or (fp_ and abs(fp_) > 1e-9)):
+        motifs.append("actif total absent alors que le passif et les fonds propres "
+                      "sont renseignes — la liasse ne decrit pas l'entite cotee")
+
     if ta and ta > 0:
         if (fund.get("cash") or 0) > ta * 1.001:
             motifs.append("tresorerie superieure a l'actif total")

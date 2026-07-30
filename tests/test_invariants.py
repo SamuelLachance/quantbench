@@ -868,3 +868,78 @@ def test_la_simulation_ne_reimplemente_pas_la_marge_normalisee():
     corps = src.split("def _route_margin(")[1].split("\ndef ")[0]
     assert "marge_de_cycle" in corps, "la simulation reimplemente la marge normalisee"
     assert "0.12" not in corps, "marge cible codee en dur dans la simulation"
+
+
+# --------------------------------------------------------------------------- #
+# 27. Ce qui bloquait le DEPLOIEMENT : cinq titres a plus d'un million de %
+#
+# Le garde-fou qualite refusait le build quotidien depuis plusieurs jours. Les
+# titres en cause partageaient tous des fonds propres attribuables NEGATIFS et des
+# comptes de trois a dix-sept ans.
+# --------------------------------------------------------------------------- #
+def test_les_tests_hors_ligne_ne_dependent_d_aucun_client_reseau():
+    """`quantbench/data/__init__.py` importait `build` -> `edgar` -> `requests` des
+    l'import du paquet : la suite d'invariants, pourtant concue pour ne toucher aucun
+    reseau, ne pouvait pas s'importer sans client HTTP. L'integration continue
+    echouait a la COLLECTE des tests, sans qu'aucune regression ne soit en cause."""
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "data" / "__init__.py").read_text(encoding="utf-8")
+    lignes = [ligne for ligne in src.splitlines()
+              if ligne.startswith("from ") or ligne.startswith("import ")]
+    assert not lignes, f"import immediat dans le paquet de donnees : {lignes}"
+
+
+def test_la_liquidation_ne_rend_que_la_part_attribuable():
+    """Actif moins passif donne les fonds propres TOTAUX. Ce qui revient aux
+    minoritaires d'une filiale ne reviendra jamais a l'actionnaire : Etao
+    International affiche -15,6 M$ de fonds propres attribuables pour +9,6 M$ de
+    minoritaires, et ressortait a +5 291 567 %."""
+    f = societe(total_assets=0.053, total_liab=0.059, total_equity=-0.006,
+                book_equity=-0.0156, cash=0.0118)
+    assert route.valeur_de_liquidation(f) == 0.0
+    # Sans minoritaires, la formule est inchangee.
+    g = societe(total_assets=1.0, total_liab=0.2, total_equity=0.8, book_equity=0.8,
+                cash=0.3)
+    taux = route.sect(g, "recuperation", 0.5)
+    assert abs(route.valeur_de_liquidation(g)
+               - max(0.3 + taux * 0.7 - 0.2, 0.0)) < 1e-12
+
+
+def test_le_portillon_de_l_actif_net_teste_la_presence_pas_le_signe():
+    """Il exigeait un actif net POSITIF et renoncait sinon — si bien qu'une societe
+    dont le passif excede l'actif, cas ou la reponse "zero" est justement la bonne,
+    ressortait "valorisation impossible" et repartait dans la cascade de repli, qui
+    lui inventait une valeur. Qingdao Footwear, 10,2 M$ d'actif pour 16,8 M$ de
+    passif, ressortait a +1 282 295 %."""
+    f = societe(revenue=None, revenue_history=[], total_assets=0.0102,
+                total_liab=0.0168, total_equity=-0.0066, book_equity=-0.0066,
+                cash=0.00005, total_debt=0.0018)
+    r = route.value_assetbased(f)
+    assert r is not None and r["equity_value"] == 0.0
+    v = route.value_stock("TEST", fund=f, forensic=_FOR, F=etats())
+    assert v["ok"] and v["equity_value"] == 0.0, v
+
+
+def test_un_actif_total_nul_est_une_liasse_qui_ne_decrit_pas_l_entite():
+    """Meme angle mort que celui du passif nul : le controle d'identite etait garde
+    par `if ta and ta > 0`, si bien qu'un actif a ZERO le desactivait entierement.
+    Entergy New Orleans publie 0 d'actif pour 91 M$ de passif et 16,9 Md$ de fonds
+    propres — ceux du groupe Entergy entier. Elle ressortait a +2 566 %."""
+    from quantbench.data.validate import valider
+    f = societe(total_assets=0.0, total_liab=0.091, total_equity=16.92,
+                book_equity=16.70, revenue=12.95)
+    assert any("actif total absent" in m for m in valider(f, etats(), None))
+    # Une societe sans aucun bilan renseigne ne declenche pas ce motif.
+    g = societe(total_assets=None, total_liab=None, total_equity=None)
+    assert not any("actif total absent" in m for m in valider(g, etats(), None))
+
+
+def test_une_continuite_d_exploitation_se_constate():
+    """Un DCF actualise les flux FUTURS d'une societe EN ACTIVITE. Qingdao Footwear
+    etait valorisee sur son exercice 2010 — quinze ans et demi plus tard — et Alabama
+    Aircraft sur 2008. Passe deux exercices annuels manques, la continuite n'est plus
+    attestee par rien et seul subsiste un droit sur les actifs derniers constates."""
+    recente = societe(age_des_comptes_mois=14)
+    ancienne = societe(age_des_comptes_mois=186)
+    assert route.classify(recente, None, etats()) == "standard"
+    assert route.classify(ancienne, None, etats()) == "actif_net"

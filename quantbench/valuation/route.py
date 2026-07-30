@@ -200,6 +200,23 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
         # pas de flux a actualiser -> valeur d'actif net (methode Damodaran).
         return "actif_net"
 
+    # --- UNE CONTINUITE D'EXPLOITATION SE CONSTATE, ELLE NE SE SUPPOSE PAS ------
+    # Un DCF actualise les flux FUTURS d'une societe en activite, a partir d'un
+    # exercice de reference cense la decrire. Qingdao Footwear etait valorisee sur
+    # son exercice 2010 — quinze ans et demi plus tard — a +1 282 295 %, et Alabama
+    # Aircraft sur 2008. Ces societes n'ont rien publie depuis : rien n'atteste
+    # qu'elles exploitent encore quoi que ce soit.
+    # Le critere ne porte pas sur l'age comme jugement de valeur mais sur un FAIT DE
+    # PUBLICATION : une societe en activite depose des comptes chaque annee. Passe
+    # deux exercices annuels manques — delai de depot compris — la continuite n'est
+    # plus attestee par rien, et seul subsiste un droit sur les actifs derniers
+    # constates, que l'erosion temporelle ramene a leur valeur reelle.
+    # Ce n'est pas un rejet : la societe reste valorisee et publiee. C'est le choix
+    # d'une METHODE applicable, au meme titre que le secteur ou le levier.
+    mois = fund.get("age_des_comptes_mois")
+    if mois is not None and mois > 30:
+        return "actif_net"
+
     deficitaire = (ebit is not None and ebit < 0) or (ni is not None and ni < 0)
     # Le Z-score d'Altman est calibre sur des industriels : Altman lui-meme et
     # Damodaran l'excluent pour les financieres ; foncieres et services publics ont
@@ -494,7 +511,15 @@ def valeur_de_liquidation(fund):
     cash = max(fund.get("cash") or 0.0, 0.0)
     if ta and ta > 0 and tl is not None:
         realisable = min(cash, ta) + taux * max(ta - cash, 0.0)
-        return max(realisable - tl, 0.0)
+        # ACTIF MOINS PASSIF donne les fonds propres TOTAUX. L'actionnaire n'a droit
+        # qu'a la part ATTRIBUABLE : ce qui revient aux minoritaires d'une filiale ne
+        # lui reviendra jamais. Sans ce retrait, une societe aux fonds propres
+        # attribuables NEGATIFS mais aux minoritaires importants ressortait avec une
+        # valeur de liquidation positive — Qingdao Footwear a +1 282 295 %, Etao
+        # International a +5 291 567 %, alors que l'actionnaire ne detient rien.
+        minoritaires = max((fund.get("total_equity") or 0.0)
+                           - (fund.get("book_equity") or 0.0), 0.0)
+        return max(realisable - tl - minoritaires, 0.0)
     # Bilan incomplet : on retombe sur les fonds propres, faute de pouvoir separer
     # actif et passif. Cette voie SURESTIME les societes endettees — c'est le defaut
     # que l'on vient de corriger — et ne doit servir qu'en dernier recours.
@@ -782,9 +807,15 @@ def value_assetbased(fund):
     be = fund.get("book_equity")
     cash = fund.get("cash") or 0.0
     debt = fund.get("total_debt") or 0.0
-    nav = be if (be is not None and be > 0) else (cash - debt)
-    if nav is None or nav <= 0:
+    # LE PORTILLON TESTE LA PRESENCE DES DONNEES, PAS LEUR SIGNE.
+    # Il exigeait un actif net POSITIF et renonçait sinon — si bien qu'une societe
+    # dont le passif excede l'actif, cas ou la reponse "zero" est justement la bonne,
+    # ressortait "valorisation impossible" et repartait dans la cascade de repli, qui
+    # lui inventait une valeur. Qingdao Footwear, 10,2 M$ d'actif pour 16,8 M$ de
+    # passif, ressortait ainsi a +1 282 295 %.
+    if fund.get("total_assets") is None and be is None:
         return None
+    nav = be if (be is not None) else (cash - debt)
     # VALEUR REALISABLE, pas valeur comptable. Cette route s'applique justement aux
     # societes incapables de degager des flux : leur actif ne vaut que ce qu'on en
     # tirerait, et le creancier est servi AVANT l'actionnaire. Le calcul est celui de
