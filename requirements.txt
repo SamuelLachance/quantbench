@@ -6,7 +6,7 @@
 # Les deux workflows installent desormais ce fichier, et le test
 # `test_toute_dependance_tierce_est_declaree` verifie qu'il reste exhaustif.
 numpy>=1.26
-pandas>=2.0
+pandas>=3.0.5
 scipy>=1.11
 scikit-learn>=1.4          # quantbench/shortterm/regime.py
 requests>=2.31             # quantbench/data/edgar.py, fmp.py, market.py
