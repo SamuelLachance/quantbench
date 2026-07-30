@@ -1291,3 +1291,25 @@ def test_toutes_les_grilles_separent_quelque_chose():
     plates = [cle for cle, t in (cal.get("quantiles") or {}).items()
               if (g := (t or {}).get("global")) and g[-1] - g[0] <= 0]
     assert not plates, f"grilles degenerees : {plates}"
+
+
+def test_le_build_complet_ne_se_declenche_pas_sur_chaque_poussee():
+    """Le build reconstruit 16 800 titres en une a trois heures, et le groupe de
+    concurrence n'admet qu'un seul run EN ATTENTE : A tourne, B patiente, C arrive et
+    B est ANNULE. Un declencheur sur les poussees de code faisait donc qu'une journee
+    de corrections successives ne produisait AUCUN deploiement, tout en remplissant le
+    tableau de bord de runs annules qui ressemblaient a des echecs.
+    La justesse du code est verifiee par l'integration continue, en une minute."""
+    f = (Path(__file__).resolve().parent.parent
+         / ".github" / "workflows" / "deploy.yml")
+    if not f.exists():
+        pytest.skip("workflow absent")
+    texte = f.read_text(encoding="utf-8")
+    entete = texte.split("jobs:")[0]
+    lignes = [ligne for ligne in entete.splitlines()
+              if ligne.strip().startswith("push:") and not ligne.strip().startswith("#")]
+    assert not lignes, (
+        "le build complet se declenche sur les poussees : les runs s'annuleront "
+        "mutuellement et le site cessera de se mettre a jour")
+    assert "workflow_dispatch" in entete, "aucun declenchement manuel possible"
+    assert "schedule" in entete, "aucune reconstruction quotidienne"

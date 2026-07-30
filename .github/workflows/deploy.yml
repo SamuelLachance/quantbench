@@ -1,16 +1,22 @@
 name: Build & Deploy (quotidien, shardé)
 
+# PAS DE DECLENCHEUR SUR LES POUSSEES DE CODE, ET C'EST DELIBERE.
+#
+# Le build reconstruit 16 800 titres en une a trois heures. Avec un declencheur sur
+# `quantbench/**`, chaque commit en relancait un — or le groupe de concurrence
+# n'admet qu'un seul run EN ATTENTE : A tourne, B patiente, C arrive, et B est
+# ANNULE. Une journee de corrections successives ne produisait donc aucun
+# deploiement, et le tableau de bord affichait une file de runs "cancelled" qui
+# ressemblaient a des echecs sans en etre.
+#
+# La justesse du code est verifiee par l'integration continue, qui tourne en une
+# minute sur chaque poussee. Le site, lui, se reconstruit une fois par jour — ses
+# donnees sont quotidiennes, une reconstruction par commit n'apporterait rien.
+# Pour publier immediatement : declenchement manuel.
 on:
   schedule:
     - cron: "0 6 * * *"          # 06:00 UTC chaque jour
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "app/**"
-      - "quantbench/**"
-      - "scripts/build_site_fmp.py"
-      - ".github/workflows/deploy.yml"
 
 permissions:
   contents: read
