@@ -46,6 +46,42 @@ def _is_preferred(symbol, name):
                 or (name and (_PREF_NAME.search(name) or _COUPON_FIN.search(name))))
 
 
+# Instruments DERIVES de l'action, cotes sous leur propre ticker : un warrant est
+# une option sur le titre, un "unit" un panier action + warrant vendu a
+# l'introduction d'un SPAC, un "right" un droit de souscription. Aucun n'a pour
+# contrepartie les comptes de la societe, et les valoriser sur ses fondamentaux n'a
+# aucun sens — d'autant qu'ils heritent de la capitalisation du sous-jacent : les
+# warrants de Churchill Capital XI portaient 2,3 Md$.
+# Le NOM est le seul signal fiable. Le suffixe de ticker en emporterait des
+# centaines de vraies societes : Palantir (PLTR), Palo Alto (PANW), Intuit (INTU),
+# Baker Hughes (BKR) finissent tous par W, R ou U.
+# "Right" et "Unit" ne sont retenus qu'en FIN de libelle, ou le mot designe
+# l'instrument et non l'activite — sauf en tete de nom, ou il fait partie de la
+# raison sociale (Unit Corporation, petrolier de l'Oklahoma).
+# Verifie sur l'univers : aucune societe en commandite n'est touchee. Elles se
+# nomment toutes "... LP" ou "... L.P." (Energy Transfer, Enterprise Products,
+# Brookfield Infrastructure) et jamais "Units", alors meme que leur equite EST
+# constituee de parts.
+_DERIVE = re.compile(r"(?i)\bwarrants?\b|\bwts?\b|\bc/wts?\b|\brights?\s*$|\bunits?\b")
+# "Rt" abrege un DROIT en anglais mais designe la forme sociale en hongrois
+# (Reszvenytarsasag) : MOL Magyar Olaj-es Gazipari RT est le petrolier national.
+# On ne l'exclut donc que si le ticker porte AUSSI la marque du droit.
+_RT_ABREGE = re.compile(r"(?i)\brts?\s*$")
+
+
+def _est_un_derive(symbol, name):
+    if not name:
+        return False
+    # "Unit" en tete de nom appartient a la raison sociale : Unit Corporation est
+    # un producteur petrolier de l'Oklahoma, pas un panier de titres.
+    if name.lower().startswith("unit "):
+        return False
+    if _DERIVE.search(name):
+        return True
+    return bool(_RT_ABREGE.search(name)
+                and re.search(r"(-R|R)$", (symbol or "").split(".")[0]))
+
+
 def _sane_beta(b, sector=None):
     """Beta FMP fiable ? Les nano-caps illiquides donnent des betas aberrants
     (ex. −29) -> cout du capital negatif -> DCF qui explose. Hors [0.1, 3.5] =
@@ -162,11 +198,32 @@ def screener(exchanges=("NASDAQ",)):
                          f"&isActivelyTrading=true&limit=15000")
         except Exception:
             continue
+        # `isFund` decrit une FORME JURIDIQUE, pas une realite economique : il se
+        # declenche sur le mot "Trust" dans la raison sociale. Or une foncière est
+        # tres souvent constituee en fiducie tout en exploitant des immeubles,
+        # publiant un compte de resultat et versant des loyers. Le drapeau nous
+        # faisait perdre 164 societes et 279 Md$ de capitalisation — la TOTALITE de
+        # l'immobilier cote canadien (RioCan, CAP REIT, SmartCentres, Granite,
+        # Choice, First Capital, CT REIT, Allied) mais aussi des foncieres du
+        # S&P 500 : Essex Property Trust, Federal Realty, Vornado, Kite Realty.
+        # On les reintegre par leur INDUSTRIE, taxonomie que le fournisseur etablit
+        # sur l'activite reelle. Verifie sur l'univers entier : les 4 962 vrais
+        # fonds marques `isFund` se rangent sans exception sous "Asset Management",
+        # jamais sous "REIT — ...". Aucun fonds n'est donc readmis.
+        try:
+            rows += [r for r in _json(f"company-screener?exchange={ex}&isEtf=false"
+                                      f"&isActivelyTrading=true&limit=20000")
+                     if r.get("isFund")
+                     and str(r.get("industry") or "").upper().startswith("REIT")]
+        except Exception:
+            pass
         for r in rows:
             sym = r.get("symbol")
             if not sym:
                 continue
             if _is_preferred(sym, r.get("companyName")):   # actions privilégiées / notes : exclues
+                continue
+            if _est_un_derive(sym, r.get("companyName")):       # warrants / units / droits
                 continue
             if ex == "OTC" and (_num(r.get("volume")) or 0) <= 0:   # OTC : exclure dead stocks
                 continue
@@ -507,6 +564,16 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         # locale) faisait echouer l'identite pour toute societe non americaine —
         # l'ecart valait exactement le taux de change (534 % pour une chinoise).
         "total_liab": b(g(bal, "totalLiabilities")),
+        # Fonds propres TOTAUX, minoritaires inclus. Le bilan equilibre sur eux :
+        #     actif = passif + fonds propres TOTAUX
+        # alors que `book_equity` ne retient, a juste titre, que la part revenant
+        # aux actionnaires. Confronter l'identite a la part attribuable rejetait
+        # toute societe detenant des filiales non integralement possedees — le
+        # controle de coherence eliminait ainsi des groupes parfaitement sains,
+        # Branicks ressortant a 10 % d'ecart pour cette seule raison.
+        "total_equity": b(g(bal, "totalEquity")) or (
+            (b(g(bal, "totalStockholdersEquity")) or 0.0)
+            + (b(g(bal, "minorityInterest")) or 0.0)) or None,
         "operating_margin": (ebit / rev) if (ebit and rev) else None,
         "roe": (ni / eq) if (ni and eq) else None,
         # Amortissements + flux d'exploitation : nécessaires au FFO des foncières

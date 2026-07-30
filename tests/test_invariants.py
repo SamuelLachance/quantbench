@@ -376,11 +376,22 @@ def test_le_ffo_est_immunise_contre_les_reevaluations():
 
 
 def test_le_ffo_reste_borne_par_la_formule_comptable():
-    """Quand le marche MONTE, le resultat net porte des plus-values de reevaluation
-    et le flux d'exploitation peut etre gonfle par le besoin en fonds de roulement :
-    la formule comptable, si elle est positive et plus basse, doit borner."""
-    r = route.value_reit(_fonciere_ifrs(net_income=0.10, dep_amort=0.01, cfo=0.50))
-    assert abs(r["ffo"] - 0.11) < 1e-9, f"FFO={r['ffo']} : la borne comptable a saute"
+    """Quand l'immeuble est REELLEMENT AMORTI — les foncieres americaines — le flux
+    d'exploitation peut etre gonfle par le besoin en fonds de roulement : la formule
+    comptable, si elle est positive et plus basse, doit borner."""
+    r = route.value_reit(_fonciere_ifrs(net_income=0.10, dep_amort=0.20, cfo=0.50))
+    assert abs(r["ffo"] - 0.30) < 1e-9, f"FFO={r['ffo']} : la borne comptable a saute"
+
+
+def test_sans_amortissement_la_formule_comptable_ne_borne_rien():
+    """Sous juste valeur l'immeuble n'est pas amorti : "resultat net +
+    amortissements" degenere en simple resultat net, qui ne mesure aucune generation
+    de tresorerie. RioCan passe 1 M$ d'amortissements pour 309 M$ de flux — retenir
+    la formule bornait son FFO a 50 M$ et sortait la premiere fonciere du Canada a
+    -85 %."""
+    r = route.value_reit(_fonciere_ifrs(net_income=0.049, dep_amort=0.001, cfo=0.309))
+    assert abs(r["ffo"] - 0.309) < 1e-9, (
+        f"FFO={r['ffo']} : un amortissement negligeable ne peut pas servir de borne")
 
 
 def test_pas_de_ffo_sans_encaissement():
@@ -515,3 +526,110 @@ def test_une_equite_negative_traverse_la_ponderation():
     assert out["equity_value"] < 0, (
         "l'equite negative a ete masquee : la bascule cote equite ne se declenchera "
         "plus")
+
+
+# --------------------------------------------------------------------------- #
+# 18. Erreurs d'UNITE MONETAIRE : l'historique est publie en devise locale
+# --------------------------------------------------------------------------- #
+def test_le_service_public_normalise_en_marge_pas_en_montant():
+    """`F` est publie en DEVISE LOCALE, `fund` est converti en dollars. Prendre la
+    mediane des montants historiques et la diviser par un milliard traitait des pesos
+    comme des dollars : la valeur etait surestimee d'exactement le taux de change —
+    x1 400 pour l'argentine Edenor (+6 864 %), x33 pour la thailandaise EGCO."""
+    f = societe(sector="Utilities", industry="Utilities - Regulated Electric",
+                revenue=2.0, net_income=0.1, book_equity=1.5, market_cap=1.1,
+                ebit=0.2, operating_margin=0.10, roe=0.067)
+    # Meme societe, historique publie en pesos (x1 400) : la valeur ne doit PAS bouger.
+    n = 6
+    usd = {"years": [2025 - i for i in range(n)], "revenue": [2.0e9] * n,
+           "ebit": [0.2e9] * n, "net_income": [0.1e9] * n, "equity": [1.5e9] * n,
+           "total_assets": [4.0e9] * n, "net_ppe": [3.0e9] * n, "cfo": [0.3e9] * n}
+    ars = dict(usd, revenue=[x * 1400 for x in usd["revenue"]],
+               ebit=[x * 1400 for x in usd["ebit"]],
+               net_income=[x * 1400 for x in usd["net_income"]],
+               equity=[x * 1400 for x in usd["equity"]])
+    a = route.value_regulated(f, usd)
+    b = route.value_regulated(f, ars)
+    assert a and b
+    assert abs(a["equity_value"] - b["equity_value"]) < 1e-6, (
+        f"{a['equity_value']:.3f} contre {b['equity_value']:.3f} : la valeur depend "
+        f"de la devise de PUBLICATION, ce qui est impossible")
+
+
+def test_aucune_grandeur_de_l_historique_n_est_traitee_comme_des_dollars():
+    """Garde-fou de forme : dans le module de routage, seule la mise en forme finale
+    a le droit de convertir une grandeur en milliards. Toute autre occurrence signale
+    qu'un montant en devise locale est traite comme des dollars."""
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "valuation" / "route.py").read_text(encoding="utf-8")
+    lignes = [ligne.strip() for ligne in src.splitlines()
+              if "1e9" in ligne and not ligne.strip().startswith("#")]
+    assert lignes == ["vps = eq * 1e9 / shares if shares else None"], (
+        f"conversions suspectes : {lignes}")
+
+
+# --------------------------------------------------------------------------- #
+# 19. Univers : instruments derives exclus, foncieres en fiducie conservees
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("sym,nom", [
+    ("CCXIW", "Churchill Capital Corp XI Warrants"),
+    ("EVOXW", "Evolution Global Acquisition Corp. Wt"),
+    ("QADRW", "Qdro Acquisition Corp. C/wts (to Pur Com) 27/03/2031"),
+    ("CCXIU", "Churchill Capital Corp XI Units"),
+    ("NOVTU", "Novanta Inc. Tangible Equity Units"),
+    ("ALPXR", "Alpex Acquisition Corp. Rt"),
+    ("CRACR", "Crown Reserve Acquisition Corp. I Rights"),
+])
+def test_les_instruments_derives_sont_exclus(sym, nom):
+    """Un warrant est une option sur le titre, un "unit" un panier vendu a
+    l'introduction d'un SPAC, un "right" un droit de souscription : aucun n'a pour
+    contrepartie les comptes de la societe, et tous heritent de la capitalisation du
+    sous-jacent — les warrants de Churchill Capital XI portaient 2,3 Md$."""
+    from quantbench.data.fmp import _est_un_derive
+    assert _est_un_derive(sym, nom)
+
+
+@pytest.mark.parametrize("sym,nom", [
+    ("UNTC", "Unit Corporation"),                      # petrolier de l'Oklahoma
+    ("MGYOY", "MOL Magyar Olaj-es Gazipari RT"),       # "Rt" = societe anonyme hongroise
+    ("ET", "Energy Transfer LP"),
+    ("EPD", "Enterprise Products Partners L.P."),
+    ("BIP", "Brookfield Infrastructure Partners L.P."),
+    ("REI-UN.TO", "RioCan Real Estate Investment Trust"),
+    ("PLTR", "Palantir Technologies Inc."),            # ticker en W/R/U : piege
+    ("INTU", "Intuit Inc."),
+])
+def test_les_vraies_societes_ne_sont_pas_prises_pour_des_derives(sym, nom):
+    from quantbench.data.fmp import _est_un_derive
+    assert not _est_un_derive(sym, nom)
+
+
+def test_les_foncieres_en_fiducie_sont_reintegrees():
+    """`isFund` decrit une FORME JURIDIQUE et se declenche sur le mot "Trust". Il
+    faisait perdre 164 societes et 279 Md$ de capitalisation : la TOTALITE de
+    l'immobilier cote canadien, mais aussi Essex Property, Federal Realty, Vornado
+    et Kite Realty. On les reintegre par leur INDUSTRIE — les 4 962 vrais fonds
+    marques `isFund` se rangent sans exception sous "Asset Management"."""
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "data" / "fmp.py").read_text(encoding="utf-8")
+    bloc = src.split("def screener(")[1].split("def ")[0]
+    assert 'startswith("REIT")' in bloc and 'r.get("isFund")' in bloc, (
+        "le screener ne reintegre plus les foncieres constituees en fiducie")
+
+
+# --------------------------------------------------------------------------- #
+# 20. Le bilan equilibre sur les fonds propres TOTAUX, minoritaires inclus
+# --------------------------------------------------------------------------- #
+def test_les_minoritaires_ne_font_pas_echouer_l_identite_du_bilan():
+    """`book_equity` ne retient que la part attribuable aux actionnaires — la bonne
+    grandeur pour VALORISER, mais pas pour verifier une identite comptable. Le
+    controle rejetait toute societe detenant des filiales non integralement
+    possedees, Branicks ressortant a 10 % d'ecart pour cette seule raison."""
+    from quantbench.data.validate import valider
+    f = societe(total_assets=10.0, total_liab=6.0, book_equity=3.0,
+                total_equity=4.0)          # 1,0 de minoritaires
+    motifs = [m for m in valider(f, etats(), None) if "identite du bilan" in m]
+    assert not motifs, motifs
+    # Un vrai desequilibre doit rester detecte.
+    f2 = societe(total_assets=10.0, total_liab=6.0, book_equity=3.0, total_equity=3.0)
+    assert any("identite du bilan" in m for m in valider(f2, etats(), None))

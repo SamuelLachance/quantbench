@@ -93,8 +93,16 @@ def valider(fund: dict, F: dict | None, entry: dict | None = None) -> list[str]:
             motifs.append(f"chiffre d'affaires de {rev/ta:.0f}x l'actif total — "
                           f"entite de financement publiant les comptes du groupe")
         tl = fund.get("total_liab")          # deja converti en USD, comme ta et be
-        if tl and be is not None:
-            ecart = abs(ta - (tl + be)) / ta
+        # Le bilan equilibre sur les fonds propres TOTAUX, minoritaires inclus.
+        # `book_equity` ne retient que la part attribuable aux actionnaires — c'est
+        # la bonne grandeur pour VALORISER, mais pas pour verifier une identite
+        # comptable : confronter l'identite a la part attribuable rejetait toute
+        # societe detenant des filiales non integralement possedees.
+        fp = fund.get("total_equity")
+        if fp is None:
+            fp = be
+        if tl and fp is not None:
+            ecart = abs(ta - (tl + fp)) / ta
             if ecart > TOLERANCE_BILAN:
                 motifs.append(f"identite du bilan violee (ecart {ecart:.0%} entre "
                               f"l'actif et passif + fonds propres)")

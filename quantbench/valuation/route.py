@@ -334,9 +334,28 @@ def value_regulated(fund, F=None):
     be = fund.get("book_equity")
     if not be or be <= 0:
         return None
-    # Resultat net normalise : mediane de l'historique quand il est disponible.
+    # Resultat net normalise. Il se calcule en MARGE — un rapport — et non sur les
+    # montants de l'historique : celui-ci est publie en DEVISE LOCALE tandis que la
+    # capitalisation a laquelle on compare le resultat est en dollars. Diviser la
+    # mediane historique par un milliard revenait a traiter des pesos ou des bahts
+    # comme des dollars, surestimant la valeur d'exactement le taux de change :
+    # x1 400 pour l'argentine Edenor (+6 864 %), x33 pour la thailandaise EGCO
+    # (+2 207 %). Un rapport est, lui, sans unite ; applique au chiffre d'affaires
+    # deja converti, il redonne un montant en dollars.
+    # Rapport des sommes, non moyenne de rapports : ces societes traversent des
+    # exercices deficitaires (couverture energetique, gel tarifaire) sur des volumes
+    # tres inegaux.
+    ni = None
     nis = [x for x in (F or {}).get("net_income", []) if x is not None]
-    ni = float(np.median(nis)) / 1e9 if len(nis) >= 3 else fund.get("net_income")
+    revs = [x for x in (F or {}).get("revenue", []) if x]
+    rev_usd = fund.get("revenue")
+    if len(nis) >= 3 and len(revs) >= 3 and rev_usd:
+        n = min(len(nis), len(revs))
+        total = sum(revs[:n])
+        if total > 0:
+            ni = (sum(nis[:n]) / total) * rev_usd
+    if ni is None:
+        ni = fund.get("net_income")
     roe = _roe_normalise(fund, F)
     if not ni or ni <= 0 or not roe or roe <= 0:
         return None
@@ -475,8 +494,21 @@ def value_reit(fund):
     # (elle protege alors d'un flux gonfle par le besoin en fonds de roulement).
     # Verification sur comptes publies : Branicks 2024 annonce un FFO de 52,2 M EUR
     # pour 54,8 M EUR de flux d'exploitation — 5 % d'ecart.
+    # La formule comptable ne vaut que si l'immeuble est REELLEMENT AMORTI. Sous
+    # IFRS il ne l'est pas : RioCan passe 1 M$ d'amortissements pour 309 M$ de flux
+    # d'exploitation, CAP REIT 5 M$ pour 405 M$. "Resultat net + amortissements" y
+    # degenere en simple resultat net — lequel, sous juste valeur, ne mesure aucune
+    # generation de tresorerie. La retenir bornait le FFO de RioCan a 50 M$ au lieu
+    # de 309 M$ et sortait la premiere fonciere du Canada a -85 %.
+    # Le test porte sur une grandeur MESURABLE — la materialite de l'amortissement
+    # rapportee au flux — et non sur le referentiel comptable declare, que nos
+    # donnees ne portent pas. Les foncieres americaines amortissent effectivement
+    # (Prologis 2,6 Md$ pour 5,0 Md$ de flux, Realty Income 2,5 pour 4,0) et
+    # gardent donc la borne comptable.
     gaap = (ni + da) if (ni is not None and da is not None) else None
-    ffo = min(gaap, cfo) if (gaap is not None and gaap > 0) else cfo
+    amortissement_materiel = da is not None and da >= 0.20 * cfo
+    ffo = (min(gaap, cfo) if (gaap is not None and gaap > 0 and amortissement_materiel)
+           else cfo)
     ke, rf = _coe(fund)
     g = min(rf, 0.028)
     ke = max(ke, g + 0.02)                      # écart minimal pour un multiple fini
