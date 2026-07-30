@@ -61,6 +61,27 @@ function noteRisque(r){
     <div class="note">${RISK_REGIME[r.regime]||r.regime||''}</div>`;
 }
 
+/* CARTE DE PROJECTION — CONDITIONNELLE, comme mcCard.
+   Elle s'affichait sur les 27 % de fiches qui n'ont AUCUNE projection : titre,
+   CAGR, mention « CSV : 15 colonnes » et bouton de telechargement restaient
+   visibles, et le clic ne produisait rien — `downloadCSV` sort en silence sur une
+   liste vide. Le drapeau `dcf_applicable` existait deja et n'etait pas utilise. */
+function projCard(d, v, cagr20){
+  const p = d.projection;
+  if(!p || !p.length) return '';
+  return `<div class="card span2">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <h2>Projection 20 ans <span class="sub">DCF Damodaran · ${v.category||'DCF'}</span></h2>
+        <button class="search" onclick="QB.downloadCSV(window.__P.projection, window.__P.ticker+'_projection_20ans_damodaran.csv')" style="border:1px solid var(--accent);color:var(--accent);background:var(--accent-soft);border-radius:8px;padding:6px 12px;font:inherit;font-size:12.5px;cursor:pointer;font-weight:600">⬇ Projection complète (CSV)</button>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin:2px 0 6px">
+        <span class="mono ${(cagr20||0)>=0?'pos':'neg'}" style="font-size:22px;font-weight:700">${P(cagr20)}</span>
+        <span class="muted" style="font-size:12px">CAGR du chiffre d'affaires sur 20 ans (méthode Damodaran)</span></div>
+      <div id="projChart"></div>${projTable(p)}
+      <div class="mini">CSV : 15 colonnes (CA, croissance, marge, EBIT, impôt, EBI, réinvestissement, FCFF, ROIC, capital investi, WACC, coût des FP, facteur d'actualisation, valeur actualisée).</div>
+    </div>`;
+}
+
 function detailRisque(r){
   if(!r||!r.dimensions) return '';
   const dispo = r.dimensions.filter(d=>d.rang!==null);
@@ -230,17 +251,7 @@ function render(d){
       ${kv([['Chiffre d’affaires',BN(rs.revenue)],['Croissance a/a',P(rs.rev_growth)],['Résultat net',BN(rs.net_income)],['Marge nette',rs.net_margin==null?'—':QB.pct(rs.net_margin,0)],['ROE',d.fundamentals.roe==null?'—':QB.pct(d.fundamentals.roe,0)],['Marge opér.',d.fundamentals.operating_margin==null?'—':QB.pct(d.fundamentals.operating_margin,0)]])}
     </div>
 
-    <div class="card span2">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-        <h2>Projection 20 ans <span class="sub">DCF Damodaran · ${v.category||'DCF'}</span></h2>
-        <button class="search" onclick="QB.downloadCSV(window.__P.projection, window.__P.ticker+'_projection_20ans_damodaran.csv')" style="border:1px solid var(--accent);color:var(--accent);background:var(--accent-soft);border-radius:8px;padding:6px 12px;font:inherit;font-size:12.5px;cursor:pointer;font-weight:600">⬇ Projection complète (CSV)</button>
-      </div>
-      <div style="display:flex;align-items:baseline;gap:10px;margin:2px 0 6px">
-        <span class="mono ${(cagr20||0)>=0?'pos':'neg'}" style="font-size:22px;font-weight:700">${P(cagr20)}</span>
-        <span class="muted" style="font-size:12px">CAGR du chiffre d'affaires sur 20 ans (méthode Damodaran)</span></div>
-      <div id="projChart"></div>${projTable(d.projection)}
-      <div class="mini">CSV : 15 colonnes (CA, croissance, marge, EBIT, impôt, EBI, réinvestissement, FCFF, ROIC, capital investi, WACC, coût des FP, facteur d'actualisation, valeur actualisée).</div>
-    </div>
+    ${projCard(d, v, cagr20)}
 
     ${mcCard(d)}
 
@@ -260,7 +271,7 @@ function render(d){
                           ['Volatilité an.',s.vol_annual==null?'—':Math.round(s.vol_annual*100)+' %']]);})()}
       <div class="mini">${(d.shortterm&&d.shortterm.calibrated===true)
         ? 'Probabilité calibrée hors échantillon (voir onglet Court terme).'
-        : 'Notre calibration hors échantillon ne détecte <b>aucun pouvoir prédictif</b> (AUC ≈ 0,51) : nous n’affichons donc <b>aucune probabilité</b>, seulement le score brut. Renversement et momentum sont mesurés sur des fenêtres disjointes et standardisés par la volatilité des rendements. <a href="shortterm.html">Détail de la mesure</a>.'}</div>
+        : `Notre calibration hors échantillon ne détecte <b>aucun pouvoir prédictif</b>${(d.shortterm&&d.shortterm.auc_calibration!=null)?' (AUC '+nb3(d.shortterm.auc_calibration)+')':''} : nous n’affichons donc <b>aucune probabilité</b>, seulement le score brut. Renversement et momentum sont mesurés sur des fenêtres disjointes et standardisés par la volatilité des rendements. <a href="shortterm.html">Détail de la mesure</a>.`}</div>
     </div>
     <div class="card"><h2>Solidité forensique</h2>
       <div class="grid g4" style="grid-template-columns:1fr 1fr;gap:10px">
@@ -280,13 +291,13 @@ function render(d){
       </div>
     </div>
 
-    <div class="card span2"><h2>États financiers <span class="sub">4 exercices, SEC</span></h2>
+    <div class="card span2"><h2>États financiers <span class="sub">${((d.statements&&d.statements.years)||[]).length||'—'} exercices, SEC</span></h2>
       ${stmtTable(d.statements)}
       <div class="mini" style="margin-top:10px">
         ${d.ars_pdf_url?`<a href="${d.ars_pdf_url}" target="_blank" rel="noopener">📕 Rapport annuel officiel — PDF</a> · `:''}
         ${d.report_url?`<a href="${d.report_url}" target="_blank" rel="noopener">10-K officiel (SEC) →</a> · `:''}
         ${d.pdf_url?`<a href="us/${d.pdf_url}" download="${d.ticker}_QuantBench.pdf">⬇ Synthèse QuantBench (PDF)</a> · `:''}
-        <a href="${d.filing_url}" target="_blank" rel="noopener">Tous les dépôts →</a></div>
+        ${d.filing_url?`<a href="${d.filing_url}" target="_blank" rel="noopener">Tous les dépôts →</a>`:''}</div>
     </div>
 
     ${docsCard(d)}

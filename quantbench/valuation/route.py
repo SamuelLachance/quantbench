@@ -590,6 +590,23 @@ def consommation_de_tresorerie(fund):
     return max(-(flux or 0.0), 0.0)
 
 
+# HORIZON DE REDRESSEMENT, en annees. CONSTANTE POSEE, et declaree telle.
+#
+# Elle ne sort d'aucune mesure : nous n'avons pas d'historique de societes en
+# consommation de tresorerie suivi jusqu'a leur issue, et la construire exigerait
+# precisement le banc d'essai multi-periodes que l'archive mensuelle prepare.
+# La forme de la rampe, elle, est justifiee — la probabilite suit le temps avant
+# epuisement — mais la VALEUR du diviseur est une convention.
+#
+# Ce qu'elle coute, pour que le lecteur en juge : elle multiplie lineairement
+# l'equite de toute societe deficitaire. A 2,5 ans d'autonomie, la moitie de la
+# valeur disparait du seul fait de ce choix ; a 3 ans, 40 % ; a 5 ans, rien. La
+# porter a 3 rendrait le modele plus indulgent, a 10 plus severe, dans les memes
+# proportions. Un test de sensibilite verrouille cette dependance pour qu'elle
+# reste visible.
+_HORIZON_DE_REDRESSEMENT = 5.0
+
+
 def probabilite_de_survie(fund, valeur_en_jeu=None):
     """Probabilite qu'une societe deficitaire tienne assez longtemps pour realiser la
     valeur qu'on lui prete. DEFINITION UNIQUE, partagee par toutes les routes.
@@ -632,7 +649,7 @@ def probabilite_de_survie(fund, valeur_en_jeu=None):
     mois = fund.get("age_des_comptes_mois")
     if mois and mois > 0:
         autonomie -= mois / 12.0
-    return max(0.0, min(1.0, autonomie / 5.0))
+    return max(0.0, min(1.0, autonomie / _HORIZON_DE_REDRESSEMENT))
 
 
 def value_reit(fund):
@@ -708,7 +725,17 @@ def probabilite_de_realisation(fund, F, marge_visee):
         return 1.0                       # aucun redressement suppose
     atteints = sum(1 for m in ms if m >= marge_visee * 0.9)
     p = atteints / len(ms)
-    return float(min(1.0, max(0.15, p)))
+    # AUCUN PLANCHER. Cette ligne planchait la probabilite a 0,15 : une societe qui
+    # n'a JAMAIS atteint la marge visee sur son historique se voyait tout de meme
+    # crediter 15 % de la valeur de son redressement, via `_pondere_par_realisation`.
+    # C'est le jumeau exact du plancher a 0,30 supprime de `probabilite_de_survie`
+    # cent lignes plus haut, et pour la meme raison : la docstring de cette fonction
+    # promet une probabilite MESUREE — « la part des exercices ou la societe a
+    # effectivement atteint cette marge » — et un plancher est precisement ce qui
+    # empeche la mesure de dire zero quand la reponse est zero.
+    # Ce n'est pas non plus un lissage bayesien defendable : celui-ci vaudrait
+    # 1/(n+2) et decroitrait avec le nombre d'exercices, la ou 0,15 ne bougeait pas.
+    return float(min(1.0, max(0.0, p)))
 
 
 def _pondere_par_realisation(r, fund, F, marge_visee):

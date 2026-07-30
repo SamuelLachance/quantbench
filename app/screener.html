@@ -125,7 +125,18 @@ function renderHead(){
   document.getElementById('category').innerHTML='<option value="">toutes</option>'+cats.map(s=>`<option>${s}</option>`).join('');
   document.querySelectorAll('.filters input,.filters select').forEach(el=>el.addEventListener('input',apply));
   document.getElementById('reset').onclick=()=>{document.querySelectorAll('.filters input,.filters select').forEach(el=>el.value='');apply();};
-  document.getElementById('disc').innerHTML='Éducatif — pas un conseil d’investissement. '+d.n_ok+' titres couverts, '+d.n_suspect+' écartés (données suspectes).';
+  /* COUVERTURE REELLE. Cette ligne affichait « 0 écartés » parce que le producteur
+     écrivait n_suspect=0 en dur, alors que 30 % de l'univers ne produisait aucune
+     valorisation. Les compteurs justes existaient et n'étaient montrés nulle part.
+     On distingue les deux causes : donnée non vérifiable d'un côté, upside non
+     fini de l'autre — les confondre masquerait laquelle progresse. */
+  const nc = d.n_non_couverts ?? ((d.n_fail||0) + (d.n_invalid||0));
+  const pc = d.universe ? ' ('+Math.round(d.n_ok/d.universe*100)+' % de l’univers)' : '';
+  const detail = (d.n_fail||d.n_invalid)
+    ? ' — '+(d.n_fail||0)+' sans données vérifiables, '+(d.n_invalid||0)+' sans upside fini'
+    : '';
+  document.getElementById('disc').innerHTML='Éducatif — pas un conseil d’investissement. '
+    +d.n_ok+' titres couverts'+pc+', '+nc+' non couverts'+detail+'.';
   renderHead(); apply();
 })();
 </script>

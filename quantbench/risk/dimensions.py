@@ -116,11 +116,20 @@ def regime(fund, F=None, seuil_amortissement=None) -> str:
     da = fund.get("dep_amort")
     if da and ebit is not None:
         denom = ebit + da
-        # Le seuil est MESURE sur l'univers (percentile ecrit dans le calibrage) et
-        # non pose : c'est l'intensite d'amortissement qui declenche la bascule vers
-        # l'excedent avant amortissements, pas une liste de secteurs. Le repli ne
-        # sert qu'en l'absence de calibrage.
-        if denom > 0 and (da / denom) > (seuil_amortissement or 0.40):
+        # SEUIL POSE, ET IL FAUT LE DIRE. Ce commentaire affirmait que le seuil
+        # etait « MESURE sur l'univers (percentile ecrit dans le calibrage) ». Il
+        # ne l'a jamais ete : la cle `seuil_amortissement` n'existe pas dans
+        # `risk_calibration.json` et aucun script ne l'ecrit, si bien que
+        # `(None or 0.40)` vaut 0,40 sur tout chemin d'execution et pour tout
+        # titre. Le code documentait l'inverse de ce qu'il faisait, dans le module
+        # meme qui fonde la distinction entre mesure et convention.
+        # Ce qui EST justifie, c'est la forme : c'est l'intensite d'amortissement
+        # qui declenche la bascule vers l'excedent avant amortissements, pas une
+        # liste de secteurs. La valeur 0,40, elle, est une convention — au sens
+        # ou l'est deja `seuil_base_actionnaire`, dont le calibrage explique que
+        # la mesure a ete tentee, a echoue, et que la valeur est assumee.
+        # Le calibrage reste prioritaire s'il vient un jour a porter la cle.
+        if denom > 0 and (da / denom) > (seuil_amortissement or _SEUIL_AMORTISSEMENT_POSE):
             return "amortissement_lourd"
     return "exploitante"
 
@@ -380,14 +389,22 @@ def d7_confiance(fund, F, reg, motifs=None, reparations=None):
     fp, cap = fund.get("book_equity"), fund.get("market_cap")
     if fp and cap and fp > 0 and cap > 0:
         points.append(max(math.log10(fp / cap), 0.0))
+    # POIDS DE SEVERITE RELATIVE — POSES, et l'en-tete du module les passait sous
+    # silence en affirmant que « aucun seuil de valeur n'apparait ici ». Ils ne
+    # sont ni arithmetiques ni mesures : ils disent seulement qu'un taux de change
+    # introuvable est plus grave qu'une devise etrangere connue, et un motif de
+    # non-verifiabilite plus grave qu'une reparation reussie. C'est une opinion,
+    # defendable, mais une opinion — et elle deplace le signal brut, donc le rang,
+    # donc la note. La mesure du 30 juillet 2026 donne d'ailleurs a cette dimension
+    # une AUC de 0,496 : sur cette fenetre, elle n'annonce aucun effondrement.
     if fund.get("fx_indisponible"):
-        points.append(1.0)
+        points.append(_D7_FX_INTROUVABLE)
     if (fund.get("financial_currency") or "USD") != "USD":
-        points.append(0.25)
+        points.append(_D7_DEVISE_ETRANGERE)
     if (fund.get("exchange") or "") == "OTC":
-        points.append(0.5)
-    points.append(0.75 * len(motifs or []))
-    points.append(0.5 * len(reparations or []))
+        points.append(_D7_GRE_A_GRE)
+    points.append(_D7_PAR_MOTIF * len(motifs or []))
+    points.append(_D7_PAR_REPARATION * len(reparations or []))
     if not points:
         return None, None
     return sum(points), "opacite et fraicheur des comptes"
@@ -412,6 +429,24 @@ def d8_refinancement(fund, F, reg):
     if ressources <= 0:
         return 50.0, "echeance a douze mois sans ressource pour y faire face"
     return _borne(court / ressources, 0.0, 50.0), "mur de refinancement a douze mois"
+
+
+# --------------------------------------------------------------------------- #
+# CONSTANTES POSEES DU MODULE, rassemblees et nommees.
+#
+# L'en-tete affirme que « aucun seuil de valeur n'apparait ici ». C'etait vrai des
+# huit dimensions elles-memes — toutes converties en rang contre une table mesuree
+# — mais faux de deux endroits : le seuil de bascule vers le regime d'amortissement
+# lourd, et les poids de severite relative de la dimension de confiance. Les nommer
+# ici ne les rend pas mesurees ; cela les rend VISIBLES, ce qui est la condition
+# pour qu'un jour on les mesure ou qu'on les conteste.
+# --------------------------------------------------------------------------- #
+_SEUIL_AMORTISSEMENT_POSE = 0.40   # part de l'amortissement dans EBIT + amortissement
+_D7_FX_INTROUVABLE = 1.0           # aucun taux de change : les montants sont indechiffrables
+_D7_PAR_MOTIF = 0.75               # par motif de non-verifiabilite subsistant
+_D7_GRE_A_GRE = 0.5                # cotation de gre a gre : obligations de publication moindres
+_D7_PAR_REPARATION = 0.5           # par reparation appliquee aux comptes
+_D7_DEVISE_ETRANGERE = 0.25        # comptes tenus hors dollar : une conversion de plus
 
 
 DIMENSIONS = (

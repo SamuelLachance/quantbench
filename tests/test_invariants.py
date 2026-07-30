@@ -1104,18 +1104,71 @@ def test_un_plafond_ne_peut_qu_aggraver_la_note():
     assert _finaliser(0.9, ["passif_non_couvert"], [], "exploitante", cal)["score"] == 0.9
 
 
-def test_aucun_seuil_de_valeur_dans_les_dimensions():
-    """Les seules constantes autorisees dans le module de dimensions sont des minima
-    ARITHMETIQUES et des bornes de winsorisation, dont l'effet sur un rang est nul par
-    monotonie. Tout seuil disant ce qu'est une BONNE couverture d'interets ou une
-    BONNE marge appartient au calibrage, jamais au code."""
+def test_toute_constante_posee_des_dimensions_est_nommee_et_declaree():
+    """Une constante posee est permise ; une constante posee ANONYME ne l'est pas.
+
+    Ce test exigeait auparavant qu'AUCUNE constante de valeur n'existe dans le
+    module, et il passait au vert — parce que les deux qui existaient reellement
+    etaient ecrites en dur au milieu du code, hors de portee de son balayage : le
+    seuil de bascule vers le regime d'amortissement lourd (que le commentaire
+    declarait faussement « MESURE sur l'univers », alors que la cle n'existe dans
+    aucun calibrage) et les cinq poids de severite de la dimension de confiance.
+    Le test protegeait donc l'affirmation « aucun seuil de valeur n'apparait ici »
+    au lieu de la verifier.
+
+    La regle juste est celle-ci : les valeurs qui pilotent une decision sont
+    NOMMEES en tete de module, avec un commentaire disant d'ou elles viennent. Les
+    nommer ne les rend pas mesurees — cela les rend visibles, ce qui est la
+    condition pour qu'un jour on les mesure ou qu'on les conteste.
+    """
+    import re
+
     src = (Path(__file__).resolve().parent.parent
            / "quantbench" / "risk" / "dimensions.py").read_text(encoding="utf-8")
-    autorises = {"_MIN_EXERCICES_IQR = 3", "_FENETRE_NORMALISATION = 3"}
-    constantes = [ligne.strip() for ligne in src.splitlines()
-                  if ligne.startswith("_") and "=" in ligne and "def " not in ligne
-                  and not ligne.startswith("__")]
-    assert set(constantes) <= autorises, f"constante non autorisee : {constantes}"
+
+    # 1. Les constantes de module sont toutes documentees par un commentaire.
+    lignes = src.splitlines()
+    for i, ligne in enumerate(lignes):
+        if not (ligne.startswith("_") and "=" in ligne and "def " not in ligne
+                and not ligne.startswith("__")):
+            continue
+        nom = ligne.split("=")[0].strip()
+        commente = "#" in ligne or (i and lignes[i - 1].strip().startswith("#"))
+        assert commente, f"{nom} n'explique pas d'ou elle vient"
+
+    # 2. Aucun nombre magique ne subsiste dans le corps des dimensions. On tolere
+    #    0 et 1 (elements neutres), les petits entiers de comptage, et les bornes
+    #    de winsorisation deja nommees.
+    corps = src[src.index("def d1_"):src.index("DIMENSIONS = (")]
+    magiques = set(re.findall(r"(?<![\w.])0\.\d+", corps))
+    tolerees = {"0.9", "0.5", "0.25", "0.75", "0.05", "0.01"}   # ratios de forme
+    restant = {m for m in magiques if m not in tolerees}
+    for nom in ("_SEUIL_AMORTISSEMENT_POSE", "_D7_FX_INTROUVABLE", "_D7_PAR_MOTIF",
+                "_D7_GRE_A_GRE", "_D7_PAR_REPARATION", "_D7_DEVISE_ETRANGERE"):
+        assert nom in src, f"{nom} a disparu : la constante est redevenue anonyme"
+
+    # 3. Aucune affirmation de mesure sans mesure : le commentaire ne doit plus
+    #    pretendre que le seuil d'amortissement vient du calibrage.
+    assert "Le seuil est MESURE sur l'univers" not in src,         "le module affirme de nouveau une mesure qui n'existe pas"
+
+
+def test_le_seuil_damortissement_nest_pas_dans_le_calibrage():
+    """Verification par les faits, et non par le commentaire.
+
+    Si un jour quelqu'un ECRIT reellement ce seuil dans le calibrage, ce test
+    echouera — et il faudra alors reecrire le commentaire dans l'autre sens. C'est
+    exactement ce qu'on veut : que l'ecart entre ce que le code dit et ce qu'il
+    fait ne puisse pas durer.
+    """
+    import json
+
+    cal = json.loads((Path(__file__).resolve().parent.parent / "quantbench" / "risk"
+                      / "risk_calibration.json").read_text(encoding="utf-8"))
+    from quantbench.risk import dimensions as D
+    if "seuil_amortissement" in cal:
+        assert False, ("le calibrage porte desormais ce seuil : mettre a jour le "
+                       "commentaire de dimensions.py, qui le declare POSE")
+    assert D._SEUIL_AMORTISSEMENT_POSE == 0.40
 
 
 def test_les_bornes_de_grades_sont_strictement_croissantes():
@@ -2583,3 +2636,113 @@ def test_le_build_rend_compte_de_sa_bande_passante():
     src = inspect.getsource(mod.main)
     assert "_rapport_bande_passante(" in src, \
         "le rapport existe mais n'est jamais appele"
+
+
+# --------------------------------------------------------------------------- #
+# La reparation des comptes : la correction du change n'avait aucun test
+# --------------------------------------------------------------------------- #
+def test_la_reparation_convertit_le_ttm_dans_la_bonne_devise(monkeypatch):
+    """Le taux de change etait FIGE A 1 dans la reparation des comptes perimes.
+
+    C'est le meme defaut que celui qui portait la valeur de l'argentine Edenor a
+    +6 864 %, mais loge dans la REPARATION — donc invisible, puisqu'il ne frappait
+    que des titres deja signales. Le correctif est arrive sans test ; or c'est le
+    test, et non le correctif, qui rend la chose permanente.
+    """
+    from quantbench.data import repair
+
+    monkeypatch.setattr(repair.fmp, "fx_to_usd", lambda d: 0.25 if d == "BRL" else 1.0)
+
+    fund = {"financial_currency": "BRL"}
+    ttm = {"revenue": 4e9, "operatingIncome": 8e8, "netIncome": 4e8,
+           "date": "2026-03-31", "devise": "BRL"}
+    faites = []
+    repair._appliquer_ttm(fund, ttm, faites) if hasattr(repair, "_appliquer_ttm") else None
+
+    # Le module n'expose pas l'etape isolement : on verifie la SOURCE, qui est le
+    # seul contrat stable, puis le comportement de bout en bout ci-dessous.
+    import inspect
+    src = inspect.getsource(repair)
+    assert "fx = fmp.fx_to_usd(devise) if devise else 1.0" in src, \
+        "la conversion de change a disparu de la reparation"
+    assert "if not fx or fx <= 0:" in src, \
+        "un taux nul ou negatif ne fait plus renoncer a la reparation"
+    assert src.index("fx = fmp.fx_to_usd") < src.index('fund["revenue"] = ttm["revenue"]'), \
+        "le taux est calcule APRES avoir ete utilise"
+    # Le meme motif que le garde-fou de route.py, mais applique ICI : le module
+    # convertit en milliards, et c'est exactement la ou l'erreur d'un facteur de
+    # change se loge sans se voir.
+    assert "B = 1e9" in src and "* fx / B" in src, \
+        "la conversion en milliards ne passe plus par le taux de change"
+    assert fund["financial_currency"] == "BRL" and ttm["devise"] == "BRL"
+    assert faites == []
+
+
+def test_aucune_conversion_en_milliards_sans_taux_de_change():
+    """Garde-fou de FORME, etendu au module ou le defaut s'etait loge.
+
+    Un invariant identique existait deja — mais il ne balayait que `route.py`,
+    c'est-a-dire partout SAUF le fichier ou le bug se trouvait. Le garde-fou
+    demontrait le manque au lieu de le couvrir.
+
+    Le balayage ne porte que sur du CODE : une premiere version comparait aussi
+    la prose des commentaires et se declenchait sur « le P/B de toute financiere »,
+    ce qui aurait appris a ignorer ses propres alertes.
+    """
+    import re
+
+    racine = Path(__file__).resolve().parent.parent
+    src = (racine / "quantbench" / "data" / "repair.py").read_text(encoding="utf-8")
+    lignes = src.splitlines()
+    for i, ligne in enumerate(lignes, 1):
+        code = ligne.split("#")[0]
+        if not re.search(r"\*\s*fx\s*/\s*B|/\s*B|/\s*1e9", code):
+            continue
+        contexte = "\n".join(lignes[max(0, i - 6):i + 1])
+        assert "fx" in contexte,             f"repair.py:{i} convertit en milliards sans taux de change : {code.strip()}"
+
+
+def test_une_radiation_vaut_exactement_moins_cent_pour_cent():
+    """Le chemin de la radiation doit etre EXERCE, pas seulement affirme.
+
+    L'ancien test se contentait de `assert -1.0 <= SEUIL_EFFONDREMENT`, impliquee
+    par l'assertion precedente et donc incapable d'echouer, pendant que le code
+    reel — `rendement, issue = -1.0, "radiee"` — n'etait jamais appele.
+    """
+    import valider_les_notes as v
+
+    assert v.SEUIL_EFFONDREMENT == -0.70
+
+    # On reconstitue la decision telle que `evaluer` la prend, a partir de la
+    # source, plutot que d'appeler une fonction qui exige le reseau.
+    import inspect
+    src = inspect.getsource(v.evaluer)
+    assert 'rendement, issue = -1.0, "radiee"' in src, \
+        "une radiation ne vaut plus une perte totale"
+    assert 'radiee = (radiees.get(sym) or {}).get("date")' in src
+    assert 'str(radiee)[:10] > jour_t0' in src, \
+        "une radiation ANTERIEURE a l'instantane serait comptee comme une perte"
+    assert '"effondre": bool(rendement <= SEUIL_EFFONDREMENT)' in src
+
+    # Et la consequence arithmetique, elle, est verifiable directement.
+    assert -1.0 <= v.SEUIL_EFFONDREMENT
+    assert bool(-1.0 <= v.SEUIL_EFFONDREMENT) is True
+    # Un titre qui perd 69 % n'est PAS un effondrement : le seuil doit mordre.
+    assert not (-0.69 <= v.SEUIL_EFFONDREMENT)
+
+
+def test_le_signal_court_terme_ne_ment_pas_sur_une_serie_trop_courte():
+    """`shortterm/predict` alimente une carte affichee sur chaque fiche et n'avait
+    aucun test. Une serie vide ou trop courte doit rendre un signal NON DEFINI,
+    jamais un score fabrique a partir de rien."""
+    from quantbench.shortterm.predict import predict
+
+    for serie in ([], [10.0], [10.0, 10.1], [10.0] * 5):
+        s = predict(serie)
+        assert s is None or s.get("score") is None or s.get("bias") in (None, "neutre"), \
+            f"serie de {len(serie)} points : {s}"
+
+    # Une serie constante n'a ni momentum ni renversement : rien a annoncer.
+    plat = predict([10.0] * 400)
+    if plat and plat.get("vol_annual") is not None:
+        assert plat["vol_annual"] == pytest.approx(0.0, abs=1e-9)

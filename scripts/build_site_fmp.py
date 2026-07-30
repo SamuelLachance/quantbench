@@ -124,6 +124,24 @@ def _rapport_bande_passante(n_titres, n_shards=1):
           f"({part:.0f} %){alerte}")
 
 
+# CALIBRATION DU SIGNAL COURT TERME, chargee une fois. Chaque fiche affiche
+# « aucun pouvoir predictif (AUC ...) » : ce chiffre etait ECRIT EN DUR dans le
+# HTML, alors que la mesure vit ici. Deux chiffres a deux endroits divergent
+# toujours — il suffit d'une recalibration pour que la page mente.
+def _calibration_court_terme():
+    try:
+        c = json.loads((Path(__file__).resolve().parent.parent / "quantbench" /
+                        "shortterm" / "shortterm_calibration.json")
+                       .read_text(encoding="utf-8"))
+        return {"calibrated": bool(c.get("calibrated")),
+                "auc": (c.get("metrics") or {}).get("auc")}
+    except Exception:
+        return {"calibrated": False, "auc": None}
+
+
+_CALIB_ST = _calibration_court_terme()
+
+
 def _arrondi(v):
     """Arrondi a precision constante en CHIFFRES SIGNIFICATIFS : 2 decimales
     au-dela de 1 $, 6 en dessous (penny stocks)."""
@@ -515,6 +533,14 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     with _etape("documents SEC"):
         ard = (annual_report_docs(cik) if cik
                else {"ars_pdf": None, "tenk": None, "documents": []})
+    # UN CIK NUL N'EST PAS UN CIK. Le fournisseur renvoie la sentinelle
+    # "0000000000" pour toute societe hors perimetre SEC — tout le TSX, la
+    # quasi-totalite des lignes de gre a gre : 88 fiches sur 387. La garde
+    # `if cik` ne s'en apercevait pas, une chaine de zeros etant vraie en Python,
+    # et la fiche publiait un lien vers une recherche EDGAR VIDE. Pour 86 de ces
+    # 88 societes, c'etait le SEUL lien du bloc « documents ».
+    if cik and not str(cik).strip("0"):
+        cik = None
     filing = (f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=10-K"
               if cik else None)
     # NOTE DE RISQUE. Elle repond a une question DIFFERENTE de l'upside : non pas
@@ -538,7 +564,11 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
         "forensics": forensic, "statements": _statements(F), "news": news,
         "projection": proj, "methodologie": methodo,
         "reparations_donnees": reparations,
-        "results_summary": _results_summary(F), "shortterm": signal,
+        "results_summary": _results_summary(F),
+        # L'AUC mesuree accompagne le signal : la fiche la LIT au lieu de la
+        # recopier. Elle ne coute rien — un flottant par fiche.
+        "shortterm": ({**signal, "auc_calibration": _CALIB_ST["auc"]}
+                      if signal else signal),
         "montecarlo": mc, "documents": ard.get("documents", []),
         "report_url": ard.get("tenk"), "ars_pdf_url": ard.get("ars_pdf"),
         "filing_url": filing, "pdf_url": None,
@@ -627,9 +657,22 @@ def _write_aggregates(all_rows, universe_size, fail):
     clean = [r for r in all_rows if r["upside"] is not None and np.isfinite(r["upside"])]
     invalid = [r for r in all_rows if r["upside"] is None or not np.isfinite(r["upside"])]
     clean.sort(key=lambda r: -(r["upside"] if r["upside"] is not None else -9))
+    # LA COUVERTURE REELLE, ET NON UN ZERO ECRIT A LA MAIN. Le champ `n_suspect`
+    # valait 0 en dur et `suspects` une liste vide : la page affichait donc
+    # « 0 ecartes (donnees suspectes) » alors que 5 080 titres sur 16 830 — 30 %
+    # de l'univers — n'avaient produit aucune valorisation. Les compteurs
+    # existaient, etaient justes, et n'etaient affiches nulle part.
+    # Les deux causes sont DISTINCTES et doivent le rester : `n_fail` compte les
+    # societes dont la donnee n'est pas verifiable (comptes absents, bilan qui ne
+    # boucle pas), `n_invalid` celles qui ont ete valorisees mais dont l'upside
+    # n'est pas un nombre fini. Les confondre masquerait laquelle progresse.
+    non_couverts = int(fail) + len(invalid)
     (US / "_screener.json").write_text(json.dumps(
-        {"n_ok": len(clean), "n_suspect": 0, "n_invalid": len(invalid), "n_fail": fail,
-         "universe": universe_size, "updated": _now_et(), "rows": clean, "suspects": []},
+        {"n_ok": len(clean), "n_invalid": len(invalid), "n_fail": fail,
+         "n_non_couverts": non_couverts,
+         "part_couverte": (round(len(clean) / universe_size, 4)
+                           if universe_size else None),
+         "universe": universe_size, "updated": _now_et(), "rows": clean},
         ensure_ascii=False), encoding="utf-8")
     # Classement sur le SCORE (continu, injectif) et non sur une probabilite bornee
     # qui creait des ex aequo massifs. On publie aussi le resultat de la calibration

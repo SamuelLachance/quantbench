@@ -42,8 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065   # v5
         with:
           python-version: "3.12"
           cache: pip
@@ -54,19 +54,34 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           PYTHONPATH: ${{ github.workspace }}
           PYTHONUNBUFFERED: "1"
+          # Les entrees passent par l'ENVIRONNEMENT, jamais par `${{ }}` dans un
+          # `run:` : l'expansion y a lieu AVANT le shell, si bien qu'une valeur
+          # « 24; commande » s'executerait. Le job porte `contents: write` et
+          # pousse sur main — la portee est limitee aux comptes deja autorises,
+          # mais c'est l'anti-patron d'injection d'Actions et il ne coute rien a
+          # eviter.
+          HORIZON: ${{ github.event.inputs.horizon || '24' }}
+          ECHANTILLON: ${{ github.event.inputs.echantillon || '1400' }}
         run: >
           python scripts/valider_les_notes.py
-          --horizon ${{ github.event.inputs.horizon || '24' }}
-          --echantillon ${{ github.event.inputs.echantillon || '1400' }}
-          --workers 16
+          --horizon "$HORIZON" --echantillon "$ECHANTILLON" --workers 16
 
       # Le contrat entre le script et la page : toute cle que la fiche consomme
       # doit exister dans le resume. Une cle manquante n'y provoque pas d'erreur
       # visible — elle affiche « undefined » au milieu d'un tableau de resultats.
-      - name: Verifier que les invariants tiennent toujours
+      # SEULS LES INVARIANTS DE SCHEMA gardent la publication. Lancer toute la
+      # suite ici detruisait le travail : `test_le_resume_publie_porte_bien_la_
+      # correction_du_survivant` et l'egalite des cinq familles portent sur la
+      # mesure QUE LE SCRIPT VIENT D'ECRIRE. Un echantillon mensuel sans famille F
+      # faisait echouer pytest, le job s'arretait, le runner ephemere etait
+      # detruit, et quatre-vingt-dix minutes de mesure disparaissaient — en
+      # supprimant precisement le « mauvais resultat » que l'en-tete de ce
+      # workflow s'engage a publier. La vraie garde est en amont, dans le script
+      # lui-meme, qui refuse d'ecrire sans les societes radiees.
+      - name: Verifier le CONTRAT entre la mesure et la page
         run: |
           pip install pytest
-          python -m pytest tests/ -q
+          python -m pytest tests/ -q -k "resume_de_validation or lit_la_mesure"
 
       - name: Publier la nouvelle mesure
         run: |
@@ -81,4 +96,17 @@ jobs:
             -m "Validation de la note de risque mesuree le $(date -u +%Y-%m-%d)" \
             -m "Reconstitution point-in-time de la note, puis devenir des titres sur l'horizon. Les societes radiees depuis l'instantane sont comptees pour une perte totale, sans quoi la mesure porterait sur un univers vide des faillites que la note pretend annoncer." \
             -m "La fiche lit ce fichier ; aucune page n'est modifiee et aucun chiffre ne peut rester affiche apres avoir cesse d'etre vrai."
-          git push
+          # Pousser APRES un job long expose a une course : tout commit arrive
+          # entre-temps rejette le push en non-fast-forward, et le travail de ce
+          # job serait perdu. On rebase, et on ECHOUE BRUYAMMENT si le rebase se
+          # heurte a un conflit — un `|| true` laisserait le push partir d'un
+          # depot a moitie rebase, ce qui est pire que l'echec.
+          git fetch origin main
+          git rebase origin/main || { git rebase --abort; exit 1; }
+          git push origin HEAD:main
+
+      # La suite complete tourne APRES la publication : elle diagnostique, elle
+      # ne censure pas. Un resultat qui deplait doit etre publie, pas efface.
+      - name: Suite complete (diagnostic, apres publication)
+        if: always()
+        run: python -m pytest tests/ -q

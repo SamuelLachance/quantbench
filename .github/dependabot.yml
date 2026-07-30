@@ -1,0 +1,34 @@
+version: 2
+
+# Les actions GitHub sont epinglees sur un SHA de commit et non sur un tag.
+#
+# Un tag est DEPLACABLE : `actions/checkout@v4` designe ce que le proprietaire du
+# depot decide qu'il designe, aujourd'hui comme demain. Trois de nos workflows
+# exposent la cle du fournisseur de donnees ET poussent sur `main` ; ils meritent
+# une chaine d'approvisionnement verifiable.
+#
+# Un SHA epingle, en revanche, ne recoit jamais de correctif de securite. C'est
+# le role de ce fichier : Dependabot ouvre une demande de fusion quand une action
+# publie une nouvelle version, avec le journal des changements. La decision de
+# mettre a jour redevient explicite au lieu d'etre subie.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "Actions"
+    labels:
+      - dependances
+
+  # Les dependances Python viennent d'une source UNIQUE, `requirements.txt` —
+  # trois listes incompletes coexistaient auparavant et l'integration continue
+  # etait en echec depuis des semaines a l'import.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "Dependances"
+    labels:
+      - dependances

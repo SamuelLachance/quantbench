@@ -17,10 +17,20 @@ from datetime import date
 
 import requests
 
-# La SEC demande un User-Agent identifiant avec un contact. Configurable via la
-# variable d'environnement QUANTBENCH_SEC_UA (mettez votre email) ; defaut generique.
-_UA = {"User-Agent": os.environ.get(
-    "QUANTBENCH_SEC_UA", "QuantBench research tool (contact via GitHub issues)")}
+# La SEC exige un User-Agent identifiant avec un contact, et REFUSE (403) ceux
+# qu'elle juge insuffisants.
+#
+# Deux pieges ici, verifies en direct contre la SEC :
+#   1. Un secret GitHub NON DEFINI devient la CHAINE VIDE, pas une variable
+#      absente. `os.environ.get(cle, defaut)` ne rend alors JAMAIS le defaut : le
+#      User-Agent part vide, et la SEC repond 403. D'ou le `or`.
+#   2. La chaine de defaut d'origine — « QuantBench research tool (contact via
+#      GitHub issues) » — est elle-meme refusee en 403, alors que la meme sans la
+#      parenthese passe. Un repli qui echoue n'est pas un repli.
+# En aval, `annual_report_docs` avale toute exception : sans ces deux corrections,
+# les seize mille fiches perdaient leurs documents SEC sans qu'un seul job echoue.
+_UA = {"User-Agent": (os.environ.get("QUANTBENCH_SEC_UA")
+                      or "QuantBench research tool")}
 _BASE = "https://data.sec.gov"
 _TIMEOUT = 30
 

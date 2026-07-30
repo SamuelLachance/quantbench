@@ -186,6 +186,18 @@ def evaluer(sym, sr, jour_t0: str, radiees: dict, plafond_capi=None):
         f["market_cap"] = px_brut * fxp * sh / 1e9
         f["exchange"] = sr_t0.get("exchange")
 
+        # LIQUIDITE DE SORTIE A LA DATE DE L'INSTANTANE. Cette dimension entrait
+        # « non testee » dans chaque mesure, faute de volumes — alors que la serie
+        # datee, volumes compris, etait deja entre nos mains dix lignes plus haut.
+        # Son absence du tableau publie se lisait a tort comme une absence de
+        # signal. On tronque la serie a la date etudiee, exactement comme les
+        # comptes : utiliser les volumes d'aujourd'hui serait un regard sur
+        # l'avenir, et un titre devenu illiquide APRES coup passerait pour liquide.
+        avant = [x for x in serie if x.get("date") and x["date"][:10] <= jour_t0]
+        vol = fmp.volume_dollars_median(avant)
+        if vol is not None:
+            f["volume_dollars_median"] = vol * fxp
+
         # LA RECONSTITUTION N'A PAS DE SECONDE SOURCE. La production deduit la base
         # actionnaire du marche (capitalisation / cours) et ne se fie au nombre
         # d'actions DEPOSE qu'a defaut ; ici, faute de capitalisation d'epoque, on
