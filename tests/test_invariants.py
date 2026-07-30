@@ -2460,3 +2460,38 @@ def test_le_verdict_dune_dimension_se_lit_en_ecarts_types():
     assert "ecarts_types_au_hasard" in src
     assert "auc < 0.53" not in src, "seuil fixe rétabli sur l'AUC"
     assert "indistinguable du hasard" in src
+
+
+def test_la_validation_refuse_de_mesurer_sans_les_radiees():
+    """Sans les societes radiees, cette mesure n'en est pas une.
+
+    Le screener d'aujourd'hui ne liste que les survivantes : les faillites, soit
+    l'evenement meme que la note F pretend annoncer, en ont disparu. Le fournisseur
+    a renvoye une liste vide un soir de saturation, le script a continue sans
+    broncher, et la mesure obtenue annoncait 3,9 % d'effondrement en A contre
+    18,5 % avec la correction. Aucune alerte, juste des chiffres flatteurs — la
+    forme de defaillance la plus dangereuse qui soit pour un banc d'essai.
+    """
+    racine = Path(__file__).resolve().parent.parent
+    src = (racine / "scripts" / "valider_les_notes.py").read_text(encoding="utf-8")
+    assert "if not radiees:" in src, \
+        "aucune garde : une liste vide produirait une mesure biaisee sans le dire"
+    # La garde doit precoder l'ecriture des fichiers, pas la suivre.
+    assert src.index("if not radiees:") < src.index("SORTIE.write_text"), \
+        "la garde arrive apres l'ecriture : le fichier biaise serait quand meme publie"
+
+
+def test_le_resume_publie_porte_bien_la_correction_du_survivant():
+    """Le fichier deploye doit prouver, par lui-meme, qu'il a ete mesure avec les
+    radiees. Un resume a zero radiee est un resume a jeter."""
+    import json
+
+    racine = Path(__file__).resolve().parent.parent
+    f = racine / "app" / "us" / "_validation_risque_resume.json"
+    if not f.exists():
+        pytest.skip("validation jamais executee sur ce poste")
+    d = json.loads(f.read_text(encoding="utf-8"))
+    assert d["radiees"] > 0, \
+        "mesure publiee sans aucune societe radiee : biais du survivant non corrige"
+    assert d["radiees"] / d["n"] > 0.05, \
+        f"seulement {d['radiees']} radiees sur {d['n']} : correction trop faible"

@@ -48,6 +48,7 @@ from quantbench.data import fmp                                    # noqa: E402
 from quantbench.data.repair import reparer                         # noqa: E402
 from quantbench.data.validate import valider                       # noqa: E402
 from quantbench.risk import noter                                  # noqa: E402
+from quantbench.valuation.route import value_stock                 # noqa: E402
 from quantbench.risk.statistiques import (                         # noqa: E402
     aire_sous_la_courbe as _auc, mediane, spearman,
     test_deux_proportions, wilson)
@@ -206,6 +207,21 @@ def evaluer(sym, sr, jour_t0: str, radiees: dict, plafond_capi=None):
         if not grade:
             return None
 
+        # LA VALORISATION SUBIT LE MEME EXAMEN QUE LA NOTE, et c'est la question
+        # centrale du site : il annonce qu'une action est decotee de tant, sans
+        # que rien n'ait jamais verifie que cela predise quoi que ce soit. La
+        # valorisation est reconstruite sur le MEME instantane — memes comptes
+        # deja deposes, meme cours d'epoque, meme base actionnaire — de sorte que
+        # les deux mesures sont comparables entre elles.
+        upside, methode = None, None
+        try:
+            val = value_stock(sym, fund=f, F=F)
+            if val and val.get("value_per_share") and f.get("price"):
+                upside = val["value_per_share"] / f["price"] - 1.0
+                methode = val.get("method")
+        except Exception:
+            pass
+
         # --- Devenir ---------------------------------------------------------
         radiee = (radiees.get(sym) or {}).get("date")
         if radiee and str(radiee)[:10] > jour_t0:
@@ -235,6 +251,7 @@ def evaluer(sym, sr, jour_t0: str, radiees: dict, plafond_capi=None):
                 if d.get("rang") is not None}
 
         return {"ticker": sym, "grade": grade, "famille": grade[0], "dimensions": dims,
+                "upside": upside, "methode": methode,
                 "score": n.get("score"), "regime": n.get("regime"),
                 "cap_t0": f["market_cap"], "rendement": rendement,
                 "creux": creux, "issue": issue,
@@ -367,6 +384,43 @@ def pouvoir_des_dimensions(res):
     return out
 
 
+def pouvoir_de_la_valorisation(res, n_paquets=5):
+    """L'upside annonce predit-il le rendement ? La question centrale du site.
+
+    Il annonce qu'une action vaut tant de plus que son cours. Cette affirmation
+    n'avait jamais ete confrontee a quoi que ce soit. On range donc les societes
+    par upside croissant, en paquets d'effectif egal, et on regarde le rendement
+    median de chaque paquet sur l'horizon.
+
+    Deux precautions qui changent la lecture :
+      - la MEDIANE, jamais la moyenne : un titre qui fait x20 emporterait la
+        moyenne d'un paquet entier et ferait conclure a un pouvoir predictif que
+        les autres titres du paquet dementent ;
+      - on publie AUSSI le taux d'effondrement par paquet. Un upside eleve se
+        rencontre surtout chez les societes en difficulte, dont le cours est bas
+        parce que le marche doute — la decote et le risque de ruine vont donc
+        ensemble, et lire l'un sans l'autre serait trompeur.
+    """
+    avec = [r for r in res if r.get("upside") is not None]
+    if len(avec) < n_paquets * 30:
+        return []
+    avec.sort(key=lambda r: r["upside"])
+    taille = len(avec) // n_paquets
+    out = []
+    for i in range(n_paquets):
+        bout = avec[i * taille:(i + 1) * taille] if i < n_paquets - 1             else avec[i * taille:]
+        k = sum(1 for r in bout if r["effondre"])
+        bas, haut = wilson(k, len(bout))
+        out.append({
+            "paquet": i + 1, "n": len(bout),
+            "upside_min": bout[0]["upside"], "upside_max": bout[-1]["upside"],
+            "rendement_median": mediane([r["rendement"] for r in bout]),
+            "creux_median": mediane([r["creux"] for r in bout]),
+            "taux_effondrement": k / len(bout), "ic_bas": bas, "ic_haut": haut,
+        })
+    return out
+
+
 # --------------------------------------------------------------------------- #
 def main(horizon=24, echantillon=900, workers=14, graine=20260730):
     t0 = time.time()
@@ -378,6 +432,20 @@ def main(horizon=24, echantillon=900, workers=14, graine=20260730):
     print(f"  univers cote aujourd'hui : {len(uni)}")
     radiees = fmp.societes_radiees()
     print(f"  societes radiees connues : {len(radiees)}")
+    # SANS LES RADIEES, CETTE MESURE N'EN EST PAS UNE. Le screener d'aujourd'hui ne
+    # liste que les survivantes ; les faillites, soit l'evenement meme que la note F
+    # pretend annoncer, en ont disparu. Une passe sans elles ne mesure pas une note
+    # trop indulgente, elle mesure un univers ampute de ses ruines — et elle le fait
+    # SANS RIEN CASSER : le fournisseur a renvoye une liste vide (saturation de
+    # l'API pendant un build), le script a continue, et la mesure obtenue affichait
+    # 3,9 % d'effondrement en A contre 18,5 % avec la correction. Aucune alerte,
+    # juste des chiffres flatteurs. On refuse donc de produire un fichier.
+    if not radiees:
+        print("\nECHEC : le fournisseur n'a renvoye AUCUNE societe radiee.\n"
+              "  Sans elles, la mesure porterait sur un univers vide de ses "
+              "faillites\n  et surestimerait la note. Rien n'est ecrit ; "
+              "relancer plus tard.")
+        return 2
 
     # Les radiees APRES l'instantane sont les evenements que le test doit voir.
     # On leur applique le MEME filtre que l'univers courant : bons de souscription,
@@ -503,6 +571,30 @@ def main(horizon=24, echantillon=900, workers=14, graine=20260730):
         if auc_note is not None:
             print(f"    {'NOTE COMPLETE (tous titres)':28} {auc_note:6.3f}")
 
+    # --- L'upside predit-il le rendement ? ---------------------------------
+    paquets = pouvoir_de_la_valorisation(res)
+    auc_upside = rho_upside = None
+    if paquets:
+        print("\n  POUVOIR DE LA VALORISATION (paquets d'upside, effectifs egaux) :")
+        print(f"    {'paquet':7} {'n':>5} {'upside':>18} {'rend. med.':>11} "
+              f"{'creux med.':>11} {'effondr.':>9}")
+        for p in paquets:
+            print(f"    {p['paquet']:7} {p['n']:5} "
+                  f"{p['upside_min']*100:7.0f}% a {p['upside_max']*100:6.0f}% "
+                  f"{p['rendement_median']*100:10.1f}% {p['creux_median']*100:10.1f}% "
+                  f"{p['taux_effondrement']*100:8.1f}%")
+        rho_upside = spearman([(p["paquet"], p["rendement_median"]) for p in paquets])
+        print(f"    monotonie du rendement selon l'upside : rho = {rho_upside:+.3f}")
+        # Mesure continue, sans decoupage : l'upside classe-t-il mieux qu'un tirage
+        # a pile ou face les titres qui ont SURPERFORME la mediane de l'echantillon ?
+        avec = [r for r in res if r.get("upside") is not None]
+        med = mediane([r["rendement"] for r in avec])
+        auc_upside, se_up = _auc([(r["upside"], r["rendement"] > med) for r in avec])
+        if auc_upside is not None:
+            sig = (auc_upside - 0.5) / se_up if se_up else 0.0
+            print(f"    AUC de l'upside contre la mediane de rendement : "
+                  f"{auc_upside:.3f} ± {se_up:.3f} ({sig:+.1f} ecarts-types)")
+
     SORTIE.parent.mkdir(parents=True, exist_ok=True)
     SORTIE.write_text(json.dumps({
         "instantane": jour_t0, "horizon_mois": horizon,
@@ -512,6 +604,8 @@ def main(horizon=24, echantillon=900, workers=14, graine=20260730):
         "par_grade": par_grade, "par_famille": par_famille,
         "spearman_familles": rho, "spearman_creux": rho_creux,
         "par_taille": strates, "dimensions": dims,
+        "valorisation": {"paquets": paquets, "spearman": rho_upside,
+                         "auc_upside": auc_upside},
         "z_F_contre_A": z, "p_F_contre_A": pval,
         "genere": date.today().isoformat(),
         # Les lignes brutes : sans elles, toute anomalie du tableau agrege est
@@ -519,7 +613,37 @@ def main(horizon=24, echantillon=900, workers=14, graine=20260730):
         # — cent mille fois la richesse mondiale — est restee invisible une passe.
         "titres": sorted(res, key=lambda r: -(r["cap_t0"] or 0)),
     }, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"\n  -> {SORTIE.relative_to(RACINE)} ({time.time()-t0:.0f}s)")
+
+    # RESUME SEPARE : c'est lui que la fiche va chercher au chargement. Le fichier
+    # complet pese 400 ko parce qu'il porte le detail par titre — indispensable
+    # pour diagnostiquer une anomalie, inutile a l'affichage, et hors de question
+    # a telecharger sur chaque profil consulte.
+    RESUME.write_text(json.dumps({
+        "instantane": jour_t0, "horizon_mois": horizon,
+        "seuil_effondrement": SEUIL_EFFONDREMENT,
+        "n": len(res), "radiees": sum(1 for r in res if r["issue"] == "radiee"),
+        "par_famille": [{k: l[k] for k in ("grade", "n", "taux", "ic_bas", "ic_haut",
+                                           "rendement_median", "creux_median",
+                                           "cap_mediane")}
+                        for l in par_famille],
+        "dimensions": [{k: x.get(k) for k in ("dimension", "nom", "auc",
+                                              "ecart_type", "ecarts_types_au_hasard",
+                                              "couverture", "verdict")} for x in dims],
+        "auc_note": _auc([(r["score"], r["effondre"]) for r in res
+                          if r.get("score") is not None])[0],
+        "valorisation": {"paquets": paquets, "spearman": rho_upside,
+                         "auc_upside": auc_upside},
+        "spearman_familles": rho, "spearman_creux": rho_creux,
+        "p_F_contre_A": pval,
+        "ecart_F_moins_A": (f_["taux"] - a["taux"]) if (a and f_) else None,
+        "par_taille": [{"paquet": st["paquet"], "cap_min": st["cap_min"],
+                        "cap_max": st["cap_max"], "n": st["n"],
+                        "spearman": st["spearman"]} for st in strates],
+        "genere": date.today().isoformat(),
+    }, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    print(f"\n  -> {SORTIE.relative_to(RACINE)} + {RESUME.name} "
+          f"({time.time()-t0:.0f}s)")
     return 0
 
 
