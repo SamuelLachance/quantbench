@@ -1419,3 +1419,50 @@ def test_le_plafond_de_liquidation_n_atteint_pas_une_societe_qui_encaisse():
     exsangue = societe(total_assets=0.00072, total_liab=0.00071, total_equity=0.00001,
                        book_equity=0.00001, cash=0.0001, cfo=-0.0003, capex=0.0)
     assert "passif_non_couvert" in _modalites(exsangue, etats(), [], {})
+
+
+# --------------------------------------------------------------------------- #
+# 30. FORENSIQUE — le verdict se calcule avec la formule, jamais a cote
+# --------------------------------------------------------------------------- #
+def test_le_verdict_altman_utilise_les_seuils_de_sa_propre_formule():
+    """La formule retenue est le Z''-EMS, qui INCLUT la constante de 3,25. Les seuils
+    du Z'' SANS constante — 1,1 et 2,6 — ne s'y appliquent donc pas. La page les
+    utilisait pourtant : tout le diagnostic etait decale de 3,25 points, et une
+    societe a Z = 3,0 — en detresse averee — s'affichait "sain". Le correctif avait
+    ete applique au moteur et jamais a l'affichage."""
+    from quantbench.forensics.scores import Z_DETRESSE, Z_SAIN
+    assert (Z_DETRESSE, Z_SAIN) == (4.35, 5.85)
+    page = (Path(__file__).resolve().parent.parent
+            / "app" / "stock.html").read_text(encoding="utf-8")
+    bloc = [ligne for ligne in page.splitlines() if "altman_z" in ligne]
+    assert bloc, "l'Altman n'est plus affiche"
+    for ligne in bloc:
+        assert "1.1" not in ligne and "2.6" not in ligne, (
+            f"l'affichage recalcule le verdict avec les mauvais seuils : {ligne.strip()}")
+    assert any("altman_verdict" in ligne for ligne in bloc), (
+        "l'affichage doit lire le verdict produit par le moteur")
+
+
+def test_le_levier_forensique_compare_deux_annees_de_meme_nature():
+    """Une dette a long terme NULLE est falsy : `long_term_debt or total_debt`
+    faisait basculer CETTE annee-la sur la dette totale pendant que l'autre restait
+    sur la dette a long terme. Les deux exercices etaient alors compares sur des
+    grandeurs differentes — troisieme occurrence du meme piege aujourd'hui, apres le
+    passif nul et l'actif nul."""
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "forensics" / "scores.py").read_text(encoding="utf-8")
+    assert 'g("long_term_debt", 0) or g("total_debt", 0)' not in src, (
+        "le champ de dette est choisi par un `or` falsy, annee par annee")
+    # Verification par le comportement : une societe ayant rembourse toute sa dette a
+    # long terme ne doit pas voir son levier "baisser" par changement de grandeur.
+    from quantbench.forensics.scores import piotroski_f_score
+    n = 4
+    F = {"years": ["2025", "2024", "2023", "2022"],
+         "net_income": [1.0] * n, "total_assets": [10.0] * n, "cfo": [2.0] * n,
+         "long_term_debt": [0.0, 0.0, 0.0, 0.0], "total_debt": [3.0, 3.0, 3.0, 3.0],
+         "current_assets": [5.0] * n, "current_liab": [2.0] * n,
+         "shares": [100.0] * n, "gross_profit": [4.0] * n, "revenue": [8.0] * n}
+    r = piotroski_f_score(F)
+    assert r is not None
+    assert r["tests"]["Levier en baisse"] is False, (
+        "un levier strictement stable ne peut pas etre declare en baisse")

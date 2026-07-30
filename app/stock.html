@@ -266,7 +266,11 @@ function render(d){
       <div class="grid g4" style="grid-template-columns:1fr 1fr;gap:10px">
         ${tile('Piotroski',sc.piotroski_f==null?'—':sc.piotroski_f+'/9','')}
         ${tile('Beneish M',sc.beneish_m==null?'—':sc.beneish_m,sc.beneish_flag?'à investiguer':'ok')}
-        ${tile('Altman Z″',sc.altman_z==null?'—':sc.altman_z,sc.altman_z==null?'':(sc.altman_z<1.1?'détresse':sc.altman_z>2.6?'sain':'gris'))}
+        ${/* Le verdict vient du MOTEUR, il n'est plus recalculé ici. La page utilisait
+             les seuils du Z″ SANS constante (1,1 / 2,6) sur un score qui INCLUT la
+             constante de 3,25 : tout le diagnostic était décalé de 3,25 points, et une
+             société à Z = 3,0 — en détresse avérée — s'affichait « sain ». */
+          tile('Altman Z″',sc.altman_z==null?'—':sc.altman_z,sc.altman_verdict||'')}
         ${tile('Accruals',sc.accruals_ratio==null?'—':(sc.accruals_ratio*100).toFixed(1)+'%','')}
       </div>
       <div style="margin-top:10px">

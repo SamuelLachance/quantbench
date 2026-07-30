@@ -118,8 +118,14 @@ def beneish_m_score(F) -> float | None:
         depi0 = _r(g("dep_amort", 0), g("dep_amort", 0) + g("net_ppe", 0))
         depi = _r(depi1, depi0)
         sgai = _r(_r(g("sga", 0), rev0), _r(g("sga", 1), rev1))
-        ltd0 = g("long_term_debt", 0) or g("total_debt", 0)
-        ltd1 = g("long_term_debt", 1) or g("total_debt", 1)
+        # Une dette a long terme NULLE est falsy : `or` faisait basculer cette
+        # annee-la sur la dette TOTALE pendant que l'autre restait sur la dette a
+        # long terme, et les deux exercices etaient compares sur des grandeurs
+        # differentes. On choisit le champ UNE FOIS, pour les deux annees.
+        champ = ("long_term_debt" if (g("long_term_debt", 0) is not None
+                                      and g("long_term_debt", 1) is not None)
+                 else "total_debt")
+        ltd0, ltd1 = g(champ, 0), g(champ, 1)
         lev0 = _r((ltd0 or 0) + g("current_liab", 0), g("total_assets", 0))
         lev1 = _r((ltd1 or 0) + g("current_liab", 1), g("total_assets", 1))
         lvgi = _r(lev0, lev1)
@@ -198,8 +204,14 @@ def piotroski_f_score(F) -> dict | None:
         tests["ROA en hausse"] = (roa0 is not None and roa1 is not None and roa0 > roa1)
         tests["Cash-flow > resultat net (accruals sains)"] = (
             cfo0 is not None and g("net_income", 0) is not None and cfo0 > g("net_income", 0))
-        lev0 = _r(g("long_term_debt", 0) or g("total_debt", 0), g("total_assets", 0))
-        lev1 = _r(g("long_term_debt", 1) or g("total_debt", 1), g("total_assets", 1))
+        # Meme piege que dans le M-Score : le champ est choisi UNE FOIS pour les
+        # deux exercices, faute de quoi une societe ayant rembourse toute sa dette a
+        # long terme voit son levier compare a une autre grandeur.
+        champ = ("long_term_debt" if (g("long_term_debt", 0) is not None
+                                      and g("long_term_debt", 1) is not None)
+                 else "total_debt")
+        lev0 = _r(g(champ, 0), g("total_assets", 0))
+        lev1 = _r(g(champ, 1), g("total_assets", 1))
         tests["Levier en baisse"] = (lev0 is not None and lev1 is not None and lev0 < lev1)
         cr0 = _r(g("current_assets", 0), g("current_liab", 0))
         cr1 = _r(g("current_assets", 1), g("current_liab", 1))
@@ -245,6 +257,22 @@ def analyze(ticker: str, financials=None) -> dict:
     z = altman_z_score(F)
     piotroski = piotroski_f_score(F)
     accr = accruals_ratio(F)
+
+    # LE VERDICT SE CALCULE ICI, avec les constantes qui vont avec la formule.
+    # La page le recalculait de son cote et utilisait les seuils du Z'' SANS
+    # constante — 1,1 et 2,6 — sur un score qui INCLUT la constante de 3,25. Tout le
+    # diagnostic etait donc decale de 3,25 points : une societe a Z = 3,0, en
+    # detresse averee, s'affichait "sain". Le correctif avait ete applique au moteur
+    # et jamais a l'affichage, ce qui est la pire configuration — le code juste
+    # existait, et personne ne le lisait.
+    if z is None:
+        verdict_z = None
+    elif z < Z_DETRESSE:
+        verdict_z = "detresse"
+    elif z > Z_SAIN:
+        verdict_z = "sain"
+    else:
+        verdict_z = "zone grise"
 
     positives, flags = [], []
 
@@ -296,6 +324,9 @@ def analyze(ticker: str, financials=None) -> dict:
             "beneish_m": None if m is None else round(m, 2),
             "beneish_flag": (m is not None and m > -1.78),
             "altman_z": None if z is None else round(z, 2),
+            # Verdict calcule AVEC la formule, jamais recalcule par l'affichage.
+            "altman_verdict": verdict_z,
+            "altman_seuils": [Z_DETRESSE, Z_SAIN],
             "piotroski_f": piotroski["score"] if piotroski else None,
             "piotroski_tests": piotroski["tests"] if piotroski else None,
             "accruals_ratio": None if accr is None else round(accr, 4),
