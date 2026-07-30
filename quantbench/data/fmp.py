@@ -254,7 +254,15 @@ def societes_radiees():
         for r in rows:
             sym, d = r.get("symbol"), str(r.get("delistedDate") or "")[:10]
             if sym and d and d < limite:
-                out[sym] = d
+                # La place de cotation et le nom accompagnent la date. Ils ne
+                # servent pas a l'univers courant — `screener` ne teste que
+                # l'appartenance — mais ils sont indispensables des qu'on veut
+                # REMETTRE ces societes dans une mesure : sans la place, on ignore
+                # dans quelle monnaie elles cotaient ; sans le nom, on ne peut pas
+                # ecarter les bons de souscription et les unites de SPAC, que
+                # l'univers courant exclut et qu'un test doit exclure aussi.
+                out[sym] = {"date": d, "exchange": r.get("exchange"),
+                            "name": r.get("companyName")}
     return out
 
 
@@ -421,21 +429,30 @@ def history_ohlcv(symbol, days=400):
 
     Cours AJUSTES des splits et dividendes : les cours bruts creent de faux signaux,
     un split 4:1 apparaissant comme une chute de 75 % et un detachement de dividende
-    comme une baisse."""
+    comme une baisse.
+
+    La DATE de chaque seance est conservee : sans elle, la serie ne peut servir
+    qu'a des mesures relatives (volatilite, volume median). Toute question de la
+    forme "que valait ce titre a telle date" — c'est-a-dire toute validation
+    historique d'une note ou d'une valorisation — exige de savoir a quel jour
+    correspond chaque cours. `days=None` rend l'historique complet."""
     try:
         j = _json(f"historical-price-eod/dividend-adjusted?symbol={symbol}")
-        lignes = [{"close": _num(d.get("adjClose")), "volume": _num(d.get("volume"))}
+        lignes = [{"date": d.get("date"), "close": _num(d.get("adjClose")),
+                   "volume": _num(d.get("volume"))}
                   for d in j][::-1]                           # ancien -> recent
-        out = [x for x in lignes if x["close"]][-days:]
+        out = [x for x in lignes if x["close"]]
         if out:
-            return out
+            return out[-days:] if days else out
     except Exception:
         pass
     try:                                                      # repli : cours brut
         j = _json(f"historical-price-eod/light?symbol={symbol}")
-        lignes = [{"close": _num(d.get("price")), "volume": _num(d.get("volume"))}
+        lignes = [{"date": d.get("date"), "close": _num(d.get("price")),
+                   "volume": _num(d.get("volume"))}
                   for d in j][::-1]
-        return [x for x in lignes if x["close"]][-days:]
+        out = [x for x in lignes if x["close"]]
+        return out[-days:] if days else out
     except Exception:
         return []
 

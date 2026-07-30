@@ -2011,3 +2011,102 @@ def test_la_fusion_accepte_les_shards_sans_signature(tmp_path, monkeypatch):
             "rows": [{"ticker": f"T{i}{k}"} for k in range(10)],
             "universe": 10, "fail": 0}), encoding="utf-8")
     mod.combine_shards(5)                     # ne leve pas
+
+
+# --------------------------------------------------------------------------- #
+# Validation retrospective de la note de risque : les pieges methodologiques
+# --------------------------------------------------------------------------- #
+def test_la_troncature_interdit_tout_regard_sur_lavenir():
+    """Le filtre porte sur la date de DEPOT, jamais sur la date de cloture.
+
+    Un exercice clos le 31 decembre 2023 n'est public qu'en mars 2024. Le retenir
+    des le 1er janvier donnerait a la note trois mois de connaissance de l'avenir,
+    ce qui suffit a lui faire "predire" des faillites deja consommees et a rendre
+    toute la validation flatteuse et fausse.
+    """
+    from valider_les_notes import tronquer
+
+    entry = {"income": {
+        2023: {"date": "2023-12-31", "filingDate": "2024-03-15", "revenue": 1.0},
+        2022: {"date": "2022-12-31", "filingDate": "2023-03-10", "revenue": 0.9},
+    }, "balance": {}, "cashflow": {}}
+
+    # La veille du depot : l'exercice 2023 n'existe pas encore pour le marche.
+    assert sorted(tronquer(entry, "2024-03-14")["income"]) == [2022]
+    # Le jour du depot : il devient utilisable.
+    assert sorted(tronquer(entry, "2024-03-15")["income"]) == [2022, 2023]
+    # La cloture seule ne suffit JAMAIS a rendre un exercice utilisable.
+    assert sorted(tronquer(entry, "2024-01-05")["income"]) == [2022]
+
+
+def test_un_exercice_sans_date_de_depot_est_ecarte():
+    """Sans date de depot, on ne peut pas prouver qu'il etait public : on l'ecarte.
+    Le supposer publie serait exactement le regard sur l'avenir qu'on interdit."""
+    from valider_les_notes import tronquer
+
+    entry = {"income": {2023: {"date": "2023-12-31", "revenue": 1.0}},
+             "balance": {}, "cashflow": {}}
+    assert tronquer(entry, "2030-01-01")["income"] == {}
+
+
+def test_le_cours_retenu_est_le_dernier_avant_la_date():
+    from valider_les_notes import cours_a
+
+    serie = [{"date": "2024-07-26", "close": 10.0},
+             {"date": "2024-07-29", "close": 11.0},
+             {"date": "2024-07-31", "close": 12.0}]
+    assert cours_a(serie, "2024-07-30")["close"] == 11.0
+    assert cours_a(serie, "2024-07-29")["close"] == 11.0   # borne incluse
+    assert cours_a(serie, "2024-07-25") is None            # ne cotait pas encore
+
+
+def test_lintervalle_de_wilson_ne_ment_pas_sur_les_petits_effectifs():
+    """Zero effondrement sur dix observations ne prouve pas un risque nul.
+    L'intervalle normal donnerait [0 %, 0 %] ; Wilson refuse cette certitude."""
+    from valider_les_notes import wilson
+
+    bas, haut = wilson(0, 10)
+    assert bas == 0.0
+    assert haut > 0.25, haut
+    # Plus d'observations, intervalle plus etroit.
+    assert wilson(0, 200)[1] < haut
+    # Toujours dans [0, 1].
+    for k, n in [(0, 0), (5, 5), (3, 7), (100, 100)]:
+        b, h = wilson(k, n)
+        assert 0.0 <= b <= h <= 1.0
+
+
+def test_la_separation_se_juge_sur_la_difference_pas_sur_le_chevauchement():
+    """Deux intervalles de confiance qui se chevauchent NE prouvent PAS l'absence
+    de difference. Le cas mesure : A 21/93 contre F 36/86, intervalles de Wilson
+    chevauchants d'un dixieme de point, et pourtant p = 0,006. Conclure de l'un a
+    l'autre revient a declarer l'instrument aveugle parce qu'on l'a mal lu."""
+    from valider_les_notes import test_deux_proportions, wilson
+
+    a_bas, a_haut = wilson(21, 93)
+    f_bas, f_haut = wilson(36, 86)
+    assert a_haut > f_bas, "les intervalles se chevauchent bien"
+    z, p = test_deux_proportions(21, 93, 36, 86)
+    assert z > 2.5 and p < 0.01, (z, p)
+    # Aucune difference -> aucune significativite.
+    _z0, p0 = test_deux_proportions(20, 100, 20, 100)
+    assert p0 > 0.99
+
+
+def test_spearman_reconnait_une_monotonie_parfaite():
+    from valider_les_notes import spearman
+
+    assert spearman([(0, 0.1), (1, 0.2), (2, 0.3), (3, 0.4)]) == pytest.approx(1.0)
+    assert spearman([(0, 0.4), (1, 0.3), (2, 0.2), (3, 0.1)]) == pytest.approx(-1.0)
+    assert spearman([(0, 0.2)]) is None          # pas assez de points
+
+
+def test_une_radiation_compte_pour_une_perte_totale():
+    """Le screener d'aujourd'hui ne liste que les survivants : les faillites, soit
+    exactement ce que la note F pretend annoncer, en ont disparu. Les omettre
+    mesurerait la note sur un univers vide de ses succes."""
+    import valider_les_notes as v
+
+    assert v.SEUIL_EFFONDREMENT == -0.70
+    # Une radiation vaut -100 %, donc un effondrement quel que soit le seuil.
+    assert -1.0 <= v.SEUIL_EFFONDREMENT
