@@ -1365,3 +1365,39 @@ def test_le_readme_decrit_le_depot_reel():
                     if l.startswith("def test")])
         assert abs(annonce - reel) <= 5, (
             f"le README annonce {annonce} invariants, il y en a {reel}")
+
+
+def test_les_workflows_sont_du_yaml_valide():
+    """Une erreur de syntaxe dans un workflow ne se voit qu'au moment ou GitHub refuse
+    de le lancer — silencieusement, sans job en echec a inspecter. Un message de commit
+    multi-ligne mal indente a suffi a casser celui des reperes."""
+    yaml = pytest.importorskip("yaml")
+    dossier = Path(__file__).resolve().parent.parent / ".github" / "workflows"
+    if not dossier.is_dir():
+        pytest.skip("aucun workflow")
+    for f in sorted(dossier.glob("*.yml")):
+        d = yaml.safe_load(f.read_text(encoding="utf-8"))
+        assert isinstance(d, dict), f"{f.name} : YAML invalide"
+        # `on:` est interprete comme le booleen True par le YAML 1.1.
+        assert d.get(True) or d.get("on"), f"{f.name} : aucun declencheur"
+        assert d.get("jobs"), f"{f.name} : aucun job"
+
+
+def test_les_reperes_sectoriels_sont_remesures_periodiquement():
+    """Beta desendette, marge, ventes sur capital, ROIC et taux de recuperation sont
+    des MESURES de l'univers courant : elles nourrissent le cout du capital, la
+    croissance financable et la valeur de liquidation de chaque titre. Aucun workflow
+    ne les regenerait, elles vieillissaient donc en silence.
+    A distinguer du calibrage de la NOTE, delibererement gele : la-bas le gel fait la
+    difference entre une note et un classement ; ici l'immobilisme ferait deriver
+    toutes les valorisations sans que rien ne le signale."""
+    dossier = Path(__file__).resolve().parent.parent / ".github" / "workflows"
+    if not dossier.is_dir():
+        pytest.skip("aucun workflow")
+    textes = " ".join(f.read_text(encoding="utf-8") for f in dossier.glob("*.yml"))
+    assert "build_industry_stats" in textes, (
+        "aucun workflow ne remesure les reperes sectoriels")
+    # Et le calibrage de la note, lui, ne doit PAS etre regenere automatiquement.
+    assert "build_risk_stats" not in textes, (
+        "le calibrage de la note de risque est GELE : le regenerer automatiquement le "
+        "transformerait en simple classement de l'univers du jour")

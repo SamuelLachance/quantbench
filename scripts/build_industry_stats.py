@@ -150,6 +150,35 @@ def main(par_groupe=40):
     # renseignes, pour qu'aucune societe ne reste sans parametre.
     glob = agrege(res)
 
+    # CE QUI BOUGE DOIT ETRE VISIBLE. Ces reperes nourrissent le cout du capital, la
+    # croissance financable et la valeur de liquidation de l'univers entier : une
+    # derive silencieuse deplacerait toutes les valorisations sans que rien ne le
+    # signale. On publie donc l'ecart avec la mesure precedente avant d'ecrire.
+    ancien = None
+    try:
+        with open(OUT, encoding="utf-8") as f:
+            ancien = json.load(f)
+    except Exception:                                  # noqa: BLE001
+        pass
+    if ancien:
+        print(f"\n{'ECART AVEC LA MESURE PRECEDENTE':^78}")
+        print(f"{'secteur':26} {'repere':22} {'avant':>10} {'apres':>10} {'ecart':>9}")
+        bouges = []
+        for sec, apres in sorted(secteurs.items()):
+            av = (ancien.get("secteurs") or {}).get(sec) or {}
+            for cle in ("beta_desendette", "marge", "s2c", "roic", "recuperation"):
+                a, b = av.get(cle), apres.get(cle)
+                if a is None or b is None or abs(a) < 1e-9:
+                    continue
+                rel = (b - a) / abs(a)
+                if abs(rel) > 0.15:                    # 15 % : au-dela, on regarde
+                    bouges.append((abs(rel), sec, cle, a, b, rel))
+        for _k, sec, cle, a, b, rel in sorted(bouges, reverse=True)[:20]:
+            print(f"  {sec[:24]:24} {cle:22} {a:>10.4f} {b:>10.4f} {rel * 100:>+8.1f} %")
+        if not bouges:
+            print("  aucun repere sectoriel ne bouge de plus de 15 %")
+        print(f"\n  {len(bouges)} repere(s) sectoriel(s) deplaces de plus de 15 %")
+
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump({"industries": industries, "secteurs": secteurs, "global": glob},
                   f, ensure_ascii=False, indent=1)

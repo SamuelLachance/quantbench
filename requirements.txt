@@ -14,4 +14,5 @@ reportlab>=4.0             # quantbench/reports/pdf.py
 yfinance>=0.2              # quantbench/data/market.py (repli de cotation)
 fastapi>=0.110
 uvicorn[standard]>=0.27
+pyyaml>=6.0               # workflows : validation de syntaxe par les invariants
 # optionnel (tests) : pytest>=8.0
