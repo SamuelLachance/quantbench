@@ -580,6 +580,12 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         # (Damodaran : les REIT se valorisent sur FFO/NAV, pas sur le FCFF).
         "dep_amort": b(g(cf, "depreciationAndAmortization")),
         "cfo": b(g(cf, "operatingCashFlow")),
+        # INVESTISSEMENTS : une societe qui construit son outil consomme sa
+        # tresorerie par le capex bien plus que par l'exploitation. Wesizwe Platinum
+        # brule 562 M ZAR d'exploitation pour 1 238 M ZAR d'investissement dans la
+        # mine de Bakubung : juger son autonomie sur le seul flux d'exploitation
+        # revenait a ignorer les deux tiers de la consommation.
+        "capex": b(g(cf, "capitalExpenditure")),
         "cik": inc.get(y, {}).get("cik"), "sic": None,
     }
 

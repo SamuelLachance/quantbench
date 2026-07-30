@@ -633,3 +633,106 @@ def test_les_minoritaires_ne_font_pas_echouer_l_identite_du_bilan():
     # Un vrai desequilibre doit rester detecte.
     f2 = societe(total_assets=10.0, total_liab=6.0, book_equity=3.0, total_equity=3.0)
     assert any("identite du bilan" in m for m in valider(f2, etats(), None))
+
+
+# --------------------------------------------------------------------------- #
+# 21. LIQUIDATION : la decote porte sur l'ACTIF, le passif se retranche ensuite
+#
+# Wesizwe Platinum construit la mine de Bakubung sans avoir jamais produit :
+# 2,15 Md$ d'actif, 1,83 Md$ de passif (pret China Development Bank), zero chiffre
+# d'affaires, et une reserve sur la continuite d'exploitation au rapport 2025.
+# Sa valeur de liquidation ressortait a 0,25 Md$ pour 16 M$ de capitalisation,
+# soit +1 462 %.
+# --------------------------------------------------------------------------- #
+def test_la_decote_de_liquidation_porte_sur_l_actif_pas_sur_l_equite():
+    """Appliquer la decote aux FONDS PROPRES revient a supposer que les dettes la
+    subissent aussi, AU BENEFICE DE L'ACTIONNAIRE. Elles sont nominales et
+    prioritaires : le creancier est servi en entier d'abord."""
+    f = societe(sector="Basic Materials", industry="Other Precious Metals",
+                total_assets=2.15, total_liab=1.83, book_equity=0.32, cash=0.007,
+                revenue=None, ebit=-0.01, net_income=0.01, cfo=-0.034, capex=-0.124)
+    liq = route.valeur_de_liquidation(f)
+    taux = route.sect(f, "recuperation", 0.5)
+    attendu = max(0.007 + taux * (2.15 - 0.007) - 1.83, 0.0)
+    assert abs(liq - attendu) < 1e-9, f"liquidation={liq}, attendu {attendu}"
+    # L'erreur corrigee valait (1 - taux) x passif : ici plus que l'equite entiere.
+    ancienne = taux * 0.32
+    assert liq < ancienne, (
+        f"{liq:.3f} contre {ancienne:.3f} : la formule surestimait de "
+        f"{(1 - taux) * 1.83:.3f} Md$, soit {(1 - taux) * 1.83 / 0.32:.1f} fois l'equite")
+
+
+def test_une_societe_sans_dette_n_est_pas_penalisee():
+    """L'erreur vaut (1 - taux) x passif : elle doit etre NULLE sans passif — d'ou
+    son invisibilite tant qu'on ne regardait pas de societe endettee."""
+    f = societe(total_assets=1.0, total_liab=0.0, book_equity=1.0, cash=0.4)
+    taux = route.sect(f, "recuperation", 0.5)
+    assert abs(route.valeur_de_liquidation(f) - (0.4 + taux * 0.6)) < 1e-9
+
+
+def test_un_passif_non_couvert_donne_zero_et_non_une_erreur():
+    """Quand l'actif realisable ne couvre pas les dettes, l'actionnaire ne recoit
+    rien. C'est une REPONSE, pas un echec de methode : la route ne doit pas se
+    rabattre ailleurs et ainsi ressusciter une valeur."""
+    f = societe(sector="Basic Materials", industry="Other Precious Metals",
+                revenue=None, revenue_history=[], total_assets=2.15, total_liab=1.83,
+                book_equity=0.32, cash=0.007, ebit=-0.01, net_income=0.01)
+    r = route.value_assetbased(f)
+    assert r is not None and r["equity_value"] == 0.0 and r.get("passif_non_couvert")
+    v = route.value_stock("TEST", fund=f, forensic=_FOR, F=etats())
+    assert v["ok"] and v["equity_value"] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# 22. La consommation de tresorerie inclut les INVESTISSEMENTS
+# --------------------------------------------------------------------------- #
+def test_la_consommation_inclut_le_capex():
+    """Une societe qui construit son outil consomme sa tresorerie par le capex bien
+    plus que par l'exploitation : Wesizwe brule 562 M ZAR d'exploitation pour
+    1 238 M ZAR investis dans la mine."""
+    f = societe(cfo=-0.562, capex=-1.238)
+    assert abs(route.consommation_de_tresorerie(f) - 1.800) < 1e-9
+    # Une societe qui encaisse plus qu'elle n'investit ne consomme rien.
+    assert route.consommation_de_tresorerie(societe(cfo=1.0, capex=-0.3)) == 0.0
+
+
+def test_la_survie_se_mesure_sur_la_tresorerie_pas_sur_le_resultat():
+    """Sur 126 societes routees "jeune/deficitaire", 37 affichent un resultat et un
+    flux de signes OPPOSES : GitLab perd 56 M$ comptables en encaissant 233 M$, NIO
+    perd 2,16 Md$ en encaissant 431 M$."""
+    encaisse = societe(net_income=-0.056, cfo=0.233, capex=-0.02, cash=0.5)
+    assert route.probabilite_de_survie(encaisse) == 1.0
+    consomme = societe(net_income=-0.056, cfo=-0.233, capex=-0.02, cash=0.1)
+    assert route.probabilite_de_survie(consomme) < 0.2
+
+
+def test_la_survie_n_a_pas_de_plancher_arbitraire():
+    """Elle etait plancherisee a 0,30 : une societe sans tresorerie et en pleine
+    consommation se voyait creditee d'une chance sur trois de survivre, chiffre pose
+    a la main et sans fondement."""
+    exsangue = societe(cash=0.0, cfo=-0.5, capex=-0.1, net_income=-0.6)
+    assert route.probabilite_de_survie(exsangue) == 0.0
+    r = route.value_young(exsangue)
+    liq = route.valeur_de_liquidation(exsangue)
+    assert abs(r["equity_value"] - liq) < 1e-9, (
+        "sans autonomie, la valeur doit se reduire a la liquidation")
+
+
+# --------------------------------------------------------------------------- #
+# 23. "Jeune" veut dire COURTE HISTOIRE, pas "jamais rentable"
+# --------------------------------------------------------------------------- #
+def test_une_societe_ancienne_et_deficitaire_n_est_pas_une_jeune_pousse():
+    """Le critere ne comptait que les exercices benificiaires : une societe publiant
+    depuis dix ans sans en avoir aucun etait valorisee sur la marge MEDIANE DE SON
+    SECTEUR, qu'elle n'a precisement jamais approchee. DiDi Global (32,6 Md$ de
+    chiffre d'affaires), Carvana (20,3), NIO (12,6) et Roku (4,7) en relevaient."""
+    n = 10
+    longue = {"years": [2025 - i for i in range(n)], "revenue": [30.0e9] * n,
+              "ebit": [-1.0e9] * n, "net_income": [-1.0e9] * n, "cfo": [-0.5e9] * n,
+              "equity": [5.0e9] * n, "total_assets": [20.0e9] * n,
+              "net_ppe": [5.0e9] * n}
+    f = societe(revenue=30.0, ebit=-1.0, net_income=-1.0, operating_margin=-0.033)
+    assert route.classify(f, None, longue) == "mature_deficitaire"
+    # Historique court : la route descendante reste legitime, faute de reference.
+    courte = {k: (v[:3] if isinstance(v, list) else v) for k, v in longue.items()}
+    assert route.classify(f, None, courte) == "jeune/deficitaire"

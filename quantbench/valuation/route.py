@@ -227,9 +227,19 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
         return "cyclique"
 
     if deficitaire:
-        # Societe MATURE en perte temporaire (deja rentable par le passe) :
-        # Damodaran normalise les benefices — ce n'est pas une societe jeune.
-        if sum(1 for m in _hist_margins(F) if m > 0) >= 2:
+        # "JEUNE" VEUT DIRE COURTE HISTOIRE, PAS "JAMAIS RENTABLE".
+        # Le critere ne comptait que les exercices benificiaires : une societe
+        # publiant depuis dix ans sans en avoir aucun etait donc traitee en jeune
+        # pousse, et valorisee sur la marge MEDIANE DE SON SECTEUR — qu'elle n'a
+        # precisement jamais approchee. Sur 186 societes ainsi routees, 66 disposaient
+        # de dix exercices et treize depassaient le milliard de chiffre d'affaires :
+        # DiDi Global (32,6 Md$), Carvana (20,3), NIO (12,6), Roku (4,7).
+        # Une societe qui publie depuis longtemps a un HISTORIQUE : c'est lui qui doit
+        # servir de reference, non la mediane de ses consoeurs. La route des societes
+        # jeunes ne se justifie que faute d'historique — c'est la definition meme de
+        # l'approche descendante chez Damodaran.
+        ms = _hist_margins(F)
+        if len(ms) >= 6 or sum(1 for m in ms if m > 0) >= 2:
             return "mature_deficitaire"
         return "jeune/deficitaire"
     if z_ok and z < Z_DETRESSE_ROUTE and not encaisse:
@@ -435,6 +445,47 @@ def value_holding(fund, F=None):
             "actif_net": round(be, 2), **diag}
 
 
+def valeur_de_liquidation(fund):
+    """Valeur revenant a l'ACTIONNAIRE si l'actif etait realise.
+
+        liquidation = max( tresorerie + taux x (actif - tresorerie) - PASSIF , 0 )
+
+    Le taux de recuperation porte sur l'ACTIF ; le passif se retranche ENSUITE, a sa
+    valeur nominale. Nous l'appliquions aux FONDS PROPRES, ce qui revient a supposer
+    que les dettes subissent la meme decote AU BENEFICE DE L'ACTIONNAIRE — or elles
+    sont nominales et prioritaires : dans une realisation d'actifs, le creancier est
+    servi en entier avant que l'actionnaire ne recoive un centime.
+
+    L'erreur vaut exactement (1 - taux) x passif. Elle est NULLE pour une societe sans
+    dette — d'ou son invisibilite sur les cas simples — et croit avec le levier, donc
+    elle est maximale precisement la ou la question de la liquidation se pose.
+
+    Wesizwe Platinum, qui construit la mine de Bakubung sans avoir jamais produit,
+    porte 1,83 Md$ de passif pour 2,15 Md$ d'actif. Sa valeur de liquidation
+    ressortait a 0,25 Md$ pour une capitalisation de 16 M$, soit +1 462 %. Le calcul
+    correct donne : 2,15 x 0,80 = 1,72 Md$ d'actif realisable, moins 1,83 Md$ de
+    passif — l'equite ne vaut RIEN, ce que confirme le rapport annuel 2025, qui porte
+    une reserve sur la continuite d'exploitation.
+
+    La tresorerie est realisable a 100 %, le reste subit la decote du secteur selon
+    son intensite d'actifs corporels : une centrale ou un immeuble se revend, un
+    portefeuille de brevets beaucoup moins."""
+    taux = sect(fund, "recuperation", 0.5)
+    ta, tl = fund.get("total_assets"), fund.get("total_liab")
+    cash = max(fund.get("cash") or 0.0, 0.0)
+    if ta and ta > 0 and tl is not None:
+        realisable = min(cash, ta) + taux * max(ta - cash, 0.0)
+        return max(realisable - tl, 0.0)
+    # Bilan incomplet : on retombe sur les fonds propres, faute de pouvoir separer
+    # actif et passif. Cette voie SURESTIME les societes endettees — c'est le defaut
+    # que l'on vient de corriger — et ne doit servir qu'en dernier recours.
+    be = fund.get("book_equity")
+    if be is None or be <= 0:
+        return 0.0
+    liquide = min(be, cash)
+    return liquide + taux * max(be - liquide, 0.0)
+
+
 def erosion_par_les_pertes(fund, valeur):
     """Une valeur d'ACTIF ne tient que si la societe ne consume pas ses fonds propres.
 
@@ -454,16 +505,66 @@ def erosion_par_les_pertes(fund, valeur):
     depreciation d'actifs reduit le resultat sans faire sortir un euro, elle ne
     ronge donc aucune autonomie. Brancher l'erosion sur le resultat net faisait
     perdre deux tiers de sa valeur a une societe qui ENCAISSAIT."""
-    perte = fund.get("cfo")
-    if perte is None:
-        perte = fund.get("net_income")          # a defaut, meilleure approximation
-    if perte is None or perte >= 0 or valeur is None or valeur <= 0:
+    # La consommation est celle du FLUX LIBRE : exploitation MOINS investissements.
+    # Une societe qui construit son outil de production consomme sa tresorerie par le
+    # capex bien plus que par l'exploitation — Wesizwe Platinum brule 562 M ZAR
+    # d'exploitation pour 1 238 M ZAR investis dans la mine de Bakubung. Ne regarder
+    # que le flux d'exploitation lui pretait sept ans d'autonomie la ou son rapport
+    # annuel porte une reserve sur la continuite d'exploitation.
+    if valeur is None or valeur <= 0:
         return valeur, None
-    annees = valeur / abs(perte)
-    p_survie = min(1.0, annees / 5.0)
+    p_survie = probabilite_de_survie(fund, valeur)
     if p_survie >= 0.999:
         return valeur, None
     return valeur * p_survie, round(p_survie, 2)
+
+
+def consommation_de_tresorerie(fund):
+    """Tresorerie consommee par an — FLUX LIBRE : exploitation MOINS investissements.
+
+    Une societe qui construit son outil de production consomme sa tresorerie par le
+    capex bien plus que par l'exploitation : Wesizwe Platinum brule 562 M ZAR
+    d'exploitation pour 1 238 M ZAR investis dans la mine de Bakubung. Ne regarder que
+    le flux d'exploitation lui pretait sept ans d'autonomie la ou son rapport annuel
+    2025 porte une reserve sur la continuite d'exploitation.
+
+    Retourne un nombre POSITIF quand la societe consomme, 0 quand elle degage."""
+    cfo, capex = fund.get("cfo"), fund.get("capex")
+    flux = None
+    if cfo is not None:
+        flux = cfo - abs(capex) if capex is not None else cfo
+    elif fund.get("net_income") is not None:
+        flux = fund["net_income"]               # a defaut, meilleure approximation
+    return max(-(flux or 0.0), 0.0)
+
+
+def probabilite_de_survie(fund, valeur_en_jeu=None):
+    """Probabilite qu'une societe deficitaire tienne assez longtemps pour realiser la
+    valeur qu'on lui prete. DEFINITION UNIQUE, partagee par toutes les routes.
+
+    Elle se deduit du TEMPS AVANT EPUISEMENT : au-dela de cinq ans la societe a le
+    temps de se redresser et garde toute sa valeur ; en deca, elle est
+    proportionnellement menacee.
+
+    Deux defauts corriges ici, tous deux presents dans la route des societes jeunes :
+      - la consommation etait mesuree sur le RESULTAT NET. Sur 126 societes routees
+        "jeune/deficitaire", 37 — soit 29 % — affichent un resultat et un flux de
+        signes OPPOSES : GitLab perd 56 M$ comptables en encaissant 233 M$, NIO perd
+        2,16 Md$ en encaissant 431 M$. Une perte comptable ne consomme aucune
+        tresorerie ;
+      - la probabilite etait PLANCHERISEE A 0,30. Une societe sans tresorerie et en
+        pleine consommation se voyait donc creditee d'une chance sur trois de
+        survivre, chiffre pose a la main et sans fondement. Elle vaut desormais zero
+        quand l'autonomie est nulle, ce qui est la seule reponse defendable."""
+    conso = consommation_de_tresorerie(fund)
+    if conso <= 0:
+        return 1.0                              # la societe ne consomme pas
+    reference = valeur_en_jeu
+    if reference is None:
+        reference = max(fund.get("cash") or 0.0, 0.0)
+    if reference <= 0:
+        return 0.0
+    return min(1.0, (reference / conso) / 5.0)
 
 
 def value_reit(fund):
@@ -559,7 +660,7 @@ def _pondere_par_realisation(r, fund, F, marge_visee):
     p = probabilite_de_realisation(fund, F, marge_visee)
     if p >= 0.999:
         return r
-    liq = sect(fund, "recuperation", 0.5) * max(fund.get("book_equity") or 0.0, 0.0)
+    liq = valeur_de_liquidation(fund)
     r["equity_value"] = max(r["equity_value"], 0.0) * p + liq * (1.0 - p)
     r["probabilite_realisation"] = round(p, 2)
     r["confidence"] = "faible" if p < 0.5 else r.get("confidence", "moyenne")
@@ -605,12 +706,16 @@ def value_young(fund):
     target = om if (om is not None and om > 0.05) else sect(fund, "marge", 0.10)
     base = _dcf_value(fund, margin_override=target,
                       method="DCF top-down sur revenus (jeune) × survie")
-    cash, ni = fund.get("cash") or 0.0, fund.get("net_income") or 0.0
-    burn = -ni if ni < 0 else 0.0
-    surv = _clip(0.3 + 0.15 * (cash / burn), 0.3, 0.9) if burn > 0 else 0.85
+    # Probabilite de survie : DEFINITION UNIQUE, partagee avec les routes fondees sur
+    # l'actif. Elle rapporte la TRESORERIE DISPONIBLE a la consommation annuelle de
+    # FLUX LIBRE. La formule locale mesurait la consommation sur le RESULTAT NET —
+    # 29 % de cette cohorte affiche un resultat et un flux de signes opposes — et
+    # plancherisait la probabilite a 0,30, creditant d'une chance sur trois une
+    # societe sans tresorerie aucune.
+    surv = probabilite_de_survie(fund)
     # Recuperation en liquidation selon l'intensite d'ACTIFS CORPORELS du
     # secteur : une centrale ou un gisement se revend, un logiciel beaucoup moins.
-    liq = sect(fund, "recuperation", 0.5) * max(fund.get("book_equity") or 0.0, 0.0)
+    liq = valeur_de_liquidation(fund)
     return {"equity_value": max(base["equity_value"], 0) * surv + liq * (1 - surv),
             "method": base["method"], "confidence": "faible", "survival": round(surv, 2)}
 
@@ -621,7 +726,7 @@ def value_distressed(fund, forensic):
     gc = _dcf_value(fund, method="DCF going-concern")
     # Recuperation en liquidation selon l'intensite d'ACTIFS CORPORELS du
     # secteur : une centrale ou un gisement se revend, un logiciel beaucoup moins.
-    liq = sect(fund, "recuperation", 0.5) * max(fund.get("book_equity") or 0.0, 0.0)
+    liq = valeur_de_liquidation(fund)
     return {"equity_value": max(gc["equity_value"], 0) * (1 - pdef) + liq * pdef,
             "method": f"DCF pondéré défaut (p={pdef:.0%}) + liquidation",
             "confidence": "faible", "p_default": round(pdef, 2)}
@@ -639,14 +744,18 @@ def value_assetbased(fund):
         return None
     # VALEUR REALISABLE, pas valeur comptable. Cette route s'applique justement aux
     # societes incapables de degager des flux : leur actif ne vaut que ce qu'on en
-    # tirerait. La tresorerie est realisable a 100 %, le reste subit la decote du
-    # secteur selon son intensite d'actifs CORPOREL (une centrale ou un immeuble se
-    # revend, un portefeuille de brevets beaucoup moins). Les autres routes de
-    # liquidation appliquaient deja cette decote — celle-ci retournait la valeur
-    # comptable INTEGRALE, une incoherence interne du modele.
-    liquide = min(nav, max(cash, 0.0))
-    reste = max(nav - liquide, 0.0)
-    realisable = liquide + sect(fund, "recuperation", 0.5) * reste
+    # tirerait, et le creancier est servi AVANT l'actionnaire. Le calcul est celui de
+    # `valeur_de_liquidation` : decote sur l'ACTIF, puis retrait du PASSIF au nominal.
+    realisable = valeur_de_liquidation(fund)
+    if realisable <= 0:
+        # L'actif realisable ne couvre pas les dettes : l'actionnaire ne recoit rien.
+        # C'est une reponse, pas un echec de methode — la responsabilite limitee
+        # plancherise a zero et la route ne doit surtout pas se rabattre ailleurs.
+        return {"equity_value": 0.0,
+                "method": "Valeur d'actif net réalisable (pré-revenu / holding)",
+                "confidence": "faible", "actif_net_comptable": round(nav, 3),
+                "taux_recuperation": round(sect(fund, "recuperation", 0.5), 2),
+                "passif_non_couvert": True}
     realisable, consomme = erosion_par_les_pertes(fund, realisable)
     return {"equity_value": realisable,
             **({"probabilite_survie": consomme} if consomme else {}),
@@ -725,7 +834,15 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
             r["confidence"] = "faible"
         return _finalise(ticker, fund, r, cat)
 
-    if r and r.get("equity_value") is not None and r["equity_value"] <= 0:
+    # Ce repli ne vaut que pour l'approche ENTREPRISE, ou une equite negative signale
+    # que la dette soustraite n'etait pas operationnelle. Les methodes deja COTE
+    # EQUITE ne soustraient aucune dette : leur zero est une REPONSE, pas un echec.
+    # Wesizwe Platinum, dont l'actif realisable ne couvre pas le pret China
+    # Development Bank, ressortait ainsi ressuscitee a 0,5 Md$ apres avoir ete
+    # correctement valorisee a zero.
+    _COTE_EQUITE = ("actif_net", "holding", "fonciere", "reglementee", "financiere")
+    if (r and r.get("equity_value") is not None and r["equity_value"] <= 0
+            and cat not in _COTE_EQUITE):
         be = fund.get("book_equity")
         if be and be > 0:
             alt = value_financial(fund, F)            # residual income (borné)
