@@ -91,9 +91,45 @@ function detailRisque(r){
     <div class="dims">${dispo.sort((a,b)=>b.rang-a.rang).map(rangs).join('')}${absentes}</div>
     <div class="mini" style="margin-top:10px">Les dimensions marquées <em>n/d</em> ne
       sont pas définissables pour cette société — le poids se redistribue sur les
-      autres. Pondération actuellement <strong>uniforme</strong> : tant que la variable
-      de résultat n’est pas construite, aucune mesure n’autorise à déclarer une
-      dimension plus prédictive qu’une autre.</div>
+      autres.</div>
+    <details style="margin-top:11px">
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--accent)">Comment cette note est calculée</summary>
+      <div class="mini" style="margin-top:8px">
+        <p><strong>Le régime avant la dimension.</strong> Cette société est traitée en
+        <strong>${RISK_REGIME[r.regime]||r.regime}</strong>. Les intérêts sont un coût de
+        <em>financement</em> pour un industriel et une <em>matière première</em> pour une
+        banque : une même formule ne peut pas juger les deux. Le régime se détermine sur la
+        structure du bilan, jamais sur l’étiquette sectorielle du fournisseur.</p>
+        <p><strong>Tout entre en rang, jamais en valeur brute.</strong> Aucun seuil du code
+        ne dit ce qu’est une <em>bonne</em> couverture d’intérêts. Chaque signal est
+        converti en rang contre une table mesurée sur ${
+          r.calibrage?'une population de référence datée':'une population de référence'} —
+        sociétés d’au moins six exercices, sans réparation de données, dont le bilan
+        équilibre.</p>
+        <p><strong>La table est figée.</strong> Sans cela la note ne serait qu’un
+        classement : dans une crise où toutes les couvertures s’effondrent ensemble,
+        personne ne serait dégradé. Une dégradation signale donc une dégradation de la
+        société, non un mouvement de ses voisines.</p>
+        <p><strong>Trois particularités.</strong> La solvabilité se mesure sur la
+        <em>médiane</em> de trois exercices, sans quoi un cyclique en creux perdrait
+        plusieurs crans une année pour les reprendre la suivante. La volatilité utilise
+        l’écart <em>interquartile</em> et non l’écart-type : une marge se calcule sur un
+        chiffre d’affaires qui peut tendre vers zéro, sa queue n’est pas bornée. La
+        liquidité entre en <em>résidu</em> de la taille — la part d’illiquidité qu’explique
+        la capitalisation est déjà tarifée dans le coût des fonds propres, l’entrer à
+        nouveau la compterait deux fois.</p>
+        <p><strong>Pondération uniforme, et c’est assumé.</strong> Aucune dimension n’entre
+        avec un poids de conviction. Nos comptes ne sont pas historisés : corréler les
+        notes d’aujourd’hui aux cours passés mesurerait un biais, pas un pouvoir prédictif.
+        Les notes sont donc archivées chaque mois et seront confrontées aux faits dans
+        douze mois — taux d’effondrement par grade, monotonie, intervalle de confiance.
+        D’ici là, l’uniformité est la seule pondération qui n’affirme rien.</p>
+        <p><strong>Ce que la note ne dit pas.</strong> Elle n’est pas un pronostic de
+        cours, et une note excellente n’empêche aucune perte. Elle mesure la fragilité
+        <em>observable dans les comptes</em> — ce qu’ils ne contiennent pas, elle ne le
+        voit pas.</p>
+      </div>
+    </details>
   </div>`;
 }
 

@@ -1252,3 +1252,42 @@ def test_le_rapport_pdf_porte_la_note_de_risque():
                                      sans)
         assert _P(avec).stat().st_size > _P(sans).stat().st_size, (
             "le bloc de note de risque n'est pas dessine dans le rapport")
+
+
+def test_les_grilles_de_quantiles_sont_centrees_sur_le_signal_publie():
+    """Une grille de residus doit etre centree sur zero : c'est la definition meme
+    d'un residu de regression. Une mediane loin de zero prouve que la grille a ete
+    mesuree sur une AUTRE grandeur que celle que la notation classe — le volume brut
+    plutot que son ecart a la taille — et l'univers entier ressort alors au meme rang.
+    Ce test aurait attrape deux fois le meme defaut : une premiere fois par decalage
+    d'echelle, une seconde par COURSE entre deux calibrages concurrents dont l'ancien
+    a ecrase le nouveau."""
+    import json
+    f = (Path(__file__).resolve().parent.parent
+         / "quantbench" / "risk" / "risk_calibration.json")
+    if not f.exists():
+        pytest.skip("calibrage absent")
+    cal = json.loads(f.read_text(encoding="utf-8"))
+    grille = ((cal.get("quantiles") or {}).get("d6") or {}).get("global")
+    if not grille:
+        pytest.skip("dimension de liquidite non calibree")
+    mediane = grille[len(grille) // 2]
+    assert abs(mediane) < 1.0, (
+        f"mediane du residu de liquidite a {mediane:.2f} au lieu de ~0 : la grille "
+        f"porte sur une grandeur differente de celle qui est classee")
+    # Et elle doit SEPARER : une grille plate ne classe rien.
+    assert grille[-1] - grille[0] > 1.0, "grille de liquidite degeneree"
+
+
+def test_toutes_les_grilles_separent_quelque_chose():
+    """Une grille dont tous les centiles sont egaux ne distingue aucun titre : la
+    dimension est alors morte sans que rien ne le signale."""
+    import json
+    f = (Path(__file__).resolve().parent.parent
+         / "quantbench" / "risk" / "risk_calibration.json")
+    if not f.exists():
+        pytest.skip("calibrage absent")
+    cal = json.loads(f.read_text(encoding="utf-8"))
+    plates = [cle for cle, t in (cal.get("quantiles") or {}).items()
+              if (g := (t or {}).get("global")) and g[-1] - g[0] <= 0]
+    assert not plates, f"grilles degenerees : {plates}"
