@@ -183,6 +183,29 @@ def d1_solvabilite(fund, F, reg):
 # --------------------------------------------------------------------------- #
 # D2 — Autonomie de tresorerie
 # --------------------------------------------------------------------------- #
+def consommation_selon_le_regime(fund, reg):
+    """Tresorerie consommee, corrigee du CAPEX DE CROISSANCE.
+
+    Le flux libre brut est un mauvais juge pour une activite tres capitalistique : un
+    service public regule finance ses investissements par la dette PAR CONSTRUCTION,
+    avec un rendement garanti par le regulateur, et une fonciere en developpement fait
+    de meme. Leur flux libre est negatif en permanence sans que rien ne menace.
+    Duke Energy et Southern Company ressortaient plafonnees a D+ pour "moins d'un an
+    d'autonomie", et E.ON pour "passif non couvert".
+
+    On ne retient donc que le capex de MAINTENANCE, approxime par la dotation aux
+    amortissements — la part de l'investissement qui remplace l'outil existant, par
+    opposition a celle qui l'agrandit. L'approximation est declaree ; elle vaut
+    uniquement pour les regimes ou l'amortissement domine le resultat."""
+    from ..valuation.route import consommation_de_tresorerie
+    if reg != "amortissement_lourd":
+        return consommation_de_tresorerie(fund)
+    capex, da = fund.get("capex"), fund.get("dep_amort")
+    if capex is None or da is None:
+        return consommation_de_tresorerie(fund)
+    return consommation_de_tresorerie(dict(fund, capex=-min(abs(capex), abs(da))))
+
+
 def d2_autonomie(fund, F, reg):
     """Signal = -(annees d'autonomie). Une annee de tresorerie vaut une annee
     partout : aucune normalisation sectorielle. Que la consommation soit la NORME en
@@ -193,15 +216,7 @@ def d2_autonomie(fund, F, reg):
         # Le flux d'exploitation d'une banque suit ses encours de credit, pas son
         # exploitation : JPMorgan convertit 0,41 sans la moindre anomalie.
         return None, None
-    from ..valuation.route import consommation_de_tresorerie
-    fond = dict(fund)
-    if reg == "amortissement_lourd":
-        # Capex de MAINTENANCE, approxime par la part amortie : sans quoi toute
-        # fonciere en developpement parait mourante alors qu'elle investit.
-        capex, da = fund.get("capex"), fund.get("dep_amort")
-        if capex is not None and da is not None:
-            fond["capex"] = -min(abs(capex), abs(da))
-    conso = consommation_de_tresorerie(fond)
+    conso = consommation_selon_le_regime(fund, reg)
     if conso <= 0:
         return -math.inf, "l'exploitation finance ses investissements"
     cash = max(fund.get("cash") or 0.0, 0.0)

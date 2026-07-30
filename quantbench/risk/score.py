@@ -86,13 +86,30 @@ def rang(cle, signal, cal, secteur=None, industrie=None, niveau="univers"):
     return min(1.0, max(0.0, bas / n))
 
 
-def _modalites(fund, F, motifs, mesures):
+def _modalites(fund, F, motifs, mesures, seuil_base=None, reg=None):
     """Faits VERIFIABLES qui plafonnent la note. Ce ne sont pas des jugements : chacun
     est une observation qu'aucune qualite par ailleurs ne compense."""
-    from ..valuation.route import consommation_de_tresorerie, valeur_de_liquidation
+    from ..valuation.route import valeur_de_liquidation
+    from .dimensions import consommation_selon_le_regime
     out = []
     be = fund.get("book_equity")
-    conso = consommation_de_tresorerie(fund)
+    # MEME mesure que la dimension d'autonomie : corrigee du capex de CROISSANCE.
+    # Les plafonds lisaient le flux libre BRUT, si bien qu'un service public regule —
+    # qui finance ses investissements par la dette, par construction, avec un
+    # rendement garanti par le regulateur — etait declare a court d'autonomie. Duke
+    # Energy et Southern Company ressortaient a D+, E.ON aussi.
+    conso = consommation_selon_le_regime(fund, reg)
+    # "NE CONSOMME PAS" N'EST PAS "GENERE". Les deux plafonds ci-dessous etaient
+    # gardes par `conso > 0`, et la consommation vaut zero dans DEUX cas tres
+    # differents : la societe encaisse, ou son tableau de flux est ABSENT. 1812
+    # Brewing porte 13,7 M$ de passif pour 5,0 M$ d'actif et des fonds propres de
+    # -8,7 M$, sans aucun tableau de flux publie : elle echappait aux deux plafonds
+    # et ressortait notee B.
+    # On exige donc une PREUVE de generation de tresorerie pour epargner une societe,
+    # au lieu de se contenter de l'absence de preuve du contraire.
+    cfo = fund.get("cfo")
+    capex = fund.get("capex")
+    genere = (cfo is not None and conso <= 0)
     # PASSIF NON COUVERT PAR L'ACTIF REALISABLE.
     # La condition portait sur `passif > actif` — trop stricte : la decote de
     # realisation peut rendre l'actif insuffisant alors meme que sa valeur COMPTABLE
@@ -103,9 +120,9 @@ def _modalites(fund, F, motifs, mesures):
     # passif — et toute grande societe serait plafonnee. Une liquidation ne se pose
     # que pour une societe qui NE GENERE PAS de tresorerie ; celle qui encaisse n'est
     # pas liquidee, quelle que soit la decote theorique sur son actif.
-    if valeur_de_liquidation(fund) <= 0 and conso > 0:
+    if valeur_de_liquidation(fund) <= 0 and not genere:
         out.append("passif_non_couvert")
-    if be is not None and be <= 0 and conso > 0:
+    if be is not None and be <= 0 and not genere:
         out.append("fonds_propres_absorbes")
     if conso > 0:
         cash = max(fund.get("cash") or 0.0, 0.0)
@@ -117,6 +134,22 @@ def _modalites(fund, F, motifs, mesures):
             break
     if not ((F or {}).get("years")):
         out.append("aucun_exercice_exploitable")
+    # DEUX SOURCES QUI NE PARLENT PAS DE LA MEME SOCIETE.
+    # Le nombre d'actions deduit du marche et celui depose aux comptes divergent
+    # parfois d'un ORDRE DE GRANDEUR : All American Gold affiche 96,6 millions de
+    # titres implicites pour 1,877 MILLIARD deposes, CTR Investments 140 millions
+    # pour 3,7 milliards. La capitalisation ne porte alors pas sur la meme entite que
+    # les comptes, et tout rapport entre les deux est vide de sens.
+    # On ne REECRIT rien — aucune source ne prouve que l'autre a tort, et les
+    # corrections tentees allaient neuf fois sur douze dans le sens qui gonfle la
+    # valeur. Mais un desaccord de cette ampleur PLAFONNE la note : ce n'est plus une
+    # societe risquee, c'est une societe dont on ne sait pas de quoi on parle.
+    # Le seuil est MESURE (percentile eleve de la distribution du desaccord, ecrit
+    # dans le calibrage) et non pose : le repli ne sert qu'en son absence.
+    publiees, deduites = fund.get("actions_publiees"), fund.get("shares")
+    if publiees and deduites and publiees > 0 and deduites > 0:
+        if abs(math.log10(deduites / publiees)) > (seuil_base or 1.0):
+            out.append("base_actionnaire_incoherente")
     return out
 
 
@@ -169,7 +202,9 @@ def noter(fund, F=None, motifs=None, reparations=None, cal=None):
     debiaise = 1.0 - (1.0 - maximum) ** k
     lam = float((cal or {}).get("lambda_maillon_faible", 0.0))
     score = (1.0 - lam) * moyenne + lam * debiaise
-    return _finaliser(score, _modalites(fund, F, motifs, signaux), detail, reg, cal)
+    return _finaliser(score, _modalites(fund, F, motifs, signaux,
+                                       (cal or {}).get("seuil_base_actionnaire"), reg),
+                      detail, reg, cal)
 
 
 def _finaliser(score, modalites, detail, reg, cal, repli=False):

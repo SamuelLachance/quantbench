@@ -195,6 +195,17 @@ def main(limite):
         # Idem : le melange avec le maillon faible reste a zero tant que son gain
         # n'est pas demontre.
         "lambda_maillon_faible": 0.0,
+        # SEUIL DE DESACCORD SUR LA BASE ACTIONNAIRE — un ORDRE DE GRANDEUR.
+        # J'ai d'abord tente de le MESURER, comme tout le reste : 99e centile de la
+        # population de reference. Il est ressorti a un facteur 177, c'est-a-dire
+        # qu'il ne detectait rien. La raison est instructive et vaut d'etre ecrite :
+        # la queue de cette distribution est peuplee de rapports ADR LEGITIMES —
+        # un certificat vaut couramment 10, 20, 100 ou 200 actions ordinaires — qui
+        # ne sont pas des erreurs mais des changements d'unite. Un percentile ne peut
+        # donc pas separer l'erreur de la structure : il mesure les deux ensemble.
+        # Le facteur dix n'est pas ici une opinion sur la VALEUR — c'est le constat
+        # que deux nombres ne designent pas la meme chose. Assume comme tel.
+        "seuil_base_actionnaire": 1.0,
     }
 
     # --- Passe 2 : bornes de grades et niveaux de plafond ----------------------

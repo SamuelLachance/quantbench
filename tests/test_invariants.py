@@ -1545,3 +1545,69 @@ def test_le_beta_n_est_pas_endette_deux_fois():
     bloc = src.split("def build_dcf_from_fundamentals")[1]
     assert "unlevered_beta=unlev" in bloc, (
         "le moteur recoit un beta deja endette : il le levera une seconde fois")
+
+
+# --------------------------------------------------------------------------- #
+# 32. PLAFONDS DE LA NOTE — "ne consomme pas" n'est pas "genere"
+# --------------------------------------------------------------------------- #
+def test_l_absence_de_tableau_de_flux_n_epargne_pas_une_societe():
+    """La consommation vaut zero dans DEUX cas tres differents : la societe encaisse,
+    ou son tableau de flux est ABSENT. 1812 Brewing porte 13,7 M$ de passif pour
+    5,0 M$ d'actif et des fonds propres de -8,7 M$, sans aucun tableau de flux publie :
+    elle echappait aux deux plafonds et ressortait notee B.
+    On exige donc une PREUVE de generation de tresorerie, pas l'absence de preuve du
+    contraire."""
+    from quantbench.risk.score import _modalites
+    sans_flux = societe(total_assets=0.005, total_liab=0.0137, total_equity=-0.0087,
+                        book_equity=-0.0087, cash=0.00006, cfo=None, capex=None,
+                        net_income=0.0036)
+    m = _modalites(sans_flux, etats(), [], {}, reg="exploitante")
+    assert "fonds_propres_absorbes" in m and "passif_non_couvert" in m, m
+
+
+def test_le_capex_de_croissance_ne_compte_pas_comme_une_consommation():
+    """Un service public regule finance ses investissements par la dette PAR
+    CONSTRUCTION, avec un rendement garanti par le regulateur : son flux libre est
+    negatif en permanence sans que rien ne menace. Les plafonds lisaient le flux libre
+    BRUT — Duke Energy et Southern Company ressortaient a D+, E.ON aussi.
+    Seul le capex de MAINTENANCE, approxime par la dotation aux amortissements,
+    constitue une consommation."""
+    from quantbench.risk.dimensions import consommation_selon_le_regime
+    # Service public : 12 Md$ encaisses, 14 Md$ investis, 6 Md$ d'amortissements.
+    regule = societe(cfo=12.0, capex=-14.0, dep_amort=6.0, net_income=4.0)
+    assert consommation_selon_le_regime(regule, "amortissement_lourd") == 0.0
+    # La meme societe hors de ce regime consomme bien 2 Md$.
+    assert abs(consommation_selon_le_regime(regule, "exploitante") - 2.0) < 1e-9
+    # Et une societe qui brule vraiment reste detectee dans les deux cas.
+    brule = societe(cfo=-3.0, capex=-1.0, dep_amort=0.5, net_income=-3.0)
+    assert consommation_selon_le_regime(brule, "amortissement_lourd") > 0
+    assert consommation_selon_le_regime(brule, "exploitante") > 0
+
+
+def test_une_base_actionnaire_incoherente_plafonne_la_note():
+    """All American Gold affiche 96,6 millions de titres implicites pour 1,877
+    MILLIARD deposes, CTR Investments 140 millions pour 3,7 milliards. La
+    capitalisation ne porte alors pas sur la meme entite que les comptes, et tout
+    rapport entre les deux est vide de sens.
+    On ne REECRIT rien — aucune source ne prouve que l'autre a tort — mais un
+    desaccord d'un ordre de grandeur plafonne la note."""
+    from quantbench.risk.score import _modalites
+    incoherente = societe(shares=96_636_000, actions_publiees=1_877_273_800)
+    assert "base_actionnaire_incoherente" in _modalites(incoherente, etats(), [], {})
+    # Une dilution ordinaire, meme forte, ne declenche pas.
+    dilue = societe(shares=130_000_000, actions_publiees=100_000_000)
+    assert "base_actionnaire_incoherente" not in _modalites(dilue, etats(), [], {})
+
+
+def test_les_grandes_valeurs_ne_sont_pas_plafonnees_en_masse():
+    """Garde-fou de forme : les plafonds visent des situations exceptionnelles. S'ils
+    frappaient les grandes valeurs, c'est que leur condition est trop large — c'est
+    exactement ce qui s'est produit avec le flux libre brut, qui emportait dix
+    societes de plus de 5 Md$ dont deux services publics de premier plan."""
+    from quantbench.risk.score import _modalites
+    # Service public regule typique : investit plus qu'il n'encaisse, mais amortit.
+    for reg in ("amortissement_lourd", "exploitante"):
+        saine = societe(total_assets=180.0, total_liab=140.0, total_equity=40.0,
+                        book_equity=40.0, cash=1.0, cfo=12.0, capex=-6.0,
+                        dep_amort=6.0, net_income=5.0)
+        assert not _modalites(saine, etats(), [], {}, reg=reg), reg
