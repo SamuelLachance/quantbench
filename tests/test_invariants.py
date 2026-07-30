@@ -2112,84 +2112,62 @@ def test_une_radiation_compte_pour_une_perte_totale():
     assert -1.0 <= v.SEUIL_EFFONDREMENT
 
 
-def test_les_chiffres_publies_correspondent_a_la_mesure():
-    """La fiche affiche en dur le resultat de la validation retrospective.
+def test_la_page_lit_la_mesure_au_lieu_de_la_recopier():
+    """Aucun chiffre de validation ne doit etre ecrit en dur dans la fiche.
 
-    Des chiffres ecrits a la main dans une page HTML mentent des que la mesure est
-    refaite, et personne ne le remarque : c'est exactement ainsi que le bloc de
-    methodologie a promis pendant des semaines une confrontation "dans douze mois"
-    alors qu'elle avait eu lieu. Ce test compare chaque nombre publie au fichier
-    produit par `scripts/valider_les_notes.py`. S'ils divergent, l'un des deux doit
-    changer — et c'est toujours la page, jamais la mesure.
+    Deux chiffres ecrits a deux endroits finissent toujours par diverger. C'est
+    exactement ainsi que ce bloc a promis pendant des semaines une confrontation
+    "dans douze mois" alors qu'elle avait deja eu lieu, puis, une fois les chiffres
+    publies a la main, qu'il a fallu les recorriger a chaque nouvelle mesure. La
+    page lit desormais le fichier ; ce test interdit le retour en arriere.
     """
-    import json
     import re
 
     racine = Path(__file__).resolve().parent.parent
-    mesure = racine / "app" / "us" / "_validation_risque.json"
-    if not mesure.exists():
-        pytest.skip("validation jamais executee sur ce poste")
-    d = json.loads(mesure.read_text(encoding="utf-8"))
-    par_famille = {l["grade"]: l for l in d["par_famille"]}
-
     html = (racine / "app" / "stock.html").read_text(encoding="utf-8")
-    tables = re.findall(r'<table class="mini-table">(.*?)</table>', html, re.S)
-    assert tables, "le tableau de validation a disparu de la fiche"
-    bloc = type("B", (), {"group": lambda _s, _i: tables[0]})()
 
-    lignes = re.findall(r"<tr><td>([ABCDF])</td>(.*?)</tr>", bloc.group(1), re.S)
-    assert len(lignes) == 5, f"5 familles attendues, {len(lignes)} publiees"
+    bloc = re.search(r'<div id="validationRisque">(.*?)</div>', html, re.S)
+    assert bloc, "le conteneur de validation a disparu de la fiche"
+    fige = re.findall(r"<t[dh]>([^<]*[0-9][^<]*)</t[dh]>", bloc.group(1))
+    assert not fige, f"chiffres figes dans le HTML de validation : {fige[:5]}"
+    assert "_validation_risque_resume.json" in html,         "la fiche ne va plus chercher la mesure"
 
-    def nombre(txt):
-        return float(txt.replace("−", "-").replace("+", "")
-                     .replace(" ", "").replace("%", "").replace(",", ".").strip())
 
-    for fam, reste in lignes:
-        cellules = re.findall(r"<td>(.*?)</td>", reste)
-        assert len(cellules) == 4, (fam, cellules)
-        ref = par_famille.get(fam)
-        assert ref, f"la famille {fam} est publiee mais absente de la mesure"
-        assert int(nombre(cellules[0])) == ref["n"], (fam, "effectif")
-        assert nombre(cellules[1]) == pytest.approx(ref["taux"] * 100, abs=0.05), \
-            (fam, "taux d'effondrement")
-        assert nombre(cellules[2]) == pytest.approx(
-            ref["rendement_median"] * 100, abs=0.05), (fam, "rendement median")
-        assert nombre(cellules[3]) == pytest.approx(
-            ref["creux_median"] * 100, abs=0.05), (fam, "plus-bas median")
+def test_le_resume_de_validation_porte_tout_ce_que_la_page_lit():
+    """Le contrat entre le script de mesure et la page.
 
-    # Les affirmations en prose doivent elles aussi tenir.
-    a, f_ = par_famille["A"], par_famille["F"]
-    ecart = (f_["taux"] - a["taux"]) * 100
-    assert f"{ecart:.1f}".replace(".", ",") in html, \
-        f"l'ecart F - A publie ne vaut pas {ecart:.1f} points"
-    assert d["spearman_familles"] == pytest.approx(1.0), \
-        "la page annonce une monotonie parfaite : elle doit etre mesuree"
-    assert d["p_F_contre_A"] < 0.0001, "la page annonce p < 0,0001"
-    assert d["radiees"] == 361, \
-        "le nombre de societes radiees est cite dans la page"
+    La page rend des tableaux a partir de ce fichier : une cle absente n'y provoque
+    pas d'erreur visible, elle affiche « undefined » au milieu d'un tableau de
+    resultats. Ce test enumere donc ce que la page consomme reellement.
+    """
+    import json
 
-    # Le second tableau publie le pouvoir de chaque dimension : lui aussi doit
-    # correspondre a la mesure, y compris pour les dimensions qui DESSERVENT le
-    # modele. C'est la clause la plus importante du test — elle empeche de
-    # republier une version d'ou l'AUC genante aurait discretement disparu.
-    assert len(tables) >= 2, "le tableau des dimensions a disparu de la fiche"
-    mesure_dims = {x["nom"]: x for x in d["dimensions"]}
-    publiees = re.findall(r"<tr><td>([^<]+)</td><td>([^<]+)</td><td>([^<]+)</td></tr>",
-                          tables[1])
-    assert publiees, "aucune dimension publiee"
-    vues = 0
-    for nom, auc, _couv in publiees:
-        ref = mesure_dims.get(nom.replace("’", "'"))
-        if ref is None:
-            continue                      # ligne de synthese (note complete)
-        vues += 1
-        if ref["auc"] is None:
-            assert auc.strip() == "—", (nom, "non testee mais chiffree")
-        else:
-            assert float(auc.replace(",", ".")) == pytest.approx(ref["auc"], abs=0.001), nom
-    assert vues == 8, f"8 dimensions attendues dans la page, {vues} trouvees"
-    faibles = [x["nom"] for x in d["dimensions"]
-               if x["auc"] is not None and x["auc"] < 0.53]
-    for nom in faibles:
-        assert nom.replace("'", "’") in html, \
-            f"{nom} n'apporte rien : la page doit le dire, pas le taire"
+    racine = Path(__file__).resolve().parent.parent
+    f = racine / "app" / "us" / "_validation_risque_resume.json"
+    if not f.exists():
+        pytest.skip("validation jamais executee sur ce poste")
+    d = json.loads(f.read_text(encoding="utf-8"))
+
+    for cle in ("instantane", "horizon_mois", "n", "radiees", "par_famille",
+                "dimensions", "auc_note", "spearman_familles", "p_F_contre_A",
+                "ecart_F_moins_A", "par_taille", "genere"):
+        assert cle in d, f"cle absente du resume : {cle}"
+
+    assert [l["grade"] for l in d["par_famille"]] == ["A", "B", "C", "D", "F"]
+    for l in d["par_famille"]:
+        for cle in ("n", "taux", "rendement_median", "creux_median", "cap_mediane"):
+            assert cle in l, (l["grade"], cle)
+        assert 0.0 <= l["taux"] <= 1.0
+
+    # Les huit dimensions figurent TOUTES, y compris celles qui desservent le
+    # modele et celle qui n'a pas pu etre testee. En publier six sur huit serait
+    # une selection, pas une mesure.
+    from quantbench.risk.dimensions import DIMENSIONS
+    assert {x["dimension"] for x in d["dimensions"]} == {c for c, _n, _f, _l in DIMENSIONS}
+    for x in d["dimensions"]:
+        assert x["auc"] is None or 0.0 <= x["auc"] <= 1.0
+        assert x.get("nom") and x.get("verdict")
+
+    # Le fichier complet reste a cote, avec le detail par titre : sans lui, aucune
+    # anomalie du tableau agrege n'est diagnosticable.
+    assert (racine / "app" / "us" / "_validation_risque.json").exists(),         "le fichier detaille a disparu"

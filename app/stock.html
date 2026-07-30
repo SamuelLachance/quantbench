@@ -121,56 +121,9 @@ function detailRisque(r){
         <p><strong>Pondération uniforme, et c’est assumé.</strong> Aucune dimension n’entre
         avec un poids de conviction. Rien ne justifierait d’en privilégier une : ce serait
         affirmer, sans l’avoir mesuré, laquelle annonce le mieux une ruine.</p>
-        <p><strong>Confrontée aux faits.</strong> La note a été reconstruite telle qu’elle
-        aurait été calculée le 30 juillet 2024 — à partir des seuls comptes <em>déjà
-        déposés</em> à cette date, avec le nombre d’actions de l’époque — puis comparée à
-        ce que les titres ont fait pendant les vingt-quatre mois suivants. Les 356 sociétés
-        radiées depuis y figurent, comptées pour une perte totale : les omettre reviendrait
-        à juger la note sur un univers vidé des faillites qu’elle prétend annoncer.</p>
-        <table class="mini-table">
-          <tr><th>note</th><th>n</th><th>perte ≥ 70 %</th><th>rend. médian</th><th>plus-bas médian</th></tr>
-          <tr><td>A</td><td>329</td><td>18,5 %</td><td>+11,3 %</td><td>−17,3 %</td></tr>
-          <tr><td>B</td><td>376</td><td>22,9 %</td><td>+13,7 %</td><td>−18,0 %</td></tr>
-          <tr><td>C</td><td>249</td><td>30,5 %</td><td>−7,1 %</td><td>−29,9 %</td></tr>
-          <tr><td>D</td><td>549</td><td>44,3 %</td><td>−54,3 %</td><td>−60,0 %</td></tr>
-          <tr><td>F</td><td>128</td><td>44,5 %</td><td>−50,0 %</td><td>−92,7 %</td></tr>
-        </table>
-        <p>Monotonie parfaite de A vers F, sur le taux d’effondrement comme sur le plus-bas
-        traversé, avec 26,0 points d’écart entre les extrêmes (p&nbsp;&lt;&nbsp;0,0001).
-        La note corrèle avec la taille — 3,2&nbsp;Md$ de capitalisation médiane en A contre
-        moins d’un million en F — et la vraie question était donc de savoir si elle dit
-        quelque chose que la capitalisation ne dit pas déjà. À taille comparable, la
-        séparation tient.</p>
-        <p><strong>Ce que chaque dimension apporte.</strong> Mesuré en aire sous la courbe :
-        la probabilité qu’une société qui s’est effondrée ait été moins bien classée qu’une
-        société intacte tirée au hasard. 0,500 signifie exactement aucune information.</p>
-        <table class="mini-table">
-          <tr><th>dimension</th><th>AUC</th><th>définissable sur</th></tr>
-          <tr><td>Solvabilité</td><td>0,643</td><td>81 %</td></tr>
-          <tr><td>Autonomie de trésorerie</td><td>0,642</td><td>89 %</td></tr>
-          <tr><td>Rentabilité de cycle</td><td>0,628</td><td>95 %</td></tr>
-          <tr><td>Volatilité d’exploitation</td><td>0,601</td><td>77 %</td></tr>
-          <tr><td>Dilution</td><td>0,580</td><td>100 %</td></tr>
-          <tr><td>Mur de refinancement</td><td>0,545</td><td>100 %</td></tr>
-          <tr><td>Confiance dans la donnée</td><td>0,491</td><td>100 %</td></tr>
-          <tr><td>Liquidité de sortie</td><td>—</td><td>non testée ici</td></tr>
-          <tr><td><strong>note complète</strong></td><td><strong>0,644</strong></td><td>100 %</td></tr>
-        </table>
-        <p>La note fait mieux que chacune de ses dimensions prise seule, y compris comparée
-        sur le même sous-ensemble de sociétés — agréger apporte donc quelque chose. Deux
-        constats vont contre le modèle et sont publiés tels quels : <em>la confiance dans
-        la donnée</em> n’a annoncé aucun effondrement sur cette fenêtre (0,491, soit un
-        tirage à pile ou face), et <em>le mur de refinancement</em> n’est que marginal. La
-        pondération reste pourtant uniforme : réajuster des poids sur les 1 631 sociétés qui
-        ont servi à les mesurer reviendrait à apprendre par cœur cette fenêtre-là. La
-        <em>liquidité de sortie</em> n’est pas absente de la note — elle n’a pas pu être
-        testée ici, faute de volumes d’échange à la date de l’instantané.</p>
-        <p><strong>Ce que cette mesure ne prouve pas.</strong> Un seul instantané, un seul
-        horizon : ce n’est pas un test multi-périodes, et rien ne garantit qu’une autre
-        fenêtre donnerait le même résultat. La monotonie est aussi la plus faible chez les
-        micro-capitalisations, où la note annonce mieux la <em>profondeur</em> de la chute
-        que sa survenue. Les notes continuent d’être archivées chaque mois, pour permettre
-        un jour la mesure multi-périodes que celle-ci ne remplace pas.</p>
+        <div id="validationRisque">
+          <p><strong>Confrontée aux faits.</strong> Mesure en cours de chargement…</p>
+        </div>
         <p><strong>Ce que la note ne dit pas.</strong> Elle n’est pas un pronostic de
         cours, et une note excellente n’empêche aucune perte. Elle mesure la fragilité
         <em>observable dans les comptes</em> — ce qu’ils ne contiennent pas, elle ne le
@@ -347,12 +300,84 @@ function render(d){
   if(d.montecarlo)QB.histogram(document.getElementById('mcHist'), d.montecarlo.histogram, d.valuation.market_cap, d.montecarlo.median);
   document.title='QuantBench — '+(d.name||d.ticker);
 }
+// VALIDATION DE LA NOTE — LUE, JAMAIS RECOPIEE.
+// Ces chiffres etaient ecrits en dur dans le HTML. Deux chiffres ecrits a deux
+// endroits finissent toujours par diverger : c'est ainsi que ce meme bloc a promis
+// pendant des semaines une confrontation « dans douze mois » alors qu'elle avait eu
+// lieu. La page lit desormais le fichier produit par le script de validation, si
+// bien qu'aucune republication ne peut la desynchroniser de la mesure.
+// Signe moins TYPOGRAPHIQUE (U+2212) et non trait d'union : `toFixed` rend un tiret
+// ASCII, plus court et plus haut que le moins, qui desaligne une colonne de nombres.
+const pc=(v,signe)=>v==null?'—':((signe&&v>0?'+':'')
+  +(v*100).toFixed(1).replace('.',',')).replace('-','−')+' %';
+const nb3=v=>v==null?'—':v.toFixed(3).replace('.',',');
+// Espace insecable fine comme separateur de milliers, et date en toutes lettres :
+// « 1631 societes » et « 2026-07-30 » sont lisibles par une machine, pas par un lecteur.
+const mil=n=>String(n).replace(/\B(?=(\d{3})+(?!\d))/g,' ');
+const jour=s=>new Date(s+'T00:00:00Z').toLocaleDateString('fr-CA',
+  {day:'numeric',month:'long',year:'numeric',timeZone:'UTC'});
+function rendVal(v){
+  const el=document.getElementById('validationRisque');
+  if(!el) return;
+  if(!v){ el.innerHTML='<p><strong>Confrontée aux faits.</strong> Mesure indisponible '
+    +'— le fichier de validation n’a pas pu être lu.</p>'; return; }
+  const d=jour(v.instantane);
+  const fam=v.par_famille.map(l=>`<tr><td>${l.grade}</td><td>${l.n}</td>`
+    +`<td>${pc(l.taux)}</td><td>${pc(l.rendement_median,1)}</td>`
+    +`<td>${pc(l.creux_median,1)}</td></tr>`).join('');
+  const dims=v.dimensions.map(x=>`<tr><td>${x.nom}</td>`
+    +`<td>${x.auc==null?'—':nb3(x.auc)}</td>`
+    +`<td>${x.auc==null?'non testée ici':(x.couverture*100).toFixed(0)+' %'}</td></tr>`).join('')
+    +`<tr><td><strong>note complète</strong></td><td><strong>${nb3(v.auc_note)}</strong></td><td>100 %</td></tr>`;
+  const nulles=v.dimensions.filter(x=>x.auc!=null&&x.auc<0.53).map(x=>x.nom);
+  const capA=(v.par_famille.find(l=>l.grade==='A')||{}).cap_mediane;
+  el.innerHTML=`
+    <p><strong>Confrontée aux faits.</strong> La note a été reconstruite telle qu’elle
+    aurait été calculée le ${d} — à partir des seuls comptes <em>déjà déposés</em> à
+    cette date, avec le nombre d’actions de l’époque — puis comparée à ce que les titres
+    ont fait pendant les ${v.horizon_mois} mois suivants. Les ${mil(v.radiees)} sociétés
+    radiées depuis y figurent, comptées pour une perte totale : les omettre reviendrait
+    à juger la note sur un univers vidé des faillites qu’elle prétend annoncer.</p>
+    <table class="mini-table"><tr><th>note</th><th>n</th><th>perte ≥ 70 %</th>
+      <th>rend. médian</th><th>plus-bas médian</th></tr>${fam}</table>
+    <p>Monotonie ${v.spearman_familles>=0.999?'parfaite':'de rang '+nb3(v.spearman_familles)}
+    de A vers F, ${v.ecart_F_moins_A==null?'':'avec '+(v.ecart_F_moins_A*100).toFixed(1).replace('.',',')
+    +' points d’écart entre les extrêmes'}${v.p_F_contre_A!=null?
+    ' (p&nbsp;'+(v.p_F_contre_A<0.0001?'&lt;&nbsp;0,0001':'=&nbsp;'+v.p_F_contre_A.toFixed(4).replace('.',','))+')':''}.
+    La note corrèle avec la taille — ${capA==null?'—':(capA>=1?capA.toFixed(1).replace('.',',')+'&nbsp;Md$':
+    Math.round(capA*1000)+'&nbsp;M$')} de capitalisation médiane en A contre
+    ${(()=>{const f=v.par_famille.find(l=>l.grade==='F');return f&&f.cap_mediane>=0.001?
+    Math.round(f.cap_mediane*1000)+'&nbsp;M$':'moins d’un million';})()} en F — et la vraie
+    question était donc de savoir si elle dit quelque chose que la capitalisation ne dit
+    pas déjà. À taille comparable, la séparation tient
+    (${v.par_taille.map(s=>nb3(s.spearman)).join(' / ')} de monotonie par tiers de taille).</p>
+    <p><strong>Ce que chaque dimension apporte.</strong> Mesuré en aire sous la courbe : la
+    probabilité qu’une société qui s’est effondrée ait été moins bien classée qu’une société
+    intacte tirée au hasard. 0,500 signifie exactement aucune information.</p>
+    <table class="mini-table"><tr><th>dimension</th><th>AUC</th>
+      <th>définissable sur</th></tr>${dims}</table>
+    <p>La note fait mieux que chacune de ses dimensions prise seule — agréger apporte donc
+    quelque chose.${nulles.length?' Ce constat va contre le modèle et il est publié tel quel : '
+    +nulles.join(', ')+(nulles.length>1?' n’ont':' n’a')+' annoncé aucun effondrement sur cette'
+    +' fenêtre.':''} La pondération reste pourtant uniforme : réajuster des poids sur les
+    ${mil(v.n)} sociétés qui ont servi à les mesurer reviendrait à apprendre par cœur cette
+    fenêtre-là.</p>
+    <p><strong>Ce que cette mesure ne prouve pas.</strong> Un seul instantané, un seul
+    horizon : ce n’est pas un test multi-périodes, et rien ne garantit qu’une autre fenêtre
+    donnerait le même résultat. La monotonie est la plus faible chez les
+    micro-capitalisations, où la note annonce mieux la <em>profondeur</em> de la chute que
+    sa survenue. Mesure du ${jour(v.genere)}.</p>`;
+}
 (async()=>{
   QB.initTheme(); QB.mountSearch();
   const t=(QB.qs('t')||'').toUpperCase();
   if(!t){document.getElementById('app').innerHTML='<div class="loading">Aucun titre. <a href="screener.html">Screener</a>.</div>';return;}
   try{ render(await (await fetch('us/'+t+'.json',{cache:'no-store'})).json()); }
   catch(e){ document.getElementById('app').innerHTML=`<div class="loading">Profil indisponible pour <b>${t}</b> (hors univers couvert). <a href="screener.html">Screener</a>.</div>`; }
+  // Independant de la fiche : une mesure absente ne doit pas empecher la page de
+  // s'afficher, et une fiche en echec ne doit pas empecher la mesure de s'afficher.
+  try{ rendVal(await (await fetch('us/_validation_risque_resume.json')).json()); }
+  catch(e){ rendVal(null); }
 })();
 </script>
 </body>

@@ -1,0 +1,84 @@
+name: Validation de la note de risque (mensuel)
+
+# La note A+ a F est CALIBREE sur des quantiles d'univers — sur la forme d'une
+# distribution, jamais sur des resultats. Ce qui la rend defendable n'est pas son
+# calibrage mais sa CONFRONTATION aux faits : reconstruire la note telle qu'elle
+# aurait ete calculee il y a vingt-quatre mois, a partir des seuls comptes deja
+# deposes a cette date, puis regarder ce que les titres ont fait depuis.
+#
+# Mensuel, pour deux raisons. D'abord le cout : chaque passe interroge 1 866
+# societes sur quatorze exercices et tout leur historique de cours. Ensuite le
+# sens : un taux d'effondrement a vingt-quatre mois ne bouge pas d'un jour a
+# l'autre, et le recalculer chaque nuit ne ferait que du bruit.
+#
+# La fiche LIT ce fichier au lieu d'en recopier les chiffres. Une mesure publiee
+# ici apparait donc sur le site sans qu'aucune page n'ait a etre modifiee — et,
+# surtout, sans qu'un chiffre puisse rester affiche apres avoir cesse d'etre vrai.
+#
+# Le resultat peut etre MAUVAIS, et alors il sera publie tel quel. Une validation
+# qui ne pourrait pas invalider ce qu'elle teste ne servirait a rien.
+
+on:
+  schedule:
+    - cron: "0 4 2 * *"          # le 2 de chaque mois, 04:00 UTC (apres les reperes)
+  workflow_dispatch:
+    inputs:
+      horizon:
+        description: "Horizon en mois"
+        default: "24"
+      echantillon:
+        description: "Nombre de societes cotees tirees"
+        default: "1400"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: validation
+  cancel-in-progress: false
+
+jobs:
+  mesurer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Confronter la note aux faits
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}
+          PYTHONUNBUFFERED: "1"
+        run: >
+          python scripts/valider_les_notes.py
+          --horizon ${{ github.event.inputs.horizon || '24' }}
+          --echantillon ${{ github.event.inputs.echantillon || '1400' }}
+          --workers 16
+
+      # Le contrat entre le script et la page : toute cle que la fiche consomme
+      # doit exister dans le resume. Une cle manquante n'y provoque pas d'erreur
+      # visible — elle affiche « undefined » au milieu d'un tableau de resultats.
+      - name: Verifier que les invariants tiennent toujours
+        run: |
+          pip install pytest
+          python -m pytest tests/ -q
+
+      - name: Publier la nouvelle mesure
+        run: |
+          if git diff --quiet app/us/_validation_risque_resume.json; then
+            echo "aucun changement"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/us/_validation_risque.json app/us/_validation_risque_resume.json
+          git commit \
+            -m "Validation de la note de risque mesuree le $(date -u +%Y-%m-%d)" \
+            -m "Reconstitution point-in-time de la note, puis devenir des titres sur l'horizon. Les societes radiees depuis l'instantane sont comptees pour une perte totale, sans quoi la mesure porterait sur un univers vide des faillites que la note pretend annoncer." \
+            -m "La fiche lit ce fichier ; aucune page n'est modifiee et aucun chiffre ne peut rester affiche apres avoir cesse d'etre vrai."
+          git push

@@ -51,6 +51,15 @@ from quantbench.risk import noter                                  # noqa: E402
 
 RACINE = Path(__file__).resolve().parent.parent
 SORTIE = RACINE / "app" / "us" / "_validation_risque.json"
+# RESUME SEPARE, et c'est une decision d'architecture, pas une optimisation.
+# La fiche affichait ces chiffres EN DUR dans son HTML. Deux chiffres ecrits a deux
+# endroits divergent toujours : c'est ainsi que le bloc de methodologie a promis
+# pendant des semaines une confrontation "dans douze mois" alors qu'elle avait eu
+# lieu. La page lit desormais la mesure au lieu de la recopier, et aucune
+# republication ne peut plus la desynchroniser.
+# Fichier a part parce que le fichier complet pese 400 ko : il porte le detail par
+# titre, indispensable pour diagnostiquer une anomalie, inutile a l'affichage.
+RESUME = RACINE / "app" / "us" / "_validation_risque_resume.json"
 
 # Un titre qui a perdu 70 % de sa valeur n'est pas "en baisse" : il exige un gain
 # de 233 % pour revenir a son point de depart. C'est la definition operationnelle
