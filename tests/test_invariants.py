@@ -1313,3 +1313,25 @@ def test_le_build_complet_ne_se_declenche_pas_sur_chaque_poussee():
         "mutuellement et le site cessera de se mettre a jour")
     assert "workflow_dispatch" in entete, "aucun declenchement manuel possible"
     assert "schedule" in entete, "aucune reconstruction quotidienne"
+
+
+def test_le_controle_des_valeurs_non_finies_ne_confond_pas_un_nom_avec_un_nombre():
+    """Le garde-fou refuse `Infinity` et `NaN` dans le JSON publie — ils rendent le
+    fichier ENTIER illisible dans un navigateur. Mais chercher la SOUS-CHAINE
+    bloquerait le deploiement des qu'un emetteur s'appelle "Infinity Stone Ventures
+    Corp" — il y en a un dans l'univers. Le test doit porter sur la SYNTAXE."""
+    import json
+    src = (Path(__file__).resolve().parent.parent
+           / "scripts" / "check_build.py").read_text(encoding="utf-8")
+    assert "parse_constant" in src, (
+        "le controle cherche une sous-chaine au lieu de verifier la syntaxe")
+
+    def refuser(litteral):
+        raise ValueError(litteral)
+
+    # Un nom de societe passe.
+    json.loads('{"n": "Infinity Stone Ventures Corp"}', parse_constant=refuser)
+    # Un vrai litteral non fini est refuse.
+    for mauvais in ('{"v": Infinity}', '{"v": -Infinity}', '{"v": NaN}'):
+        with pytest.raises(ValueError):
+            json.loads(mauvais, parse_constant=refuser)

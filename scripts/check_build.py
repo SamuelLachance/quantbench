@@ -178,14 +178,22 @@ def main(strict=True):
                 erreurs.append(f"{t} note {g} — une dimension de risque est cassee")
 
     # Aucune valeur non finie ne doit atteindre le JSON : `Infinity` et `NaN` ne sont
-    # pas du JSON valide et rendent la fiche ENTIERE illisible dans un navigateur,
+    # pas du JSON valide et rendent le fichier ENTIER illisible dans un navigateur,
     # alors que Python les relit sans broncher.
-    with open(SCREENER, encoding="utf-8") as f:
-        brut = f.read()
-    for jeton in ("Infinity", "NaN"):
-        if jeton in brut:
-            erreurs.append(f"'{jeton}' present dans le JSON publie — le navigateur "
-                           f"echouera a lire le fichier entier")
+    # Le test porte sur la SYNTAXE et non sur le texte : chercher la sous-chaine
+    # "Infinity" bloquerait le deploiement des qu'un emetteur s'appelle "Infinity
+    # Stone Ventures Corp" — il y en a un dans l'univers. `parse_constant` n'est
+    # appele que sur les litteraux non finis, jamais sur le contenu d'une chaine.
+    def _non_fini(litteral):
+        raise ValueError(litteral)
+
+    for chemin in (SCREENER,):
+        try:
+            with open(chemin, encoding="utf-8") as f:
+                json.load(f, parse_constant=_non_fini)
+        except ValueError as ex:
+            erreurs.append(f"valeur non finie ({ex}) dans {os.path.basename(chemin)} "
+                           f"— le navigateur echouera a lire le fichier entier")
 
     # --- Verdict --------------------------------------------------------------
     print()
