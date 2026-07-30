@@ -38,7 +38,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Dépendances
-        run: pip install numpy pandas scipy scikit-learn requests reportlab
+        run: pip install -r requirements.txt
       - name: Build shard ${{ matrix.shard }}/5
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
@@ -70,7 +70,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Dépendances (combine)
-        run: pip install numpy pandas scipy scikit-learn requests reportlab
+        run: pip install -r requirements.txt
       - name: Télécharger tous les shards -> app/us
         uses: actions/download-artifact@v4
         with:

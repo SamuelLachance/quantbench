@@ -943,3 +943,73 @@ def test_une_continuite_d_exploitation_se_constate():
     ancienne = societe(age_des_comptes_mois=186)
     assert route.classify(recente, None, etats()) == "standard"
     assert route.classify(ancienne, None, etats()) == "actif_net"
+
+
+# --------------------------------------------------------------------------- #
+# 28. Les dependances declarees doivent etre EXHAUSTIVES
+#
+# Trois listes de dependances coexistaient — requirements.txt, celle de
+# l'integration continue et celle du deploiement — et AUCUNE n'etait complete :
+# l'integration installait scikit-learn mais pas requests, requirements.txt
+# declarait requests mais ni scikit-learn ni reportlab ni yfinance. La suite de
+# tests echouait a l'IMPORT depuis des semaines, sans qu'aucune regression ne soit
+# en cause — et une suite qui ne demarre pas ne protege rien.
+# --------------------------------------------------------------------------- #
+def test_toute_dependance_tierce_est_declaree():
+    import ast
+    import sys as _sys
+
+    racine = Path(__file__).resolve().parent.parent
+    stdlib = set(_sys.stdlib_module_names)
+    locaux = {"quantbench", "scripts", "tests"} | {
+        p.stem for p in (racine / "scripts").glob("*.py")}
+    # Nom d'import -> nom du paquet sur l'index, quand ils different.
+    ALIAS = {"sklearn": "scikit-learn", "yaml": "pyyaml", "PIL": "pillow",
+             "dateutil": "python-dateutil", "cv2": "opencv-python",
+             "bs4": "beautifulsoup4"}
+
+    tiers = {}
+    for f in list((racine / "quantbench").rglob("*.py")) + \
+             list((racine / "scripts").glob("*.py")):
+        try:
+            arbre = ast.parse(f.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for n in ast.walk(arbre):
+            if isinstance(n, ast.Import):
+                noms = [a.name.split(".")[0] for a in n.names]
+            elif isinstance(n, ast.ImportFrom) and n.level == 0:
+                noms = [(n.module or "").split(".")[0]]
+            else:
+                continue
+            for m in noms:
+                if m and m not in stdlib and m not in locaux:
+                    tiers.setdefault(m, set()).add(f.relative_to(racine).as_posix())
+
+    declare = (racine / "requirements.txt").read_text(encoding="utf-8").lower()
+    manquants = {m: sorted(ou) for m, ou in tiers.items()
+                 if ALIAS.get(m, m).lower() not in declare}
+    assert not manquants, (
+        "dependances utilisees mais NON DECLAREES dans requirements.txt — "
+        f"l'installation echouera en integration continue : {manquants}")
+
+
+def test_les_workflows_installent_les_dependances_declarees():
+    """Une liste tenue a la main dans un workflow diverge toujours de la realite.
+    C'est ce qui a fait echouer l'integration continue et le deploiement pendant des
+    semaines, chacun avec un paquet manquant DIFFERENT."""
+    racine = Path(__file__).resolve().parent.parent
+    for nom in ("ci.yml", "deploy.yml"):
+        f = racine / ".github" / "workflows" / nom
+        if not f.exists():
+            continue
+        texte = f.read_text(encoding="utf-8")
+        assert "-r requirements.txt" in texte, (
+            f"{nom} n'installe pas les dependances declarees")
+        for ligne in texte.splitlines():
+            depouille = ligne.strip()
+            if depouille.startswith(("run: pip install", "pip install")) and \
+                    "-r requirements.txt" not in depouille and "pytest" not in depouille \
+                    and "--upgrade pip" not in depouille:
+                raise AssertionError(
+                    f"{nom} installe une liste tenue a la main : {depouille}")

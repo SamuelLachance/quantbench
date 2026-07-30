@@ -1,7 +1,17 @@
+# SOURCE UNIQUE des dependances. Trois listes coexistaient — celle-ci, celle de
+# l'integration continue et celle du deploiement — et AUCUNE n'etait complete :
+# l'integration installait scikit-learn mais pas requests, ce fichier declarait
+# requests mais ni scikit-learn ni reportlab ni yfinance. La suite de tests echouait
+# donc a l'import depuis des semaines, sans qu'aucune regression ne soit en cause.
+# Les deux workflows installent desormais ce fichier, et le test
+# `test_toute_dependance_tierce_est_declaree` verifie qu'il reste exhaustif.
 numpy>=1.26
 pandas>=2.0
 scipy>=1.11
-requests>=2.31
+scikit-learn>=1.4          # quantbench/shortterm/regime.py
+requests>=2.31             # quantbench/data/edgar.py, fmp.py, market.py
+reportlab>=4.0             # quantbench/reports/pdf.py
+yfinance>=0.2              # quantbench/data/market.py (repli de cotation)
 fastapi>=0.110
 uvicorn[standard]>=0.27
 # optionnel (tests) : pytest>=8.0
