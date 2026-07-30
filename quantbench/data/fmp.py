@@ -526,7 +526,13 @@ def financials_from_fmp(entry):
          "total_debt": col(bal, "totalDebt"), "long_term_debt": col(bal, "longTermDebt"),
          "retained_earnings": col(bal, "retainedEarnings"),
          "equity": col(bal, "totalStockholdersEquity"), "total_liab": col(bal, "totalLiabilities"),
-         "cfo": col(cf, "operatingCashFlow"), "dep_amort": col(cf, "depreciationAndAmortization")}
+         "cfo": col(cf, "operatingCashFlow"), "dep_amort": col(cf, "depreciationAndAmortization"),
+         # Charges d'interets, en valeur absolue : la couverture doit se mesurer sur
+         # la MEDIANE de plusieurs exercices, un instantane faisant perdre plusieurs
+         # crans a un cyclique en creux puis les lui rendant l'annee suivante.
+         "interest_expense": [None if v is None else abs(v)
+                              for v in col(inc, "interestExpense")],
+         "capex": col(cf, "capitalExpenditure")}
     ca, cl = F["current_assets"], F["current_liab"]
     F["working_capital"] = [(ca[i] - cl[i]) if (ca[i] is not None and cl[i] is not None)
                             else None for i in range(len(yrs))]
@@ -568,8 +574,15 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
     # retient le plus PRUDENT des deux, ce qui ne change rien a une societe dont le
     # compte de resultat est ordinaire.
     pretax, interets = g(inc, "incomeBeforeTax"), g(inc, "interestExpense")
+    ebit_publie, ecart_ebit = ebit, None
     if ebit is not None and pretax is not None:
         ebit_eco = pretax + (abs(interets) if interets else 0.0)
+        # L'ECART entre resultat publie et resultat economique est une information
+        # sur la QUALITE DE LA LIASSE, et il etait calcule puis jete. Un ecart nul
+        # est le cas normal ; un ecart massif signale des charges recurrentes
+        # reclassees hors du resultat operationnel, ou un bras financier consolide.
+        if abs(ebit) > 1e-12:
+            ecart_ebit = (ebit_eco - ebit) / abs(ebit)
         if ebit_eco < ebit:
             ebit = ebit_eco
     eq, debt = g(bal, "totalStockholdersEquity"), g(bal, "totalDebt")
@@ -648,6 +661,23 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         # L'ecart est donc publie tel quel : c'est une information sur la CONFIANCE
         # que merite la donnee, pas un verdict sur la societe.
         "actions_publiees": g(inc, "weightedAverageShsOutDil") or g(inc, "weightedAverageShsOut"),
+        # --- Champs nourrissant la NOTE DE RISQUE -----------------------------
+        # Charges d'interets en VALEUR ABSOLUE : le fournisseur les publie tantot
+        # positives tantot negatives selon l'emetteur, et une couverture d'interets
+        # dont le denominateur change de signe est ininterpretable.
+        "interest_expense": b(abs(g(inc, "interestExpense") or 0.0)) or None,
+        # Ecart entre resultat operationnel PUBLIE et resultat ECONOMIQUE : mesure
+        # de la qualite de la liasse, calculee plus haut et jusqu'ici jetee.
+        "ecart_ebit": ecart_ebit,
+        "ebit_publie": b(ebit_publie),
+        # Incorporels : la solvabilite d'une financiere se juge sur ses fonds
+        # propres TANGIBLES, un ecart d'acquisition n'absorbant aucune perte.
+        "goodwill_intangibles": b(g(bal, "goodwillAndIntangibleAssets")
+                                  or ((g(bal, "goodwill") or 0.0)
+                                      + (g(bal, "intangibleAssets") or 0.0))),
+        # Mur de refinancement a douze mois.
+        "short_term_debt": b(g(bal, "shortTermDebt")),
+        "capital_lease_current": b(g(bal, "capitalLeaseObligationsCurrent")),
         "country": sr.get("country"),
         "currency_ok": not fx_ko, "fx_indisponible": fx_ko,
         "price_currency": price_cur, "financial_currency": rep_cur,

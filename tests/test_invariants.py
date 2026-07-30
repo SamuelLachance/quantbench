@@ -1013,3 +1013,135 @@ def test_les_workflows_installent_les_dependances_declarees():
                     and "--upgrade pip" not in depouille:
                 raise AssertionError(
                     f"{nom} installe une liste tenue a la main : {depouille}")
+
+
+# --------------------------------------------------------------------------- #
+# 29. NOTE DE RISQUE — elle repond a une question DIFFERENTE de l'upside
+#
+# La valorisation dit combien vaut une societe ; la note dit quelle est la
+# probabilite de perdre durablement sa mise. Un titre peut etre tres decote ET tres
+# dangereux — c'est meme la configuration la plus frequente.
+# --------------------------------------------------------------------------- #
+def test_une_note_existe_pour_tout_titre_meme_sans_donnees():
+    """Une note doit exister pour TOUS les titres. L'incertitude sur la donnee est
+    elle-meme un risque, portee par la dimension de confiance — pas un motif pour
+    s'abstenir."""
+    from quantbench.risk import noter
+    for f in (societe(), {}, {"ticker": "X"},
+              societe(revenue=None, ebit=None, book_equity=None, total_assets=None,
+                      cash=None, cfo=None, total_debt=None)):
+        r = noter(f, None)
+        assert "score" in r and 0.0 <= r["score"] <= 1.0, r
+        assert r["grade"] is None or r["grade"] in __import__(
+            "quantbench.risk", fromlist=["GRADES"]).GRADES
+
+
+def test_les_modalites_bornent_l_echelle_sans_passer_par_la_table():
+    """-inf designe le MEILLEUR cas possible d'une dimension (aucune dette,
+    autofinancee, aucune dilution), +inf le PIRE (aucun chiffre d'affaires). Les faire
+    passer par les centiles les melangerait aux mesures : Apple, qui ne paie aucune
+    charge d'interets, ressortait au 63e centile de RISQUE de solvabilite, au-dessus
+    de societes couvrant les leurs trois fois."""
+    import math
+
+    from quantbench.risk.score import rang
+    cal = {"quantiles": {"d1": {"global": [float(i) for i in range(1, 100)]}}}
+    assert rang("d1", -math.inf, cal) == 0.0
+    assert rang("d1", math.inf, cal) == 1.0
+    assert 0.0 < rang("d1", 50.0, cal) < 1.0
+
+
+def test_le_regime_est_structurel_et_non_un_libelle():
+    """Le regime decide de la REGLE appliquee. Il se determine sur le bilan, jamais
+    sur l'etiquette sectorielle du fournisseur : Visa porte "Financial - Credit
+    Services" et n'est pas une banque, Simon Property ne tient que 9 % de fonds
+    propres sans preter un centime."""
+    from quantbench.risk import regime
+    reseau = societe(sector="Financial Services",
+                     industry="Financial - Credit Services",
+                     revenue=36.0, total_assets=90.0, book_equity=39.0,
+                     interest_expense=0.7, ebit=25.0)
+    assert regime(reseau, etats()) != "financiere"
+    banque = societe(sector="Financial Services", industry="Banks - Diversified",
+                     revenue=170.0, total_assets=4200.0, book_equity=340.0,
+                     interest_expense=90.0, ebit=60.0)
+    assert regime(banque, etats()) == "financiere"
+
+
+def test_une_societe_sans_dette_ET_deficitaire_n_est_pas_declaree_sure():
+    """Le piege central de la dimension de solvabilite. La population sans charges
+    d'interets est majoritairement composee de coquilles sans chiffre d'affaires : une
+    regle naive leur decernerait la MEILLEURE note de solvabilite possible. L'absence
+    de dette chez une societe en perte rend la solvabilite INDEFINIE, pas excellente."""
+    from quantbench.risk import regime
+    from quantbench.risk.dimensions import d1_solvabilite
+    coquille = societe(interest_expense=None, ebit=-0.5, net_income=-0.5,
+                       revenue=0.0, operating_margin=None)
+    reg = regime(coquille, etats())
+    assert reg == "sans_dette_deficitaire"
+    signal, _ = d1_solvabilite(coquille, etats(), reg)
+    assert signal is None, "la solvabilite doit etre INDEFINIE, jamais au meilleur rang"
+
+
+def test_le_maillon_faible_est_debiaise_par_le_nombre_de_dimensions():
+    """Le maximum de k rangs uniformes vaut k/(k+1) en esperance — 0,75 a trois
+    dimensions, 0,90 a huit. Sans correction, une societe aux comptes RICHES serait
+    mecaniquement moins bien notee qu'une societe opaque, a risque egal : exactement
+    l'inverse de ce que la note doit dire."""
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "risk" / "score.py").read_text(encoding="utf-8")
+    assert "(1.0 - maximum) ** k" in src, (
+        "le maillon faible n'est plus debiaise par le nombre de dimensions")
+
+
+def test_un_plafond_ne_peut_qu_aggraver_la_note():
+    """Un plafond exprime qu'aucune qualite par ailleurs ne compense un fait de cette
+    nature. Il ne doit jamais AMELIORER une note deja plus mauvaise."""
+    from quantbench.risk.score import _finaliser
+    cal = {"plafonds": {"passif_non_couvert": 0.6}, "bornes_grades": None}
+    assert _finaliser(0.2, ["passif_non_couvert"], [], "exploitante", cal)["score"] == 0.6
+    assert _finaliser(0.9, ["passif_non_couvert"], [], "exploitante", cal)["score"] == 0.9
+
+
+def test_aucun_seuil_de_valeur_dans_les_dimensions():
+    """Les seules constantes autorisees dans le module de dimensions sont des minima
+    ARITHMETIQUES et des bornes de winsorisation, dont l'effet sur un rang est nul par
+    monotonie. Tout seuil disant ce qu'est une BONNE couverture d'interets ou une
+    BONNE marge appartient au calibrage, jamais au code."""
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "risk" / "dimensions.py").read_text(encoding="utf-8")
+    autorises = {"_MIN_EXERCICES_IQR = 3", "_FENETRE_NORMALISATION = 3"}
+    constantes = [ligne.strip() for ligne in src.splitlines()
+                  if ligne.startswith("_") and "=" in ligne and "def " not in ligne
+                  and not ligne.startswith("__")]
+    assert set(constantes) <= autorises, f"constante non autorisee : {constantes}"
+
+
+def test_les_bornes_de_grades_sont_strictement_croissantes():
+    """Un decoupage par quantiles tombait deux fois sur la meme valeur — les plafonds
+    posent le score exactement sur leur niveau et creent des MASSES — et un grade
+    entier restait vide. Les bornes sont donc d'amplitude egale en log-odds."""
+    import json
+    f = (Path(__file__).resolve().parent.parent
+         / "quantbench" / "risk" / "risk_calibration.json")
+    if not f.exists():
+        pytest.skip("calibrage absent")
+    bornes = json.loads(f.read_text(encoding="utf-8")).get("bornes_grades") or []
+    from quantbench.risk import GRADES
+    assert len(bornes) == len(GRADES) - 1
+    assert all(b < c for b, c in zip(bornes, bornes[1:])), bornes
+
+
+def test_le_calibrage_ne_contient_aucun_poids_de_conviction():
+    """Aucune dimension n'entre avec un poids choisi. Tant que la variable de resultat
+    n'est pas construite, l'uniformite est la seule ponderation qui n'affirme rien."""
+    import json
+    f = (Path(__file__).resolve().parent.parent
+         / "quantbench" / "risk" / "risk_calibration.json")
+    if not f.exists():
+        pytest.skip("calibrage absent")
+    cal = json.loads(f.read_text(encoding="utf-8"))
+    poids = set((cal.get("poids") or {}).values())
+    assert len(poids) <= 1 or cal.get("origine_poids", "").startswith("estimee"), (
+        "des poids differencies sans estimation declaree : "
+        f"{cal.get('poids')} / origine={cal.get('origine_poids')}")
