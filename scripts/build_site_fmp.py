@@ -216,18 +216,23 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
                                  seed=42)["equity_values"]
             eq = np.maximum(eq, 0.0)                    # responsabilité limitée : équité ≥ 0
             # Pondération de la catégorie (miroir de route.value_young/value_distressed)
+            # LES PONDERATIONS SONT CELLES DU ROUTAGE, APPELEES et non recopiees.
+            # Ce bloc portait encore, le jour meme de leur correction, la survie
+            # plancherisee a 0,30 et mesuree sur le RESULTAT NET, et une valeur de
+            # liquidation posee a la moitie des fonds propres — l'erreur exacte que
+            # `valeur_de_liquidation` corrige : appliquer la decote a l'equite revient
+            # a supposer que les dettes la subissent au benefice de l'actionnaire.
+            from quantbench.valuation.route import (probabilite_de_survie,
+                                                    valeur_de_liquidation)
             if category == "jeune/deficitaire":
-                ni = fund.get("net_income") or 0.0
-                burn = -ni if ni < 0 else 0.0
-                cash = fund.get("cash") or 0.0
-                surv = min(max(0.3 + 0.15 * (cash / burn), 0.3), 0.9) if burn > 0 else 0.85
-                liq = 0.5 * max(fund.get("book_equity") or 0.0, 0.0)
+                surv = probabilite_de_survie(fund)
+                liq = valeur_de_liquidation(fund)
                 eq = np.maximum(eq * surv + liq * (1.0 - surv), 0.0)
             elif category == "detresse":
                 from quantbench.forensics.scores import default_probability
                 z = (forensic or {}).get("scores", {}).get("altman_z")
                 pdef = default_probability(z)
-                liq = 0.5 * max(fund.get("book_equity") or 0.0, 0.0)
+                liq = valeur_de_liquidation(fund)
                 eq = np.maximum(eq * (1.0 - pdef) + liq * pdef, 0.0)
             elif category in ("mature_deficitaire", "cyclique") and margin is not None:
                 # MIROIR OBLIGATOIRE du routage : ces deux methodes valorisent un
@@ -235,12 +240,13 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
                 # de l'atteindre. Sans ce miroir, la mediane simulee ecrase la
                 # ponderation et le redressement redevient certain — c'est le meme
                 # angle mort qui faisait repasser General Motors de -70 % a -100 %.
-                from quantbench.valuation.route import (probabilite_de_realisation,
-                                                        sect)
+                from quantbench.valuation.route import probabilite_de_realisation
                 p_real = probabilite_de_realisation(fund, F, margin)
                 if p_real < 0.999:
-                    liq = sect(fund, "recuperation", 0.5) * max(
-                        fund.get("book_equity") or 0.0, 0.0)
+                    # Derniere copie de l'erreur Wesizwe : la decote de recuperation
+                    # appliquee aux FONDS PROPRES au lieu de l'ACTIF, ce qui revient a
+                    # supposer que les dettes la subissent au benefice de l'actionnaire.
+                    liq = valeur_de_liquidation(fund)
                     eq = np.maximum(eq * p_real + liq * (1.0 - p_real), 0.0)
     except Exception:
         return None
@@ -375,15 +381,24 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     if not val.get("ok"):
         return None, {"__rejet__": [val.get("reason") or "valorisation impossible"],
                       "ticker": symbol, "reparations_tentees": reparations}
-    # Monte Carlo : l'upside affiché est basé sur la MÉDIANE de la simulation
+    # MONTE CARLO : IL MESURE L'INCERTITUDE, IL NE PRODUIT PLUS LA VALEUR.
+    #
+    # Sa mediane ECRASAIT l'upside du routage sur les deux tiers de l'univers. Le
+    # probleme n'est pas que la mediane simulee differe de la valeur deterministe —
+    # mediane(f(X)) n'est pas f(mediane X), c'est une propriete et non une erreur.
+    # Le probleme est structurel : `run_mc` est une SECONDE IMPLEMENTATION de la
+    # valorisation, et c'est son resultat qui etait publie.
+    # Elle portait d'ailleurs encore, ce jour meme, trois regles corrigees le matin
+    # dans le routage : la survie plancherisee a 0,30 et mesuree sur le RESULTAT NET,
+    # et une valeur de liquidation posee a la moitie des fonds propres — l'erreur
+    # exacte que `valeur_de_liquidation` corrige et nomme dans sa docstring.
+    # Une regle n'a droit qu'a une seule ecriture, et c'est le routage qui la porte.
+    #
+    # La simulation reste publiee : bande de dispersion, percentiles et probabilite
+    # de sous-valorisation. C'est son objet — mesurer l'incertitude autour de la
+    # valeur, pas la remplacer.
     mc = run_mc(fund, val.get("category"), F=F, forensic=forensic,
                 method=val.get("method"))
-    if mc and fund.get("market_cap"):
-        if mc["vps"].get("p50") is not None:
-            val["value_per_share"] = mc["vps"]["p50"]
-        # Responsabilite limitee : l'upside ne peut pas descendre sous -100 %.
-        val["upside"] = round(max(mc["median"] / fund["market_cap"] - 1.0, -1.0), 4)
-        val["upside_basis"] = "monte_carlo"
     # UN SEUL appel pour les cours ET le volume : la reponse porte deja les deux,
     # et nous jetions le second. La liquidite est pourtant la seule mesure directe
     # de la capacite a REVENDRE — un titre qu'on ne peut pas sortir a un prix

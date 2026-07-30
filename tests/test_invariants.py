@@ -1611,3 +1611,41 @@ def test_les_grandes_valeurs_ne_sont_pas_plafonnees_en_masse():
                         book_equity=40.0, cash=1.0, cfo=12.0, capex=-6.0,
                         dep_amort=6.0, net_income=5.0)
         assert not _modalites(saine, etats(), [], {}, reg=reg), reg
+
+
+# --------------------------------------------------------------------------- #
+# 33. MONTE CARLO — il mesure l'incertitude, il ne produit pas la valeur
+# --------------------------------------------------------------------------- #
+def test_l_upside_publie_est_celui_du_routage():
+    """La mediane simulee ECRASAIT l'upside du routage sur les deux tiers de
+    l'univers. Le probleme n'est pas que la mediane differe du deterministe —
+    mediane(f(X)) n'est pas f(mediane X), c'est une propriete et non une erreur. Le
+    probleme est structurel : `run_mc` est une SECONDE IMPLEMENTATION de la
+    valorisation, et c'est SON resultat qui etait publie."""
+    src = (Path(__file__).resolve().parent.parent
+           / "scripts" / "build_site_fmp.py").read_text(encoding="utf-8")
+    corps = src.split("def build_one(")[1].split(chr(10) + "def ")[0]
+    for interdit in ('val["upside"] =', 'val["value_per_share"] =', "upside_basis"):
+        assert interdit not in corps, (
+            f"la simulation ecrase encore la valorisation routee : {interdit}")
+
+
+def test_la_simulation_n_a_pas_sa_propre_survie_ni_sa_propre_liquidation():
+    """Le miroir portait encore, le jour meme de leur correction, la survie
+    plancherisee a 0,30 et mesuree sur le RESULTAT NET, et une valeur de liquidation
+    posee a la moitie des fonds propres — l'erreur exacte que `valeur_de_liquidation`
+    corrige et nomme dans sa docstring. Sur RDGT, le miroir injectait 1 131 points
+    d'upside que le routage ne produisait pas."""
+    src = (Path(__file__).resolve().parent.parent
+           / "scripts" / "build_site_fmp.py").read_text(encoding="utf-8")
+    corps = src.split("def run_mc(")[1].split(chr(10) + "def ")[0]
+    for interdit in ("0.5 * max(fund.get", "0.3 + 0.15", 'sect(fund, "recuperation"'):
+        assert interdit not in corps, f"regle recopiee dans la simulation : {interdit}"
+    for attendu in ("probabilite_de_survie(fund)", "valeur_de_liquidation(fund)"):
+        assert attendu in corps, f"la simulation n'appelle pas {attendu}"
+
+
+def test_la_page_ne_pretend_plus_que_l_upside_vient_de_la_mediane():
+    page = (Path(__file__).resolve().parent.parent
+            / "app" / "stock.html").read_text(encoding="utf-8")
+    assert "upside affiché est fondé sur la médiane" not in page
