@@ -1401,3 +1401,21 @@ def test_les_reperes_sectoriels_sont_remesures_periodiquement():
     assert "build_risk_stats" not in textes, (
         "le calibrage de la note de risque est GELE : le regenerer automatiquement le "
         "transformerait en simple classement de l'univers du jour")
+
+
+def test_le_plafond_de_liquidation_n_atteint_pas_une_societe_qui_encaisse():
+    """La valeur de liquidation d'APPLE est nulle : 0,65 x 359 Md$ d'actif ne couvre
+    pas 285 Md$ de passif. Un plafond declenche sur ce seul constat frapperait donc
+    toute grande societe. Une liquidation ne se pose que pour une societe qui NE
+    GENERE PAS de tresorerie — celle qui encaisse n'est pas liquidee, quelle que soit
+    la decote theorique sur son actif."""
+    from quantbench.risk.score import _modalites
+    geante = societe(total_assets=359.0, total_liab=285.0, total_equity=73.0,
+                     book_equity=73.0, cash=36.0, cfo=110.0, capex=-11.0)
+    assert "passif_non_couvert" not in _modalites(geante, etats(), [], {})
+    # Une societe qui consomme ET dont l'actif realisable ne couvre pas le passif,
+    # elle, doit etre plafonnee — meme si son actif COMPTABLE depasse le passif, la
+    # decote de realisation suffisant a creuser l'ecart.
+    exsangue = societe(total_assets=0.00072, total_liab=0.00071, total_equity=0.00001,
+                       book_equity=0.00001, cash=0.0001, cfo=-0.0003, capex=0.0)
+    assert "passif_non_couvert" in _modalites(exsangue, etats(), [], {})

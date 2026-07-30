@@ -91,11 +91,20 @@ def _modalites(fund, F, motifs, mesures):
     est une observation qu'aucune qualite par ailleurs ne compense."""
     from ..valuation.route import consommation_de_tresorerie, valeur_de_liquidation
     out = []
-    ta, tl = fund.get("total_assets"), fund.get("total_liab")
-    if ta and tl is not None and valeur_de_liquidation(fund) <= 0 and tl > ta:
-        out.append("passif_non_couvert")
     be = fund.get("book_equity")
     conso = consommation_de_tresorerie(fund)
+    # PASSIF NON COUVERT PAR L'ACTIF REALISABLE.
+    # La condition portait sur `passif > actif` — trop stricte : la decote de
+    # realisation peut rendre l'actif insuffisant alors meme que sa valeur COMPTABLE
+    # depasse le passif. Une societe pre-revenu ressortait ainsi notee B avec une
+    # equite valorisee a zero.
+    # Mais la retirer sans rien mettre a la place serait pire : la valeur de
+    # liquidation d'APPLE est nulle — 0,65 x 359 Md$ d'actif ne couvre pas 285 Md$ de
+    # passif — et toute grande societe serait plafonnee. Une liquidation ne se pose
+    # que pour une societe qui NE GENERE PAS de tresorerie ; celle qui encaisse n'est
+    # pas liquidee, quelle que soit la decote theorique sur son actif.
+    if valeur_de_liquidation(fund) <= 0 and conso > 0:
+        out.append("passif_non_couvert")
     if be is not None and be <= 0 and conso > 0:
         out.append("fonds_propres_absorbes")
     if conso > 0:
