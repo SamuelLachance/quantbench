@@ -191,8 +191,8 @@ def get_fundamentals(ticker: str) -> dict:
         "revenue": b(revenue), "revenue_history": [x / _B for x in rev_hist],
         "ebit": b(ebit), "net_income": b(ni),
         "total_debt": b(debt), "cash": b(cash), "book_equity": b(equity),
-        "operating_margin": (ebit / revenue) if (ebit and revenue) else None,
-        "roe": (ni / equity) if (ni and equity) else None,
+        "operating_margin": (ebit / revenue) if (ebit is not None and revenue) else None,
+        "roe": (ni / equity) if (ni is not None and equity) else None,
         "sic": meta.get("sic"),
     }
 

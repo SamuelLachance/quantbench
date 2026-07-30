@@ -1466,3 +1466,32 @@ def test_le_levier_forensique_compare_deux_annees_de_meme_nature():
     assert r is not None
     assert r["tests"]["Levier en baisse"] is False, (
         "un levier strictement stable ne peut pas etre declare en baisse")
+
+
+def test_zero_est_une_mesure_pas_un_manque():
+    """Le piege FALSY, quatrieme occurrence de la journee apres le passif nul,
+    l'actif nul et la dette a long terme nulle.
+
+    `_safe_div(ebit, rev) or 0.10` traitait une marge CALCULEE A ZERO comme une marge
+    ABSENTE : une societe a resultat operationnel exactement nul se voyait attribuer
+    10 % de marge, projetee ensuite a l'infini par le DCF. En Python, `0` est faux —
+    tout champ comptable pouvant valoir zero doit etre teste contre `None`."""
+    from quantbench.valuation.build_universal import build_dcf_from_fundamentals
+    nulle = societe(ebit=0.0, operating_margin=None, revenue=5.0)
+    x, meta = build_dcf_from_fundamentals(nulle)
+    assert abs(meta["op_margin"]) < 1e-9, (
+        f"marge de {meta['op_margin']:.3f} pour un resultat operationnel NUL")
+    # Une marge reellement absente, elle, garde son repli.
+    absente = societe(ebit=None, operating_margin=None, revenue=5.0)
+    _x2, meta2 = build_dcf_from_fundamentals(absente)
+    assert abs(meta2["op_margin"] - 0.10) < 1e-9
+
+
+def test_une_marge_nulle_est_publiee_comme_nulle():
+    """Meme piege dans la couche de donnees : `(ebit / rev) if (ebit and rev)`
+    renvoyait None pour un EBIT nul, ce qui declenchait le repli ci-dessus."""
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "data" / "fmp.py").read_text(encoding="utf-8")
+    assert "if (ebit and rev)" not in src, (
+        "un resultat operationnel NUL est declare absent")
+    assert "if (ni and eq)" not in src, "un resultat net NUL est declare absent"

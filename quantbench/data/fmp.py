@@ -728,8 +728,8 @@ def fundamentals_from_fmp(symbol, sr, entry, desc):
         "total_equity": b(g(bal, "totalEquity")) or (
             (b(g(bal, "totalStockholdersEquity")) or 0.0)
             + (b(g(bal, "minorityInterest")) or 0.0)) or None,
-        "operating_margin": (ebit / rev) if (ebit and rev) else None,
-        "roe": (ni / eq) if (ni and eq) else None,
+        "operating_margin": (ebit / rev) if (ebit is not None and rev) else None,
+        "roe": (ni / eq) if (ni is not None and eq) else None,
         # Amortissements + flux d'exploitation : nécessaires au FFO des foncières
         # (Damodaran : les REIT se valorisent sur FFO/NAV, pas sur le FCFF).
         "dep_amort": b(g(cf, "depreciationAndAmortization")),

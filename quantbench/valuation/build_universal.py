@@ -195,7 +195,11 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
 
     op_margin = margin_override if margin_override is not None else fund.get("operating_margin")
     if op_margin is None:
-        op_margin = _safe_div(fund.get("ebit"), rev) or 0.10
+        # `... or 0.10` traitait une marge CALCULEE A ZERO comme une marge ABSENTE :
+        # une societe a resultat operationnel exactement nul se voyait attribuer 10 %
+        # de marge, projetee ensuite a l'infini. Zero est une mesure, pas un manque.
+        mesuree = _safe_div(fund.get("ebit"), rev)
+        op_margin = mesuree if mesuree is not None else 0.10
     op_margin = _clamp(op_margin, -0.20, 0.75)
     tx = tax_rate(pays_exploitation(fund))      # impot du pays d'EXPLOITATION
 

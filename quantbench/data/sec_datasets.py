@@ -207,8 +207,8 @@ def extract_fundamentals(entry, ticker, quote) -> dict:
         "revenue": bb(revenue), "revenue_history": [x / B for x in rev_hist],
         "ebit": bb(ebit), "net_income": bb(ni),
         "total_debt": bb(debt), "cash": bb(cash), "book_equity": bb(equity),
-        "operating_margin": (ebit / revenue) if (ebit and revenue) else None,
-        "roe": (ni / equity) if (ni and equity) else None,
+        "operating_margin": (ebit / revenue) if (ebit is not None and revenue) else None,
+        "roe": (ni / equity) if (ni is not None and equity) else None,
         "sic": entry.get("sic"),
     }
 
