@@ -48,6 +48,9 @@ from quantbench.data import fmp                                    # noqa: E402
 from quantbench.data.repair import reparer                         # noqa: E402
 from quantbench.data.validate import valider                       # noqa: E402
 from quantbench.risk import noter                                  # noqa: E402
+from quantbench.risk.statistiques import (                         # noqa: E402
+    aire_sous_la_courbe as _auc, mediane, spearman,
+    test_deux_proportions, wilson)
 
 RACINE = Path(__file__).resolve().parent.parent
 SORTIE = RACINE / "app" / "us" / "_validation_risque.json"
@@ -243,83 +246,7 @@ def evaluer(sym, sr, jour_t0: str, radiees: dict, plafond_capi=None):
 # --------------------------------------------------------------------------- #
 # Statistiques
 # --------------------------------------------------------------------------- #
-def wilson(k, n, z=1.96):
-    """Intervalle de confiance de Wilson pour une proportion.
 
-    Preferé a l'intervalle normal : avec dix observations dans un grade et zero
-    effondrement, l'intervalle normal donne [0 %, 0 %], ce qui affirmerait une
-    certitude que dix observations ne peuvent pas porter.
-    """
-    if n == 0:
-        return (0.0, 1.0)
-    p = k / n
-    d = 1 + z * z / n
-    c = (p + z * z / (2 * n)) / d
-    e = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
-    return (max(0.0, c - e), min(1.0, c + e))
-
-
-def test_deux_proportions(k1, n1, k2, n2):
-    """Test z sur la difference de deux proportions. Renvoie (z, p bilateral).
-
-    Il remplace une comparaison d'intervalles de confiance, qui donnait ici un
-    verdict FAUX. Les intervalles de Wilson de A [15,3 % ; 32,1 %] et de F
-    [32,0 % ; 52,4 %] se chevauchent de un dixieme de point, d'ou la conclusion
-    "separation non etablie" — alors que le test direct de la difference donne
-    p = 0,006. Le chevauchement de deux intervalles est un critere CONSERVATEUR :
-    son absence prouve la difference, sa presence ne prouve rien. Conclure de l'un
-    a l'autre revient a declarer un instrument aveugle parce qu'on l'a mal lu.
-    """
-    if n1 == 0 or n2 == 0:
-        return (None, None)
-    p1, p2 = k1 / n1, k2 / n2
-    p = (k1 + k2) / (n1 + n2)
-    se = math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2))
-    if se == 0:
-        return (None, None)
-    z = (p2 - p1) / se
-    # Fonction de repartition normale via erf : evite une dependance a scipy dans
-    # un script destine a tourner en integration continue.
-    p_bilateral = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))
-    return (z, p_bilateral)
-
-
-def mediane(xs):
-    s = sorted(xs)
-    if not s:
-        return None
-    m = len(s) // 2
-    return s[m] if len(s) % 2 else (s[m - 1] + s[m]) / 2
-
-
-def spearman(paires):
-    """Correlation de rang entre le rang du grade et le taux d'effondrement."""
-    if len(paires) < 3:
-        return None
-    xs = [p[0] for p in paires]
-    ys = [p[1] for p in paires]
-
-    def rangs(v):
-        o = sorted(range(len(v)), key=lambda i: v[i])
-        r = [0.0] * len(v)
-        i = 0
-        while i < len(o):
-            j = i
-            while j + 1 < len(o) and v[o[j + 1]] == v[o[i]]:
-                j += 1
-            moy = (i + j) / 2 + 1
-            for k in range(i, j + 1):
-                r[o[k]] = moy
-            i = j + 1
-        return r
-
-    rx, ry = rangs(xs), rangs(ys)
-    n = len(rx)
-    mx, my = sum(rx) / n, sum(ry) / n
-    num = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
-    dx = math.sqrt(sum((a - mx) ** 2 for a in rx))
-    dy = math.sqrt(sum((b - my) ** 2 for b in ry))
-    return num / (dx * dy) if dx and dy else None
 
 
 def agreger(res, cle):
@@ -384,27 +311,9 @@ def par_taille(res, n_paquets=3):
 
 
 def aire_sous_la_courbe(paires):
-    """AUC : probabilite qu'une societe effondree soit MOINS bien classee qu'une
-    societe intacte tiree au hasard. Calculee par la statistique de Mann-Whitney,
-    ex aequo comptes une demie.
-
-    0,50 signifie exactement aucune information — un tirage a pile ou face. C'est
-    la seule lecture qui compte ici : une dimension a 0,50 pese dans la note sans
-    rien y apporter, et la moyenne uniforme la fait entrer au meme titre qu'une
-    dimension qui separe vraiment.
-    """
-    pos = [r for r, y in paires if y]          # effondrees
-    neg = [r for r, y in paires if not y]
-    if not pos or not neg:
-        return None
-    neg_tries = sorted(neg)
-    import bisect
-    total = 0.0
-    for r in pos:
-        inf = bisect.bisect_left(neg_tries, r)
-        egaux = bisect.bisect_right(neg_tries, r) - inf
-        total += inf + 0.5 * egaux
-    return total / (len(pos) * len(neg))
+    """AUC seule. L'ecart-type accompagne la mesure la ou elle est publiee."""
+    auc, _se = _auc(paires)
+    return auc
 
 
 def pouvoir_des_dimensions(res):
@@ -424,7 +333,7 @@ def pouvoir_des_dimensions(res):
     for cle, nom, _f, _niv in DIMENSIONS:
         sous = [r for r in res if cle in (r.get("dimensions") or {})]
         paires = [(r["dimensions"][cle], r["effondre"]) for r in sous]
-        auc = aire_sous_la_courbe(paires)
+        auc, ecart_type = _auc(paires)
         if auc is None:
             # Une dimension jamais definissable dans cette reconstitution n'est pas
             # une dimension sans pouvoir : elle est NON TESTEE. La liquidite de
@@ -432,18 +341,26 @@ def pouvoir_des_dimensions(res):
             # l'instantane, que le calcul de note ne recoit pas ici. Le taire
             # laisserait lire son absence comme une absence de signal.
             out.append({"dimension": cle, "nom": noms[cle], "n": 0, "auc": None,
+                        "ecart_type": None,
                         "auc_note_meme_sous_echantillon": None, "couverture": 0.0,
                         "verdict": "non testee dans cette reconstitution"})
             continue
         auc_note = aire_sous_la_courbe(
             [(r["score"], r["effondre"]) for r in sous if r.get("score") is not None])
-        if auc < 0.53:
-            verdict = "n'apporte rien"
-        elif auc < 0.55:
-            verdict = "marginal"
+        # LE VERDICT SE LIT EN ECARTS-TYPES, PAS EN CENTIEMES. Un seuil fixe a
+        # 0,53 juge un chiffre sans savoir a quelle precision il est connu : le
+        # meme 0,545 est une information sur mille six cents societes et du bruit
+        # sur cent. On compte donc les ecarts-types qui separent la mesure de 0,50,
+        # c'est-a-dire de l'absence totale d'information.
+        sigmas = (auc - 0.5) / ecart_type if ecart_type else 0.0
+        if sigmas < 2.0:
+            verdict = "indistinguable du hasard"
+        elif sigmas < 4.0:
+            verdict = "signal faible"
         else:
             verdict = "porte du signal"
         out.append({"dimension": cle, "nom": noms[cle], "n": len(paires), "auc": auc,
+                    "ecart_type": ecart_type, "ecarts_types_au_hasard": sigmas,
                     "auc_note_meme_sous_echantillon": auc_note,
                     "couverture": len(paires) / len(res), "verdict": verdict})
     out.sort(key=lambda d: -(d["auc"] if d["auc"] is not None else -1))
@@ -570,16 +487,17 @@ def main(horizon=24, echantillon=900, workers=14, graine=20260730):
     dims = pouvoir_des_dimensions(res)
     if dims:
         print("\n  POUVOIR DE CHAQUE DIMENSION (AUC ; 0,500 = aucune information) :")
-        print(f"    {'dimension':28} {'AUC':>6} {'note ici':>9} {'ecart':>7} "
-              f"{'couvre':>7}  verdict")
+        print(f"    {'dimension':28} {'AUC':>6} {'+/-':>6} {'sigmas':>7} "
+              f"{'note ici':>9} {'couvre':>7}  verdict")
         for d in dims:
             if d["auc"] is None:
-                print(f"    {d['nom']:28} {'—':>6} {'—':>9} {'—':>7} {'—':>7}  "
-                      f"{d['verdict']}")
+                print(f"    {d['nom']:28} {'—':>6} {'—':>6} {'—':>7} {'—':>9} "
+                      f"{'—':>7}  {d['verdict']}")
                 continue
             an = d["auc_note_meme_sous_echantillon"]
-            print(f"    {d['nom']:28} {d['auc']:6.3f} {an:9.3f} "
-                  f"{an - d['auc']:+7.3f} {d['couverture']*100:6.1f}%  {d['verdict']}")
+            print(f"    {d['nom']:28} {d['auc']:6.3f} {d['ecart_type']:6.3f} "
+                  f"{d['ecarts_types_au_hasard']:7.1f} {an:9.3f} "
+                  f"{d['couverture']*100:6.1f}%  {d['verdict']}")
         auc_note = aire_sous_la_courbe([(r["score"], r["effondre"]) for r in res
                                         if r.get("score") is not None])
         if auc_note is not None:

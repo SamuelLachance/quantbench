@@ -2380,3 +2380,83 @@ def test_larchive_mensuelle_garde_la_mesure_la_plus_large():
             assert json.loads(f.read_text(encoding="utf-8"))["n"] == 301
         finally:
             mod.US = old_us
+
+
+# --------------------------------------------------------------------------- #
+# Statistiques de jugement : une seule ecriture
+# --------------------------------------------------------------------------- #
+def test_laire_sous_la_courbe_est_juste():
+    """Verifiee contre les cas ou la reponse est connue d'avance, et contre
+    scikit-learn quand il est disponible. Les EX AEQUO comptent pour une demie :
+    sans cela, une dimension a valeurs discretes serait creditee d'un pouvoir
+    qu'elle n'a pas."""
+    import random
+
+    from quantbench.risk.statistiques import aire_sous_la_courbe
+
+    assert aire_sous_la_courbe([(0.1, False), (0.2, False),
+                                (0.8, True), (0.9, True)])[0] == 1.0
+    assert aire_sous_la_courbe([(0.9, False), (0.8, False),
+                                (0.2, True), (0.1, True)])[0] == 0.0
+    assert aire_sous_la_courbe([(0.5, True), (0.5, False)])[0] == 0.5
+    assert aire_sous_la_courbe([(1.0, True)]) == (None, None)   # une seule classe
+
+    # L'ecart-type doit RETRECIR quand l'echantillon grandit, sinon il ne mesure
+    # rien. La separation doit etre IMPARFAITE pour que la question ait un sens :
+    # une AUC de 1,0 a une variance de Hanley-McNeil exactement nulle a tout
+    # effectif, et comparer deux zeros ne prouve pas que l'ecart-type reagit.
+    def bruite(n, graine):
+        r = random.Random(graine)
+        return [(r.gauss(1.0 if i % 3 == 0 else 0.0, 1.0), i % 3 == 0)
+                for i in range(n)]
+
+    petit = aire_sous_la_courbe(bruite(40, 1))
+    grand = aire_sous_la_courbe(bruite(4000, 1))
+    assert 0.5 < grand[0] < 1.0, grand[0]
+    assert 0.0 < grand[1] < petit[1], (petit[1], grand[1])
+
+    try:
+        from sklearn.metrics import roc_auc_score
+    except ImportError:
+        return
+    rng = random.Random(11)
+    for _ in range(60):
+        n = rng.randint(30, 300)
+        paires = [(round(rng.uniform(0, 1), rng.choice([1, 2, 3])), rng.random() < 0.3)
+                  for _ in range(n)]
+        ys = [y for _s, y in paires]
+        if not any(ys) or all(ys):
+            continue
+        attendu = roc_auc_score(ys, [s for s, _y in paires])
+        assert aire_sous_la_courbe(paires)[0] == pytest.approx(attendu, abs=1e-12)
+
+
+def test_les_scripts_de_mesure_ne_redefinissent_pas_les_statistiques():
+    """Deux scripts jugent la note de risque et avaient chacun leur aire sous la
+    courbe. Elles s'accordaient, mais l'une rendait l'ecart-type et l'autre non :
+    le tableau publie affichait donc des AUC sans jamais dire a quelle precision.
+    Une regle n'a le droit qu'a une seule ecriture."""
+    racine = Path(__file__).resolve().parent.parent
+    for nom in ("valider_les_notes.py", "mesurer_les_notes.py"):
+        src = (racine / "scripts" / nom).read_text(encoding="utf-8")
+        assert "quantbench.risk.statistiques" in src, \
+            f"{nom} n'utilise pas la source unique"
+        for interdit in ("def wilson(", "def test_deux_proportions(",
+                         "def spearman(", "def mediane("):
+            assert interdit not in src, f"{nom} redefinit {interdit.strip('def (')}"
+        # `aire_sous_la_courbe` peut etre reexposee localement, mais jamais
+        # RECALCULEE : la statistique de Mann-Whitney n'a pas a exister deux fois.
+        assert "bisect" not in src and "Mann-Whitney" not in src, \
+            f"{nom} recalcule l'aire sous la courbe au lieu de l'importer"
+
+
+def test_le_verdict_dune_dimension_se_lit_en_ecarts_types():
+    """Un seuil fixe juge un chiffre sans savoir a quelle precision il est connu :
+    le meme 0,545 est une information sur mille six cents societes et du bruit sur
+    cent. Le verdict doit donc compter les ecarts-types qui separent la mesure de
+    0,500, c'est-a-dire de l'absence totale d'information."""
+    racine = Path(__file__).resolve().parent.parent
+    src = (racine / "scripts" / "valider_les_notes.py").read_text(encoding="utf-8")
+    assert "ecarts_types_au_hasard" in src
+    assert "auc < 0.53" not in src, "seuil fixe rétabli sur l'AUC"
+    assert "indistinguable du hasard" in src

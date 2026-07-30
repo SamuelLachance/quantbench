@@ -34,6 +34,7 @@ _ICI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_ICI))
 
 from quantbench.risk import GRADES                                   # noqa: E402
+from quantbench.risk.statistiques import aire_sous_la_courbe  # noqa: E402
 
 ARCHIVES = os.path.join(os.path.dirname(_ICI), "app", "us", "_notes_risque")
 # Seuil d'EFFONDREMENT. Ce n'est pas une opinion de valorisation mais la definition
@@ -55,33 +56,6 @@ def archives_disponibles():
         return []
     return sorted(f[:-5] for f in os.listdir(ARCHIVES) if f.endswith(".json"))
 
-
-def aire_sous_la_courbe(paires):
-    """Probabilite qu'un titre effondre porte un score PIRE qu'un titre epargne.
-    0,50 = aucun pouvoir discriminant. Calcul par rangs (statistique de Mann-Whitney),
-    exact et sans hypothese de distribution."""
-    positifs = [s for s, y in paires if y]
-    negatifs = [s for s, y in paires if not y]
-    if not positifs or not negatifs:
-        return None, None
-    tous = sorted(paires, key=lambda p: p[0])
-    rangs, i = {}, 0
-    while i < len(tous):
-        j = i
-        while j + 1 < len(tous) and tous[j + 1][0] == tous[i][0]:
-            j += 1
-        moyen = (i + j) / 2.0 + 1
-        for k in range(i, j + 1):
-            rangs.setdefault(tous[k][0], moyen)
-        i = j + 1
-    somme = sum(rangs[s] for s, y in paires if y)
-    n1, n0 = len(positifs), len(negatifs)
-    auc = (somme - n1 * (n1 + 1) / 2.0) / (n1 * n0)
-    # Ecart-type de Hanley-McNeil : sans lui, un chiffre isole ne se lit pas.
-    q1, q2 = auc / (2 - auc), 2 * auc * auc / (1 + auc)
-    var = (auc * (1 - auc) + (n1 - 1) * (q1 - auc ** 2)
-           + (n0 - 1) * (q2 - auc ** 2)) / (n1 * n0)
-    return auc, math.sqrt(max(var, 0.0))
 
 
 def main(depart, arrivee):

@@ -325,11 +325,16 @@ function rendVal(v){
   const fam=v.par_famille.map(l=>`<tr><td>${l.grade}</td><td>${l.n}</td>`
     +`<td>${pc(l.taux)}</td><td>${pc(l.rendement_median,1)}</td>`
     +`<td>${pc(l.creux_median,1)}</td></tr>`).join('');
+  // L'ECART-TYPE ACCOMPAGNE CHAQUE AUC. Un chiffre sans son incertitude ne se lit
+  // pas : 0,545 et 0,491 se distinguent si l'ecart-type vaut 0,013, pas s'il vaut
+  // 0,05. Le verdict est d'ailleurs calcule en ecarts-types a 0,500, jamais contre
+  // un seuil fixe qui jugerait sans savoir a quelle precision on mesure.
   const dims=v.dimensions.map(x=>`<tr><td>${x.nom}</td>`
-    +`<td>${x.auc==null?'—':nb3(x.auc)}</td>`
-    +`<td>${x.auc==null?'non testée ici':(x.couverture*100).toFixed(0)+' %'}</td></tr>`).join('')
-    +`<tr><td><strong>note complète</strong></td><td><strong>${nb3(v.auc_note)}</strong></td><td>100 %</td></tr>`;
-  const nulles=v.dimensions.filter(x=>x.auc!=null&&x.auc<0.53).map(x=>x.nom);
+    +`<td>${x.auc==null?'—':nb3(x.auc)+(x.ecart_type==null?'':' ± '+nb3(x.ecart_type))}</td>`
+    +`<td>${x.auc==null?'non testée ici':(x.verdict||'')}</td></tr>`).join('')
+    +`<tr><td><strong>note complète</strong></td><td><strong>${nb3(v.auc_note)}</strong></td><td>—</td></tr>`;
+  const nulles=v.dimensions.filter(x=>x.auc!=null
+    &&(x.verdict||'').indexOf('hasard')>=0).map(x=>x.nom);
   const capA=(v.par_famille.find(l=>l.grade==='A')||{}).cap_mediane;
   el.innerHTML=`
     <p><strong>Confrontée aux faits.</strong> La note a été reconstruite telle qu’elle
@@ -355,11 +360,14 @@ function rendVal(v){
     probabilité qu’une société qui s’est effondrée ait été moins bien classée qu’une société
     intacte tirée au hasard. 0,500 signifie exactement aucune information.</p>
     <table class="mini-table"><tr><th>dimension</th><th>AUC</th>
-      <th>définissable sur</th></tr>${dims}</table>
+      <th>lecture</th></tr>${dims}</table>
     <p>La note fait mieux que chacune de ses dimensions prise seule — agréger apporte donc
-    quelque chose.${nulles.length?' Ce constat va contre le modèle et il est publié tel quel : '
-    +nulles.join(', ')+(nulles.length>1?' n’ont':' n’a')+' annoncé aucun effondrement sur cette'
-    +' fenêtre.':''} La pondération reste pourtant uniforme : réajuster des poids sur les
+    quelque chose. Le verdict de chaque ligne se lit en écarts-types à 0,500 et non
+    contre un seuil fixe : le même 0,545 est une information sur mille six cents
+    sociétés et du bruit sur cent.${nulles.length?' Ce constat va contre le modèle et il '
+    +'est publié tel quel : '+nulles.join(', ')+(nulles.length>1?' ne se distinguent':
+    ' ne se distingue')+' pas du hasard sur cette fenêtre.':''} La pondération reste
+    pourtant uniforme : réajuster des poids sur les
     ${mil(v.n)} sociétés qui ont servi à les mesurer reviendrait à apprendre par cœur cette
     fenêtre-là.</p>
     <p><strong>Ce que cette mesure ne prouve pas.</strong> Un seul instantané, un seul
