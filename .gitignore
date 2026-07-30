@@ -20,8 +20,25 @@ Thumbs.db
 *.parquet
 data_cache/
 
-# PDF générés (déployés via artefact Pages, pas commités)
-app/us/
+# Fiches par titre et PDF : régénérés à chaque build, déployés via l'artefact
+# Pages, jamais commités — seize mille fichiers n'ont rien à faire dans un dépôt.
+#
+# MAIS DEUX MESURES DOIVENT SURVIVRE AU BUILD, et `app/us/` les emportait toutes
+# les deux en silence. Chaque exécution repart d'une copie fraîche du dépôt : ce
+# qui n'y est pas commité n'a jamais existé.
+#   - `_notes_risque/` archive chaque mois la note de toutes les sociétés. Son
+#     unique raison d'être est d'être relue DANS UN AN pour mesurer ce qui est
+#     arrivé. Ignorée, elle se recréait vide à chaque build : la promesse
+#     affichée sur chaque fiche était structurellement intenable.
+#   - `_validation_risque*.json` porte la confrontation de la note aux faits, que
+#     la fiche va CHERCHER au chargement. Ignorée, la page affichait « mesure
+#     indisponible » en production alors que tout était vert en intégration.
+# On exclut donc le CONTENU du dossier, pas le dossier, pour pouvoir réadmettre
+# ces deux-là nommément.
+app/us/*
+!app/us/_notes_risque/
+!app/us/_validation_risque.json
+!app/us/_validation_risque_resume.json
 
 # sorties de backtest
 scripts/_backtest_*.json

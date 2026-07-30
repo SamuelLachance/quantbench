@@ -19,7 +19,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # `write` sur le contenu parce que l'etape de fusion COMMITE l'archive mensuelle
+  # des notes de risque. Chaque execution repart d'une copie fraiche du depot :
+  # sans commit, cette archive se recreait vide tous les jours, et la mesure a
+  # douze mois qu'elle prepare — la seule qui autoriserait a ponderer les
+  # dimensions autrement qu'uniformement — n'aurait jamais eu de matiere.
+  contents: write
   pages: write
   id-token: write
 
@@ -97,6 +102,22 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           PYTHONUNBUFFERED: "1"
         run: python scripts/check_build.py
+      # L'archive du mois est ecrite par la FUSION, qui seule voit l'univers
+      # entier. On la commite APRES la barriere qualite : un build refuse ne doit
+      # pas laisser derriere lui une archive tiree de donnees jugees mauvaises.
+      - name: Conserver l'archive mensuelle des notes
+        run: |
+          if git diff --quiet --exit-code app/us/_notes_risque/ &&              [ -z "$(git ls-files --others --exclude-standard app/us/_notes_risque/)" ]; then
+            echo "archive du mois deja a jour"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add app/us/_notes_risque/
+            git commit -m "Archive des notes de risque du $(date -u +%Y-%m)"               -m "Ecrite par l'etape de fusion, apres la barriere qualite. Elle sera relue dans douze mois pour mesurer ce qui est arrive : c'est la seule mesure qui autorisera a ponderer les dimensions autrement qu'uniformement."
+            git pull --rebase --autostash origin main || true
+            git push origin HEAD:main
+          fi
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,0 +1,146 @@
+{
+ "instantane": "2024-07-30",
+ "horizon_mois": 24,
+ "seuil_effondrement": -0.7,
+ "n": 1631,
+ "radiees": 361,
+ "par_famille": [
+  {
+   "grade": "A",
+   "n": 329,
+   "taux": 0.18541033434650456,
+   "ic_bas": 0.1471320342164944,
+   "ic_haut": 0.2309505131573915,
+   "rendement_median": 0.11334583262314624,
+   "creux_median": -0.17261904761904767,
+   "cap_mediane": 3.1963318519499997
+  },
+  {
+   "grade": "B",
+   "n": 376,
+   "taux": 0.22872340425531915,
+   "ic_bas": 0.18913884927897212,
+   "ic_haut": 0.2737951737453622,
+   "rendement_median": 0.13729471316085484,
+   "creux_median": -0.18046489032700208,
+   "cap_mediane": 0.9773341609349999
+  },
+  {
+   "grade": "C",
+   "n": 249,
+   "taux": 0.30522088353413657,
+   "ic_bas": 0.25134060115338663,
+   "ic_haut": 0.36501999773540383,
+   "rendement_median": -0.07086614173228356,
+   "creux_median": -0.2990654205607477,
+   "cap_mediane": 0.112357476
+  },
+  {
+   "grade": "D",
+   "n": 549,
+   "taux": 0.4426229508196721,
+   "ic_bas": 0.4016152653342179,
+   "ic_haut": 0.4844280425499934,
+   "rendement_median": -0.5428495856110034,
+   "creux_median": -0.6,
+   "cap_mediane": 0.01503649718
+  },
+  {
+   "grade": "F",
+   "n": 128,
+   "taux": 0.4453125,
+   "ic_bas": 0.36205379206482013,
+   "ic_haut": 0.5317581762365354,
+   "rendement_median": -0.500000015,
+   "creux_median": -0.9267768595041322,
+   "cap_mediane": 0.00038890237
+  }
+ ],
+ "dimensions": [
+  {
+   "dimension": "d1",
+   "nom": "Solvabilité",
+   "auc": 0.64270415937694,
+   "couverture": 0.8074800735744941,
+   "verdict": "porte du signal"
+  },
+  {
+   "dimension": "d2",
+   "nom": "Autonomie de trésorerie",
+   "auc": 0.6422322876209269,
+   "couverture": 0.8865726548129982,
+   "verdict": "porte du signal"
+  },
+  {
+   "dimension": "d3",
+   "nom": "Rentabilité de cycle",
+   "auc": 0.62811026626332,
+   "couverture": 0.9460453709380748,
+   "verdict": "porte du signal"
+  },
+  {
+   "dimension": "d4",
+   "nom": "Volatilité d'exploitation",
+   "auc": 0.601351393811427,
+   "couverture": 0.7664009809932557,
+   "verdict": "porte du signal"
+  },
+  {
+   "dimension": "d5",
+   "nom": "Dilution",
+   "auc": 0.5797496068120249,
+   "couverture": 0.9981606376456161,
+   "verdict": "porte du signal"
+  },
+  {
+   "dimension": "d8",
+   "nom": "Mur de refinancement",
+   "auc": 0.5446612848672268,
+   "couverture": 1.0,
+   "verdict": "marginal"
+  },
+  {
+   "dimension": "d7",
+   "nom": "Confiance dans la donnée",
+   "auc": 0.49074176336188746,
+   "couverture": 1.0,
+   "verdict": "n'apporte rien"
+  },
+  {
+   "dimension": "d6",
+   "nom": "Liquidité de sortie",
+   "auc": null,
+   "couverture": 0.0,
+   "verdict": "non testee dans cette reconstitution"
+  }
+ ],
+ "auc_note": 0.6438219174299894,
+ "spearman_familles": 0.9999999999999998,
+ "spearman_creux": 0.9999999999999998,
+ "p_F_contre_A": 1.1929906618135533e-08,
+ "ecart_F_moins_A": 0.25990216565349544,
+ "par_taille": [
+  {
+   "paquet": 1,
+   "cap_min": 1.8208395e-09,
+   "cap_max": 0.0273755268,
+   "n": 543,
+   "spearman": 0.3999999999999999
+  },
+  {
+   "paquet": 2,
+   "cap_min": 0.02745343825,
+   "cap_max": 0.93400774978,
+   "n": 543,
+   "spearman": 0.9999999999999998
+  },
+  {
+   "paquet": 3,
+   "cap_min": 0.9342691763,
+   "cap_max": 3109.94222,
+   "n": 545,
+   "spearman": 0.8999999999999998
+  }
+ ],
+ "genere": "2026-07-30"
+}

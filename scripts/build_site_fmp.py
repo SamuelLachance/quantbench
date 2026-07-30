@@ -558,12 +558,28 @@ def _archiver_les_notes(all_rows):
     dossier = US / "_notes_risque"
     dossier.mkdir(exist_ok=True)
     fichier = dossier / f"{datetime.now(timezone.utc):%Y-%m}.json"
-    if fichier.exists():
-        return
     notes = {r["ticker"]: [r.get("note_risque"), r.get("score_risque"), r.get("price")]
              for r in all_rows if r.get("note_risque")}
     if not notes:
         return
+
+    # ON GARDE L'ARCHIVE LA PLUS COMPLETE DU MOIS, pas la premiere ecrite.
+    # La regle precedente — "le fichier existe, on ne touche a rien" — protegeait
+    # contre l'ecrasement, mais elle rendait toute archive partielle DEFINITIVE.
+    # Un build interrompu, un essai local sur cent vingt titres, un shard perdu :
+    # le mois entier restait fige sur cet echantillon, et la mesure a douze mois
+    # aurait porte dessus sans que rien ne le signale. Une mesure plus large du
+    # MEME mois est strictement meilleure ; une plus etroite ne l'est jamais.
+    if fichier.exists():
+        try:
+            ancien = json.loads(fichier.read_text(encoding="utf-8")).get("n", 0)
+        except Exception:
+            ancien = 0
+        if ancien >= len(notes):
+            print(f"  archive {fichier.name} conservee ({ancien} notes, "
+                  f"la nouvelle en compte {len(notes)})")
+            return
+        print(f"  archive {fichier.name} elargie : {ancien} -> {len(notes)} notes")
     fichier.write_text(json.dumps(
         {"date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
          "champs": ["grade", "score", "cours"], "n": len(notes), "notes": notes},

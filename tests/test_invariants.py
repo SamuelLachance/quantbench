@@ -14,6 +14,7 @@ d'elles ne puisse revenir silencieusement. Chacun correspond a un bug reel :
                                          obligations prises pour des actions
 """
 
+import inspect
 import sys
 from pathlib import Path
 
@@ -2314,3 +2315,68 @@ def test_les_deux_chemins_du_monte_carlo_donnent_la_meme_distribution():
         (lent["median"], rapide["median"])
     assert np.isclose(lent["percentiles"][10], rapide["percentiles"][10], rtol=0.10)
     assert set(sample_inputs(lois, 5, corr, 0)) == set(lois)
+
+
+# --------------------------------------------------------------------------- #
+# Ce qui doit SURVIVRE au build
+# --------------------------------------------------------------------------- #
+def test_les_mesures_durables_ne_sont_pas_ignorees_par_git():
+    """`app/us/` etait ignore en bloc, et emportait deux mesures qui doivent durer.
+
+    Chaque execution du build repart d'une copie fraiche du depot : ce qui n'y est
+    pas commite n'a jamais existe. Deux consequences avaient passe inapercues, les
+    deux invisibles en integration continue et visibles seulement en production :
+      - l'archive mensuelle des notes se recreait vide a chaque build, alors que
+        son unique raison d'etre est d'etre relue dans un an ;
+      - le fichier de validation que la fiche va CHERCHER au chargement n'etait
+        pas deploye, si bien que la page affichait « mesure indisponible ».
+    """
+    racine = Path(__file__).resolve().parent.parent
+    lignes = (racine / ".gitignore").read_text(encoding="utf-8").splitlines()
+    regles = [x.strip() for x in lignes if x.strip() and not x.startswith("#")]
+
+    assert "app/us/" not in regles, \
+        "app/us/ ignore en bloc : les mesures durables ne survivront pas au build"
+    assert "app/us/*" in regles, "le contenu de app/us/ doit rester ignore"
+    for garde in ("!app/us/_notes_risque/", "!app/us/_validation_risque.json",
+                  "!app/us/_validation_risque_resume.json"):
+        assert garde in regles, f"reglee manquante : {garde}"
+
+
+def test_larchive_mensuelle_garde_la_mesure_la_plus_large():
+    """Une archive partielle ne doit jamais devenir definitive.
+
+    La regle precedente — « le fichier du mois existe, on ne touche a rien » —
+    figeait le mois entier sur le premier ecrit : un build interrompu, un essai
+    local sur cent vingt titres, un shard perdu, et la mesure a douze mois aurait
+    porte sur cet echantillon sans que rien ne le signale.
+    """
+    import importlib
+    import json
+
+    mod = importlib.import_module("build_site_fmp")
+    src = inspect.getsource(mod._archiver_les_notes)
+    assert "if fichier.exists():\n        return" not in src, \
+        "l'archive du mois redevient definitive des le premier ecrit"
+    assert "ancien >= len(notes)" in src, \
+        "aucune comparaison d'effectif : l'archive peut retrecir"
+
+    # Comportement, pas seulement forme.
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        old_us = mod.US
+        try:
+            mod.US = Path(tmp)
+            large = [{"ticker": f"T{i}", "note_risque": "B", "score_risque": 0.4,
+                      "price": 1.0} for i in range(300)]
+            etroit = large[:5]
+            mod._archiver_les_notes(large)
+            f = next(Path(tmp).glob("_notes_risque/*.json"))
+            assert json.loads(f.read_text(encoding="utf-8"))["n"] == 300
+            mod._archiver_les_notes(etroit)          # ne doit PAS retrecir
+            assert json.loads(f.read_text(encoding="utf-8"))["n"] == 300
+            mod._archiver_les_notes(large + [{"ticker": "ZZ", "note_risque": "A",
+                                              "score_risque": 0.1, "price": 2.0}])
+            assert json.loads(f.read_text(encoding="utf-8"))["n"] == 301
+        finally:
+            mod.US = old_us
