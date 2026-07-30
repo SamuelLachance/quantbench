@@ -1914,3 +1914,100 @@ def _dcf_inputs_temoin():
 def _lois_temoin(base):
     from quantbench.valuation.build_universal import lois_de_tirage
     return lois_de_tirage(base)
+
+
+# --------------------------------------------------------------------------- #
+# Fusion des shards : un univers incomplet ne doit JAMAIS etre publie
+# --------------------------------------------------------------------------- #
+def _ecrire_shard(rep, i, n, tickers, acheves=None):
+    import json
+    (rep / f"_shard_{i}.json").write_text(json.dumps({
+        "rows": [{"ticker": t, "upside": 0.1, "grade": "B"} for t in tickers],
+        "universe": len(tickers), "fail": 0,
+        "shard": i, "n_shards": n, "assignes": tickers,
+        "acheves": len(tickers) if acheves is None else acheves,
+        "date": "2026-07-30",
+    }), encoding="utf-8")
+
+
+def _combine_dans(tmp_path, monkeypatch):
+    """Branche `combine_shards` sur un repertoire jetable."""
+    import importlib
+    mod = importlib.import_module("build_site_fmp")
+    monkeypatch.setattr(mod, "US", tmp_path)
+    monkeypatch.setattr(mod, "_write_aggregates",
+                        lambda rows, uni, fail: (len(rows), 0, 0))
+    return mod
+
+
+def test_la_fusion_refuse_un_shard_manquant(tmp_path, monkeypatch):
+    """Le defaut etait invisible : la barriere qualite raisonne en ratios, et un
+    shard absent retire autant au numerateur qu'au denominateur. Le site perdait
+    un cinquieme de sa couverture sans qu'aucune verification ne bronche."""
+    import pytest
+
+    mod = _combine_dans(tmp_path, monkeypatch)
+    for i in range(4):                       # 4 shards sur 5
+        _ecrire_shard(tmp_path, i, 5, [f"T{i}{k}" for k in range(10)])
+    with pytest.raises(mod.ShardManquant) as e:
+        mod.combine_shards(5)
+    assert "shard 4" in str(e.value)
+
+
+def test_la_fusion_refuse_un_shard_interrompu(tmp_path, monkeypatch):
+    import pytest
+
+    mod = _combine_dans(tmp_path, monkeypatch)
+    for i in range(5):
+        t = [f"T{i}{k}" for k in range(100)]
+        _ecrire_shard(tmp_path, i, 5, t, acheves=100 if i != 2 else 60)
+    with pytest.raises(mod.ShardManquant) as e:
+        mod.combine_shards(5)
+    assert "shard 2" in str(e.value) and "60/100" in str(e.value)
+
+
+def test_la_fusion_refuse_un_decoupage_incoherent(tmp_path, monkeypatch):
+    """Melange d'artefacts de deux builds : un shard construit pour un decoupage
+    en 8 fusionne dans un decoupage en 5 couvre la mauvaise part de l'univers."""
+    import pytest
+
+    mod = _combine_dans(tmp_path, monkeypatch)
+    for i in range(5):
+        _ecrire_shard(tmp_path, i, 5 if i != 3 else 8, [f"T{i}{k}" for k in range(10)])
+    with pytest.raises(mod.ShardManquant) as e:
+        mod.combine_shards(5)
+    assert "decoupage" in str(e.value)
+
+
+def test_la_fusion_refuse_des_societes_en_double(tmp_path, monkeypatch):
+    """Deux shards qui se recouvrent fausseraient toutes les statistiques de
+    l'univers : medianes du screener et quantiles des notes de risque."""
+    import pytest
+
+    mod = _combine_dans(tmp_path, monkeypatch)
+    for i in range(5):
+        _ecrire_shard(tmp_path, i, 5, [f"T{i}{k}" for k in range(10)])
+    _ecrire_shard(tmp_path, 4, 5, ["T00", "T01", "T42"])   # recouvre le shard 0
+    with pytest.raises(mod.ShardManquant) as e:
+        mod.combine_shards(5)
+    assert "plusieurs shards" in str(e.value)
+
+
+def test_la_fusion_accepte_un_univers_complet(tmp_path, monkeypatch):
+    mod = _combine_dans(tmp_path, monkeypatch)
+    for i in range(5):
+        _ecrire_shard(tmp_path, i, 5, [f"T{i}{k}" for k in range(10)])
+    mod.combine_shards(5)                     # ne leve pas
+
+
+def test_la_fusion_accepte_les_shards_sans_signature(tmp_path, monkeypatch):
+    """Compatibilite ascendante : un build lance AVANT l'ajout de la signature
+    doit pouvoir etre fusionne, sinon la premiere execution echoue sans raison."""
+    import json
+
+    mod = _combine_dans(tmp_path, monkeypatch)
+    for i in range(5):
+        (tmp_path / f"_shard_{i}.json").write_text(json.dumps({
+            "rows": [{"ticker": f"T{i}{k}"} for k in range(10)],
+            "universe": 10, "fail": 0}), encoding="utf-8")
+    mod.combine_shards(5)                     # ne leve pas

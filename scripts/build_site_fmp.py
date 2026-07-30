@@ -600,20 +600,79 @@ def _write_aggregates(all_rows, universe_size, fail):
     return len(clean), len(invalid), len(st)
 
 
-def combine_shards(n_shards):
+class ShardManquant(RuntimeError):
+    """Un shard est absent, tronque, ou n'est pas celui qu'on attendait."""
+
+
+def combine_shards(n_shards, tolerance=0.02):
     """Job de combinaison : fusionne les _shard_*.json (produits par les jobs parallèles)
     en _screener.json + _shortterm.json. Les fiches par-titre + PDF sont déjà en place
-    (téléchargées depuis les artefacts de chaque shard)."""
+    (téléchargées depuis les artefacts de chaque shard).
+
+    LA FUSION REFUSE DE PUBLIER UN UNIVERS INCOMPLET. Avant, un shard absent
+    produisait un avertissement noye dans dix mille lignes de journal, puis un site
+    ampute d'un cinquieme de sa couverture — environ 3 300 societes disparues sans
+    que rien n'echoue. La barriere qualite ne le voyait pas : elle raisonne en
+    RATIOS (valorisees / univers), et un shard manquant retire autant au numerateur
+    qu'au denominateur. Le defaut etait donc invisible par construction.
+
+    Quatre verifications, chacune contre un mode de panne observable :
+      1. les `n_shards` fichiers sont la          -> artefact perdu ou job echoue ;
+      2. chacun declare le meme decoupage         -> melange de deux builds ;
+      3. chacun s'annonce sous l'index de son nom -> artefact renomme ou duplique ;
+      4. chacun a traite ses tickers assignes     -> shard interrompu en cours de route.
+    """
     all_rows, universe, fail = [], 0, 0
+    manques = []
     for i in range(n_shards):
         p = US / f"_shard_{i}.json"
         if not p.exists():
-            print(f"  ATTENTION : shard {i} manquant")
+            manques.append(f"shard {i} : fichier absent")
             continue
         d = json.loads(p.read_text(encoding="utf-8"))
+
+        declare_n = d.get("n_shards")
+        if declare_n is not None and declare_n != n_shards:
+            manques.append(f"shard {i} : construit pour un decoupage en "
+                           f"{declare_n}, fusionne en {n_shards}")
+        declare_i = d.get("shard")
+        if declare_i is not None and declare_i != i:
+            manques.append(f"shard {i} : le fichier declare etre le shard {declare_i}")
+
+        # Un shard interrompu ecrit quand meme son fichier : seul l'ecart entre les
+        # tickers assignes et les tickers acheves le trahit.
+        assignes = d.get("assignes")
+        acheves = d.get("acheves")
+        if assignes is not None and acheves is not None and assignes:
+            reste = 1.0 - acheves / len(assignes)
+            if reste > tolerance:
+                manques.append(f"shard {i} : {acheves}/{len(assignes)} titres traites "
+                               f"({reste*100:.1f} % jamais atteints)")
+
         all_rows.extend(d.get("rows", []))
         universe += d.get("universe", 0)
         fail += d.get("fail", 0)
+
+    # Un ticker present deux fois signifie que deux shards se recouvrent : la
+    # societe apparaitrait en double dans le screener et ses statistiques
+    # (medianes, quantiles de risque) seraient calculees sur un univers fausse.
+    vus = {}
+    for r in all_rows:
+        t = r.get("ticker")
+        if t:
+            vus[t] = vus.get(t, 0) + 1
+    doublons = sorted(t for t, k in vus.items() if k > 1)
+    if doublons:
+        manques.append(f"{len(doublons)} tickers presents dans plusieurs shards "
+                       f"(ex. {', '.join(doublons[:5])})")
+
+    if manques:
+        raise ShardManquant(
+            "Fusion refusee — l'univers serait incomplet et le site publierait "
+            "silencieusement moins de societes qu'il n'en couvre :\n  "
+            + "\n  ".join(manques)
+            + "\nLe site conserve ses dernieres donnees completes.")
+
     nok, ninv, nst = _write_aggregates(all_rows, universe, fail)
     print(f"-> COMBINE {n_shards} shards : {nok} affichés, {ninv} non-fini, "
           f"{fail} sans données | court terme {nst}")
@@ -675,8 +734,14 @@ def main(exchanges, years=6, workers=20, with_news=True, with_pdf=True, limit=No
 
     if shard is not None:                                # écrit les lignes de ce shard
         i, n = shard
+        # Le shard SIGNE son travail : son index, le decoupage sous lequel il a
+        # tourne, et la liste exacte des tickers qui lui avaient ete assignes. Sans
+        # cette signature, la fusion ne peut pas distinguer un shard complet d'un
+        # shard interrompu, ni un artefact de la veille d'un artefact du jour.
         (US / f"_shard_{i}.json").write_text(json.dumps(
-            {"rows": rows, "universe": len(syms), "fail": fail}, ensure_ascii=False),
+            {"rows": rows, "universe": len(syms), "fail": fail,
+             "shard": i, "n_shards": n, "assignes": syms,
+             "acheves": done + fail, "date": _now_et()}, ensure_ascii=False),
             encoding="utf-8")
         print(f"\n-> SHARD {i}/{n} : {done} valorisés, {fail} sans données, "
               f"{len(rows)} lignes | {time.time()-t0:.0f}s")
