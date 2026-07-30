@@ -2110,3 +2110,59 @@ def test_une_radiation_compte_pour_une_perte_totale():
     assert v.SEUIL_EFFONDREMENT == -0.70
     # Une radiation vaut -100 %, donc un effondrement quel que soit le seuil.
     assert -1.0 <= v.SEUIL_EFFONDREMENT
+
+
+def test_les_chiffres_publies_correspondent_a_la_mesure():
+    """La fiche affiche en dur le resultat de la validation retrospective.
+
+    Des chiffres ecrits a la main dans une page HTML mentent des que la mesure est
+    refaite, et personne ne le remarque : c'est exactement ainsi que le bloc de
+    methodologie a promis pendant des semaines une confrontation "dans douze mois"
+    alors qu'elle avait eu lieu. Ce test compare chaque nombre publie au fichier
+    produit par `scripts/valider_les_notes.py`. S'ils divergent, l'un des deux doit
+    changer — et c'est toujours la page, jamais la mesure.
+    """
+    import json
+    import re
+
+    racine = Path(__file__).resolve().parent.parent
+    mesure = racine / "app" / "us" / "_validation_risque.json"
+    if not mesure.exists():
+        pytest.skip("validation jamais executee sur ce poste")
+    d = json.loads(mesure.read_text(encoding="utf-8"))
+    par_famille = {l["grade"]: l for l in d["par_famille"]}
+
+    html = (racine / "app" / "stock.html").read_text(encoding="utf-8")
+    bloc = re.search(r'<table class="mini-table">(.*?)</table>', html, re.S)
+    assert bloc, "le tableau de validation a disparu de la fiche"
+
+    lignes = re.findall(r"<tr><td>([ABCDF])</td>(.*?)</tr>", bloc.group(1), re.S)
+    assert len(lignes) == 5, f"5 familles attendues, {len(lignes)} publiees"
+
+    def nombre(txt):
+        return float(txt.replace("−", "-").replace("+", "")
+                     .replace(" ", "").replace("%", "").replace(",", ".").strip())
+
+    for fam, reste in lignes:
+        cellules = re.findall(r"<td>(.*?)</td>", reste)
+        assert len(cellules) == 4, (fam, cellules)
+        ref = par_famille.get(fam)
+        assert ref, f"la famille {fam} est publiee mais absente de la mesure"
+        assert int(nombre(cellules[0])) == ref["n"], (fam, "effectif")
+        assert nombre(cellules[1]) == pytest.approx(ref["taux"] * 100, abs=0.05), \
+            (fam, "taux d'effondrement")
+        assert nombre(cellules[2]) == pytest.approx(
+            ref["rendement_median"] * 100, abs=0.05), (fam, "rendement median")
+        assert nombre(cellules[3]) == pytest.approx(
+            ref["creux_median"] * 100, abs=0.05), (fam, "plus-bas median")
+
+    # Les affirmations en prose doivent elles aussi tenir.
+    a, f_ = par_famille["A"], par_famille["F"]
+    ecart = (f_["taux"] - a["taux"]) * 100
+    assert f"{ecart:.1f}".replace(".", ",") in html, \
+        f"l'ecart F - A publie ne vaut pas {ecart:.1f} points"
+    assert d["spearman_familles"] == pytest.approx(1.0), \
+        "la page annonce une monotonie parfaite : elle doit etre mesuree"
+    assert d["p_F_contre_A"] < 0.0001, "la page annonce p < 0,0001"
+    assert d["radiees"] == 356, \
+        "le nombre de societes radiees est cite dans la page"

@@ -53,7 +53,7 @@ bêta désendetté, marge, ventes sur capital, ROIC et taux de récupération pa
 dirait ce qu'est une *bonne* couverture d'intérêts.
 
 **Toute correction se termine par un test.** `tests/test_invariants.py` encode
-**126 invariants** — 178 cas de test une fois les paramétrages développés —
+**127 invariants** — 179 cas de test une fois les paramétrages développés —
 chacun correspondant à un défaut réellement observé en production.
 C'est le test, et non le correctif, qui rend la chose permanente.
 
@@ -97,7 +97,7 @@ scripts/      build_site_fmp.py     build quotidien, 5 shards parallèles
               check_build.py        garde-fou qui BLOQUE un déploiement défectueux
               mesurer_les_notes.py  juge la note de risque contre les faits
 app/          index.html · stock.html · screener.html · shortterm.html
-tests/        test_invariants.py — 126 invariants hors ligne, 178 cas
+tests/        test_invariants.py — 127 invariants hors ligne, 179 cas
 ```
 
 ## Lancement

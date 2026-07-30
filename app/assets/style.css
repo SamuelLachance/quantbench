@@ -197,3 +197,16 @@ h2 .sub{font-weight:400;color:var(--faint);font-size:12px;letter-spacing:0;text-
 .dim.indispo .dnom,.dim.indispo .dval{color:var(--faint);opacity:.65}
 .plafond{display:inline-block;font-size:11.5px;padding:.22em .5em;border-radius:5px;
   background:var(--r-f-bg);color:var(--r-f);border:1px solid currentColor;margin:2px 4px 2px 0}
+
+/* Tableau compact inséré dans un bloc de méthodologie (résultat de validation).
+   Il doit rester lisible sur téléphone : le conteneur défile horizontalement
+   plutôt que d'élargir la page — une page qui déborde latéralement est cassée,
+   un tableau qui défile ne l'est pas. */
+.mini-table{width:100%;border-collapse:collapse;margin:12px 0 14px;font-size:13px;
+  font-variant-numeric:tabular-nums;display:block;overflow-x:auto}
+.mini-table th{text-align:right;color:var(--muted);font-weight:600;
+  padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+.mini-table td{text-align:right;padding:5px 10px;
+  border-bottom:1px solid var(--border);white-space:nowrap}
+.mini-table th:first-child,.mini-table td:first-child{text-align:left}
+.mini-table tr:last-child td{border-bottom:none}
