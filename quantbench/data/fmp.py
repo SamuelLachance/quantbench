@@ -410,24 +410,53 @@ def profile_descriptions(symbols, max_parts=6):
 # --------------------------------------------------------------------------- #
 # Historique de prix (signal court terme) + news (par ticker)
 # --------------------------------------------------------------------------- #
-def history_closes(symbol, days=400):
-    """Cours de cloture AJUSTES des splits et dividendes (adjClose). Les cours
-    bruts creent de faux signaux : un split 4:1 apparait comme une chute de 75 %
-    et un detachement de dividende comme une baisse."""
+def history_ohlcv(symbol, days=400):
+    """Serie quotidienne AJUSTEE : cours de cloture ET volume echange.
+
+    Le volume figure DEJA dans la reponse que nous telechargeons pour les cours, et
+    nous le jetions. L'exposer ne coute donc pas un appel de plus, alors qu'il porte
+    la seule mesure directe de LIQUIDITE dont nous disposions — un titre qu'on ne
+    peut pas revendre a un prix raisonnable est risque, quelle que soit la solidite
+    de ses comptes.
+
+    Cours AJUSTES des splits et dividendes : les cours bruts creent de faux signaux,
+    un split 4:1 apparaissant comme une chute de 75 % et un detachement de dividende
+    comme une baisse."""
     try:
         j = _json(f"historical-price-eod/dividend-adjusted?symbol={symbol}")
-        closes = [_num(d.get("adjClose")) for d in j][::-1]   # ancien -> recent
-        out = [c for c in closes if c][-days:]
+        lignes = [{"close": _num(d.get("adjClose")), "volume": _num(d.get("volume"))}
+                  for d in j][::-1]                           # ancien -> recent
+        out = [x for x in lignes if x["close"]][-days:]
         if out:
             return out
     except Exception:
         pass
     try:                                                      # repli : cours brut
         j = _json(f"historical-price-eod/light?symbol={symbol}")
-        closes = [_num(d.get("price")) for d in j][::-1]
-        return [c for c in closes if c][-days:]
+        lignes = [{"close": _num(d.get("price")), "volume": _num(d.get("volume"))}
+                  for d in j][::-1]
+        return [x for x in lignes if x["close"]][-days:]
     except Exception:
         return []
+
+
+def history_closes(symbol, days=400):
+    """Cours seuls — adaptateur conserve pour le signal court terme."""
+    return [x["close"] for x in history_ohlcv(symbol, days)]
+
+
+def volume_dollars_median(serie, seances=60):
+    """Volume quotidien MEDIAN en dollars, sur les dernieres seances.
+
+    En dollars et non en titres : un million d'actions a 0,001 $ n'est pas un marche.
+    Mediane et non moyenne : une seule seance exceptionnelle — annonce, entree dans un
+    indice — ne doit pas faire passer pour liquide un titre qui ne s'echange jamais."""
+    valeurs = sorted(x["close"] * x["volume"] for x in (serie or [])[-seances:]
+                     if x.get("close") and x.get("volume") is not None)
+    if not valeurs:
+        return None
+    n = len(valeurs)
+    return valeurs[n // 2] if n % 2 else (valeurs[n // 2 - 1] + valeurs[n // 2]) / 2.0
 
 
 def news(symbol, limit=8):

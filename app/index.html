@@ -24,15 +24,22 @@
   </nav>
 
   <div class="grid g4" id="stats" style="margin-bottom:18px"></div>
+  <div class="card" style="margin-bottom:18px">
+    <h2>Note de risque <span class="sub">probabilité de perdre durablement sa mise — distincte de la décote</span></h2>
+    <div id="risqueBarres" style="display:flex;gap:3px;align-items:flex-end;height:56px;margin:6px 0 8px"></div>
+    <div class="mini">Une décote ne dit rien du danger : un titre peut être très bon marché
+      <em>parce qu’il est</em> très risqué. La note se lit dans une table figée — une dégradation
+      signale une dégradation de la société, non un mouvement de ses voisines.</div>
+  </div>
 
   <div class="pcards">
     <div class="card" style="margin-bottom:0">
       <h2>Sous-valorisées <span class="sub">valeur intrinsèque &gt; cours</span></h2>
-      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Cap</th><th>Upside</th><th>F</th></tr></thead><tbody id="up"></tbody></table></div>
+      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Cap</th><th>Upside</th><th>Risque</th></tr></thead><tbody id="up"></tbody></table></div>
     </div>
     <div class="card" style="margin-bottom:0">
       <h2>Richement valorisées <span class="sub">le marché price l'optimisme</span></h2>
-      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Cap</th><th>Upside</th><th>F</th></tr></thead><tbody id="down"></tbody></table></div>
+      <div class="tableScroll"><table><thead><tr><th>Titre</th><th>Secteur</th><th>Cap</th><th>Upside</th><th>Risque</th></tr></thead><tbody id="down"></tbody></table></div>
     </div>
   </div>
 
@@ -48,7 +55,7 @@ function row(r){
     <td><span class="pill">${(r.sector||'—')}</span></td>
     <td class="num">${r.market_cap==null?'—':QB.nf0.format(r.market_cap)+' Md'}</td>
     <td class="num ${cls}" style="font-weight:600">${QB.pct(r.upside)}</td>
-    <td class="num">${r.piotroski==null?'—':r.piotroski}</td></tr>`;
+    <td class="num">${r.note_risque?`<span class="note-risque tag nr-${r.note_risque[0].toLowerCase()}">${r.note_risque}</span>`:'<span style="color:var(--faint)">—</span>'}</td></tr>`;
 }
 (async()=>{
   QB.initTheme(); QB.mountSearch();
@@ -60,12 +67,27 @@ function row(r){
   const med=meds.length?meds[Math.floor(meds.length/2)]:0;
   document.getElementById('stats').innerHTML=[
     ['Titres couverts',d.n_ok],['Sous-valorisés',`${uv}/${d.n_ok}`],
-    ['Upside médian',QB.pct(med)],['MàJ',d.updated||'—']
+    ['Upside médian',QB.pct(med)],['Risque A ou B',(()=>{
+      const n=rows.filter(r=>r.note_risque&&'AB'.includes(r.note_risque[0])).length;
+      const t=rows.filter(r=>r.note_risque).length;
+      return t?`${Math.round(n/t*100)} %`:'—';})()]
   ].map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v" style="font-size:${String(v).length>10?'14px':'22px'}">${v}</div></div>`).join('');
   // Dashboard = opportunités crédibles : plancher de capitalisation (pros).
   const big=rows.filter(r=>r.upside!=null && (r.market_cap||0)>=5);
   document.getElementById('up').innerHTML=big.slice(0,15).map(row).join('');
   document.getElementById('down').innerHTML=big.slice(-12).reverse().map(row).join('');
+  // Distribution des notes : elle a le DROIT de se deplacer d'un mois sur l'autre,
+  // puisque les bornes sont gelees. C'est precisement ce qui la rend surveillable.
+  const ORDRE=['A+','A','A-','B+','B','B-','C+','C','C-','D+','D','D-','F'];
+  const cpt=Object.fromEntries(ORDRE.map(g=>[g,0]));
+  rows.forEach(r=>{if(r.note_risque in cpt)cpt[r.note_risque]++;});
+  const maxi=Math.max(1,...Object.values(cpt));
+  document.getElementById('risqueBarres').innerHTML=ORDRE.map(g=>{
+    const h=Math.round(cpt[g]/maxi*44)+4;
+    return `<div style="flex:1;text-align:center" title="${cpt[g]} titres notés ${g}">
+      <div style="height:${h}px;border-radius:3px 3px 0 0;background:var(--r-${g[0].toLowerCase()})"></div>
+      <div style="font-size:9.5px;color:var(--faint);margin-top:3px;font-family:var(--mono)">${g}</div>
+    </div>`;}).join('');
   document.getElementById('disc').innerHTML=`${d.n_ok} titres · NASDAQ, NYSE, Canada &amp; OTC · top opportunités filtrées ≥ 5 Md$ · valorisation routée (Damodaran) + forensique + sentiment · SEC + marché, USD · éducatif, pas un conseil.`;
 })();
 </script>

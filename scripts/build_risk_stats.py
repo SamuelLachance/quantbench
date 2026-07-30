@@ -57,6 +57,14 @@ def collecter(sym, uni):
         if not f or not f.get("price"):
             return None
         f["exchange"] = uni[sym].get("exchange")
+        # Volume echange : un appel de plus par titre, mais c'est la seule mesure
+        # directe de LIQUIDITE, et la regression du volume sur la taille ne peut se
+        # calibrer sans lui.
+        try:
+            f["volume_dollars_median"] = fmp.volume_dollars_median(
+                fmp.history_ohlcv(sym, days=90))
+        except Exception:                              # noqa: BLE001
+            f["volume_dollars_median"] = None
         motifs = valider(f, F, e)
         reparations = reparer(sym, f, F, e, motifs) if motifs else []
         if reparations:

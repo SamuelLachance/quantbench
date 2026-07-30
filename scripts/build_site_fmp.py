@@ -384,7 +384,13 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
         # Responsabilite limitee : l'upside ne peut pas descendre sous -100 %.
         val["upside"] = round(max(mc["median"] / fund["market_cap"] - 1.0, -1.0), 4)
         val["upside_basis"] = "monte_carlo"
-    signal = st_predict(fmp.history_closes(symbol))
+    # UN SEUL appel pour les cours ET le volume : la reponse porte deja les deux,
+    # et nous jetions le second. La liquidite est pourtant la seule mesure directe
+    # de la capacite a REVENDRE — un titre qu'on ne peut pas sortir a un prix
+    # raisonnable est risque, quelle que soit la solidite de ses comptes.
+    serie = fmp.history_ohlcv(symbol)
+    signal = st_predict([x["close"] for x in serie])
+    fund["volume_dollars_median"] = fmp.volume_dollars_median(serie)
     news = fmp.news(symbol, limit=8) if with_news else []
     # La projection 20 ans n'a de sens que si la valorisation retenue EST un DCF.
     # Afficher un echeancier de flux actualises sous une banque valorisee par
@@ -460,8 +466,38 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     return profile, row
 
 
+def _archiver_les_notes(all_rows):
+    """Archive MENSUELLE des notes de risque — la seule voie honnete vers un calibrage.
+
+    Le probleme est structurel : nos fondamentaux ne sont pas historises. Correler les
+    notes d'AUJOURD'HUI aux mouvements de cours PASSES ne mesurerait donc rien — les
+    comptes utilises n'existaient pas a la date ou le cours a bouge, et la mesure
+    serait un biais de survie a l'envers. Aucune astuce ne contourne cela.
+
+    Reste une voie, lente mais propre : ecrire ce que le modele pense AUJOURD'HUI, et
+    mesurer dans douze mois ce qui est arrive. Un fichier par mois — plusieurs par
+    mois n'apporteraient rien, une note de risque ne bougeant pas d'une semaine a
+    l'autre. `scripts/mesurer_les_notes.py` confrontera deux archives des qu'un an les
+    separera, et c'est cette mesure, et elle seule, qui autorisera a ponderer les
+    dimensions autrement qu'uniformement."""
+    dossier = US / "_notes_risque"
+    dossier.mkdir(exist_ok=True)
+    fichier = dossier / f"{datetime.now(timezone.utc):%Y-%m}.json"
+    if fichier.exists():
+        return
+    notes = {r["ticker"]: [r.get("note_risque"), r.get("score_risque"), r.get("price")]
+             for r in all_rows if r.get("note_risque")}
+    if not notes:
+        return
+    fichier.write_text(json.dumps(
+        {"date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+         "champs": ["grade", "score", "cours"], "n": len(notes), "notes": notes},
+        ensure_ascii=False), encoding="utf-8")
+
+
 def _write_aggregates(all_rows, universe_size, fail):
     """Écrit _screener.json + _shortterm.json depuis l'ensemble des lignes."""
+    _archiver_les_notes(all_rows)
     clean = [r for r in all_rows if r["upside"] is not None and np.isfinite(r["upside"])]
     invalid = [r for r in all_rows if r["upside"] is None or not np.isfinite(r["upside"])]
     clean.sort(key=lambda r: -(r["upside"] if r["upside"] is not None else -9))
