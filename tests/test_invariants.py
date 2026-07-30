@@ -1813,3 +1813,104 @@ def test_les_lois_de_tirage_ont_une_seule_declaration():
                                       current_roic=0.15, terminal_roic=0.10))[0]
     assert (grande["terminal_operating_margin"].std()
             > petite["terminal_operating_margin"].std())
+
+
+# --------------------------------------------------------------------------- #
+# Trajectoires de convergence : optimisation a resultat IDENTIQUE
+# --------------------------------------------------------------------------- #
+def _converge_path_reference(start, end, n_years, converge_start_year):
+    """Implementation de reference, fondee sur `np.linspace`.
+
+    C'est celle qui a produit toutes les valorisations publiees jusqu'ici. La
+    version optimisee doit lui etre identique AU BIT PRES, pas seulement proche :
+    une optimisation qui deplace les chiffres n'est pas une optimisation, c'est un
+    changement de methode qui ne dit pas son nom.
+    """
+    import numpy as _np
+    n_years = int(n_years)
+    converge_start_year = int(converge_start_year)
+    if n_years <= 0:
+        return _np.zeros(0, dtype=float)
+    hold = min(max(converge_start_year - 1, 0), n_years)
+    path = _np.empty(n_years, dtype=float)
+    path[:hold] = start
+    ramp_len = n_years - hold
+    if ramp_len == 1:
+        path[hold:] = end
+    elif ramp_len > 1:
+        path[hold:] = _np.linspace(start, end, ramp_len)
+    return path
+
+
+def test_converge_path_est_identique_au_bit_pres_a_linspace():
+    import random
+
+    import numpy as np
+
+    from quantbench.valuation.dcf import converge_path
+
+    random.seed(20260730)
+    for _ in range(20000):
+        s = random.uniform(-0.95, 0.95)
+        e = random.uniform(-0.95, 0.95)
+        n = random.randint(0, 30)
+        c = random.randint(0, 32)
+        attendu = _converge_path_reference(s, e, n, c)
+        obtenu = converge_path(s, e, n, c)
+        assert obtenu.shape == attendu.shape, (s, e, n, c)
+        assert np.array_equal(obtenu, attendu), (s, e, n, c, attendu, obtenu)
+
+
+def test_le_cache_dindices_ne_peut_pas_etre_corrompu():
+    """Le cache est partage par les threads du build : il doit etre en lecture
+    seule. Un tableau mutable rendu deux fois, puis modifie une fois, empoisonnerait
+    silencieusement toutes les trajectoires suivantes de toutes les societes."""
+    import numpy as np
+    import pytest
+
+    from quantbench.valuation.dcf import _indices, converge_path
+
+    a = _indices(7)
+    assert a.flags.writeable is False
+    with pytest.raises(ValueError):
+        a[0] = 99.0
+    # Deux appels rendent le MEME objet : c'est bien un cache, pas une allocation.
+    assert _indices(7) is a
+    # Et une trajectoire calculee apres coup reste juste.
+    assert np.array_equal(converge_path(0.10, 0.02, 5, 1),
+                          _converge_path_reference(0.10, 0.02, 5, 1))
+
+
+def test_le_monte_carlo_reste_reproductible_a_graine_fixe():
+    """Meme graine, meme resultat : sans quoi aucune comparaison avant/apres
+    optimisation n'a de sens, et les valeurs publiees bougeraient a chaque build."""
+    from quantbench.valuation.dcf import DcfInputs
+    from quantbench.valuation.montecarlo import monte_carlo_dcf
+
+    base = _dcf_inputs_temoin()
+    lois, corr = _lois_temoin(base)
+    a = monte_carlo_dcf(base, lois, n=400, correlations=corr, seed=7)
+    b = monte_carlo_dcf(base, lois, n=400, correlations=corr, seed=7)
+    assert a["median"] == b["median"]
+    assert a["percentiles"] == b["percentiles"]
+    assert isinstance(base, DcfInputs)
+
+
+def _dcf_inputs_temoin():
+    from quantbench.valuation.dcf import DcfInputs
+    return DcfInputs(
+        revenue_base=1_000.0,
+        g1_begin=0.08, g1_end=0.05, g2_begin=0.05, g2_end=0.03,
+        g3_begin=0.03, g3_end=0.025,
+        current_operating_margin=0.15, terminal_operating_margin=0.12,
+        current_tax_rate=0.25, marginal_tax_rate=0.25,
+        risk_free_rate=0.04, erp=0.05,
+        unlevered_beta=1.0, terminal_unlevered_beta=1.0,
+        equity_value=1_500.0, debt_value=200.0, cash_and_non_operating=100.0,
+        reinvestment_mode="roic", current_roic=0.15, terminal_roic=0.10,
+    )
+
+
+def _lois_temoin(base):
+    from quantbench.valuation.build_universal import lois_de_tirage
+    return lois_de_tirage(base)

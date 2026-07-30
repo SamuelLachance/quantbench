@@ -31,6 +31,23 @@ import numpy as np
 # --------------------------------------------------------------------------- #
 # Helpers de trajectoires (convergence lineaire vers une valeur terminale)
 # --------------------------------------------------------------------------- #
+# Indices 0..n-1 en flottant, mis en cache par longueur. Le Monte Carlo appelle
+# `converge_path` neuf fois par tirage, dix mille tirages par titre : `np.linspace`
+# y consommait 40 % du temps total de simulation, non pas a calculer dix nombres
+# mais a resoudre des types et a redimensionner. Les longueurs utiles se comptent
+# sur les doigts (les horizons de projection), le cache tient donc en quelques
+# tableaux. Ils ne sont JAMAIS ecrits : les threads du build les partagent.
+_INDICES: dict[int, np.ndarray] = {}
+
+
+def _indices(n: int) -> np.ndarray:
+    a = _INDICES.get(n)
+    if a is None:
+        a = _INDICES[n] = np.arange(n, dtype=float)
+        a.flags.writeable = False
+    return a
+
+
 def converge_path(start: float, end: float, n_years: int,
                   converge_start_year: int) -> np.ndarray:
     """Trajectoire annuelle : reste a `start` jusqu'a `converge_start_year - 1`,
@@ -49,7 +66,14 @@ def converge_path(start: float, end: float, n_years: int,
     if ramp_len == 1:
         path[hold:] = end
     elif ramp_len > 1:
-        path[hold:] = np.linspace(start, end, ramp_len)
+        # Rampe lineaire ecrite directement dans la vue, sans passer par
+        # `np.linspace`. L'ordre des operations reproduit exactement le sien
+        # (i * pas, puis + depart, puis borne finale imposee) : le resultat est
+        # identique au bit pres, ce qu'un test verifie sur des milliers de tirages.
+        pente = (end - start) / (ramp_len - 1)
+        np.multiply(_indices(ramp_len), pente, out=path[hold:])
+        path[hold:] += start
+        path[-1] = end
     return path
 
 

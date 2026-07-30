@@ -37,6 +37,58 @@ from quantbench.shortterm.predict import predict as st_predict
 from quantbench.reports import financial_summary_pdf
 
 
+# CHRONOMETRE PAR ETAPE. Le build met une a trois heures et personne n'a jamais
+# mesure ou passe ce temps : toute optimisation serait une supposition.
+#
+# Une seule horloge, parce qu'une seule fonctionne. `time.thread_time`,
+# `time.process_time` et `os.times` renvoient TOUS ZERO sur ce Python/Windows, y
+# compris pour une boucle qui brule une demi-seconde de CPU pur : impossible de
+# separer calcul et attente par la mesure directe. Reste `perf_counter`, qui mesure
+# le temps de MUR.
+#
+# Consequence a ne pas oublier en lisant le tableau : sous N threads, une etape de
+# calcul pur accumule aussi tout le temps ou elle attend le GIL. Mesure a 12 threads,
+# le Monte Carlo semblait couter 14,3 s par titre ; a 1 thread il en coute 1,7, et
+# 0,35 s en isolation totale. C'est pourquoi le tableau annonce le facteur de
+# parallelisme : au-dessus de 1, l'attribution par etape n'est qu'indicative, et
+# seule une passe `--workers 1` donne le cout reel.
+_CHRONO = {}
+_CHRONO_VERROU = __import__("threading").Lock()
+
+
+class _etape:
+    """Accumule le temps de mur d'une etape sous son nom."""
+
+    def __init__(self, nom):
+        self.nom = nom
+
+    def __enter__(self):
+        self.mur = time.perf_counter()
+        return self
+
+    def __exit__(self, *_exc):
+        d = time.perf_counter() - self.mur
+        with _CHRONO_VERROU:
+            n, mur = _CHRONO.get(self.nom, (0, 0.0))
+            _CHRONO[self.nom] = (n + 1, mur + d)
+        return False
+
+
+def _rapport_chrono(duree_totale, workers=1):
+    if not _CHRONO:
+        return
+    lignes = sorted(_CHRONO.items(), key=lambda kv: -kv[1][1])
+    cumul = sum(m for _n, m in _CHRONO.values())
+    facteur = cumul / duree_totale if duree_totale > 0 else 0.0
+    fiable = "cout reel" if facteur <= 1.2 else \
+             f"INDICATIF : x{facteur:.1f} de recouvrement, relancer a --workers 1"
+    print(f"\n  temps par etape ({duree_totale/60:.1f} min de mur, "
+          f"{workers} thread(s)) — {fiable}")
+    for nom, (n, mur) in lignes:
+        print(f"    {nom:26} {mur/60:7.1f} min {mur/cumul*100:5.1f} %  "
+              f"{n:6} appels  {mur/max(n,1)*1000:7.0f} ms/appel")
+
+
 def _arrondi(v):
     """Arrondi a precision constante en CHIFFRES SIGNIFICATIFS : 2 decimales
     au-dela de 1 $, 6 en dessous (penny stocks)."""
@@ -295,7 +347,8 @@ def _results_summary(F):
 
 
 def build_one(symbol, sr, with_news=True, with_pdf=True):
-    entry = fmp.statements(symbol)                 # 3 appels par-ticker (débit élevé)
+    with _etape("etats financiers"):
+        entry = fmp.statements(symbol)             # 3 appels par-ticker
     if len(set(entry["income"]) & set(entry["balance"])) < 1:   # ≥1 an suffit (actif net)
         # Abandon SILENCIEUX auparavant : environ six cents lignes disparaissaient
         # sans laisser de trace, dont les certificats canadiens (Eli Lilly, Micron,
@@ -303,7 +356,8 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
         # donnee est un fait a AFFICHER, pas a taire.
         return None, {"__rejet__": ["comptes indisponibles chez le fournisseur"],
                       "ticker": symbol}
-    prof = fmp.profile(symbol)
+    with _etape("profil"):
+        prof = fmp.profile(symbol)
     desc = {"description": prof.get("description"), "industry": prof.get("industry")}
     F = fmp.financials_from_fmp(entry)
     fund = fmp.fundamentals_from_fmp(symbol, sr, entry, desc)
@@ -375,7 +429,8 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     # emissions obligataires, reconnaissables a leur libelle, et c'est la que le
     # filtre appartient.
     forensic = analyze(symbol, financials=F) if F else None
-    val = value_stock(symbol, fund=fund, forensic=forensic, F=F)
+    with _etape("valorisation"):
+        val = value_stock(symbol, fund=fund, forensic=forensic, F=F)
     if not val.get("ok"):
         return None, {"__rejet__": [val.get("reason") or "valorisation impossible"],
                       "ticker": symbol, "reparations_tentees": reparations}
@@ -395,16 +450,19 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     # La simulation reste publiee : bande de dispersion, percentiles et probabilite
     # de sous-valorisation. C'est son objet — mesurer l'incertitude autour de la
     # valeur, pas la remplacer.
-    mc = run_mc(fund, val.get("category"), F=F, forensic=forensic,
-                method=val.get("method"))
+    with _etape("monte carlo"):
+        mc = run_mc(fund, val.get("category"), F=F, forensic=forensic,
+                    method=val.get("method"))
     # UN SEUL appel pour les cours ET le volume : la reponse porte deja les deux,
     # et nous jetions le second. La liquidite est pourtant la seule mesure directe
     # de la capacite a REVENDRE — un titre qu'on ne peut pas sortir a un prix
     # raisonnable est risque, quelle que soit la solidite de ses comptes.
-    serie = fmp.history_ohlcv(symbol)
+    with _etape("historique de cours"):
+        serie = fmp.history_ohlcv(symbol)
     signal = st_predict([x["close"] for x in serie])
     fund["volume_dollars_median"] = fmp.volume_dollars_median(serie)
-    news = fmp.news(symbol, limit=8) if with_news else []
+    with _etape("actualites"):
+        news = fmp.news(symbol, limit=8) if with_news else []
     # La projection 20 ans n'a de sens que si la valorisation retenue EST un DCF.
     # Afficher un echeancier de flux actualises sous une banque valorisee par
     # rendement excedentaire, ou sous une fonciere valorisee au FFO, etait
@@ -419,7 +477,9 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
             proj = None
     methodo = _methodologie(fund, val, F)
     cik = fund.get("cik")
-    ard = annual_report_docs(cik) if cik else {"ars_pdf": None, "tenk": None, "documents": []}
+    with _etape("documents SEC"):
+        ard = (annual_report_docs(cik) if cik
+               else {"ars_pdf": None, "tenk": None, "documents": []})
     filing = (f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=10-K"
               if cik else None)
     # NOTE DE RISQUE. Elle repond a une question DIFFERENTE de l'upside : non pas
@@ -449,7 +509,9 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
         "filing_url": filing, "pdf_url": None,
     }
     if with_pdf:
-        if financial_summary_pdf(profile, str(PDF / f"{symbol}.pdf")):
+        with _etape("rapport PDF"):
+            ok_pdf = financial_summary_pdf(profile, str(PDF / f"{symbol}.pdf"))
+        if ok_pdf:
             profile["pdf_url"] = f"pdf/{symbol}.pdf"
     (US / f"{symbol}.json").write_text(json.dumps(profile, ensure_ascii=False), encoding="utf-8")
     f = forensic or {}
@@ -599,6 +661,8 @@ def main(exchanges, years=6, workers=20, with_news=True, with_pdf=True, limit=No
                 fail += 1
             if (done + fail) % 200 == 0:
                 print(f"  {done+fail}/{len(syms)} (ok={done})")
+
+    _rapport_chrono(time.time() - t0, workers)
 
     if rejets:
         print("\n  motifs de non-couverture (donnees non verifiables) :")
