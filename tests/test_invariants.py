@@ -1218,3 +1218,37 @@ def test_la_liquidite_est_un_residu_de_la_taille():
     assert sg > sp, (sg, sp)
     # Sans calibrage, la dimension est indefinissable — jamais devinee.
     assert d6_liquidite(grande, None, "exploitante", None) == (None, None)
+
+
+def test_le_rapport_pdf_porte_la_note_de_risque():
+    """Omettre la note du rapport laisserait croire qu'une decote est une opportunite.
+    Le test compare deux rendus du MEME titre, avec et sans note : le PDF doit grossir,
+    faute de quoi le bloc n'a pas ete dessine — reportlab compresse ses flux, on ne
+    peut donc pas chercher le texte en clair."""
+    import tempfile
+    from pathlib import Path as _P
+
+    pytest.importorskip("reportlab")
+    from quantbench.reports import financial_summary_pdf
+    profil = {
+        "ticker": "TEST", "name": "Test", "sector": "Technology",
+        "valuation": {"price": 10.0, "value_per_share": 6.0, "upside": -0.4,
+                      "method": "DCF FCFF (standard)"},
+        "statements": {"years": ["2025", "2024"], "revenue": [5.0, 4.0],
+                       "ebit": [1.0, 0.8], "net_income": [0.7, 0.5],
+                       "cfo": [1.0, 0.9], "total_assets": [9.0, 8.0],
+                       "equity": [4.0, 3.5], "total_debt": [2.0, 2.0]},
+        "risque": {"grade": "C-", "score": 0.61, "regime": "exploitante",
+                   "plafonds_appliques": ["moins_d_un_an_d_autonomie"],
+                   "dimensions": [{"cle": "d1", "nom": "Solvabilité", "rang": 0.91},
+                                  {"cle": "d2", "nom": "Autonomie", "rang": 0.74},
+                                  {"cle": "d6", "nom": "Liquidité", "rang": None}]},
+    }
+    with tempfile.TemporaryDirectory() as d:
+        avec = str(_P(d) / "avec.pdf")
+        sans = str(_P(d) / "sans.pdf")
+        assert financial_summary_pdf(profil, avec)
+        assert financial_summary_pdf({k: v for k, v in profil.items() if k != "risque"},
+                                     sans)
+        assert _P(avec).stat().st_size > _P(sans).stat().st_size, (
+            "le bloc de note de risque n'est pas dessine dans le rapport")

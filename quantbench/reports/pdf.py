@@ -83,6 +83,37 @@ def financial_summary_pdf(profile: dict, out_path: str) -> str | None:
         ("LEFTPADDING", (0, 0), (-1, -1), 7)]))
     story += [vbox, Spacer(1, 10)]
 
+    # --- Note de risque ---
+    # Elle repond a une question DIFFERENTE de l'upside, et l'omettre du rapport
+    # laisserait croire qu'une decote est une opportunite. Les dimensions sont triees
+    # de la plus risquee a la moins risquee : le lecteur doit voir d'abord ce qui
+    # degrade la note, non une liste alphabetique.
+    risque = profile.get("risque") or {}
+    if risque.get("grade"):
+        fam = {"A": "#1a7f5a", "B": "#2f7db8", "C": "#a8791f",
+               "D": "#c2612a", "F": "#a33b47"}[risque["grade"][0]]
+        dispo = [d for d in risque.get("dimensions") or [] if d.get("rang") is not None]
+        dispo.sort(key=lambda d: -d["rang"])
+        pires = " · ".join(f"{d['nom']} {round(d['rang'] * 100)}" for d in dispo[:4])
+        plafonds = ", ".join(risque.get("plafonds_appliques") or [])
+        rbox = Table([[Paragraph(f"<font size=20 color='{fam}'><b>"
+                                 f"{risque['grade']}</b></font>", body),
+                       Paragraph("<b>Note de risque</b> — probabilité de perdre "
+                                 "durablement sa mise, distincte de la décote.<br/>"
+                                 f"<font size=7.5 color='{_MUT}'>Dimensions les plus "
+                                 f"dégradées (0 = meilleur cas observé, 100 = pire) : "
+                                 f"{pires or '—'}"
+                                 + (f"<br/>Plafond appliqué : {plafonds}" if plafonds else "")
+                                 + "</font>", body)]],
+                     colWidths=[20 * mm, 150 * mm])
+        rbox.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#dde2e9")),
+            ("LINEBEFORE", (0, 0), (0, -1), 2.5, colors.HexColor(fam)),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7)]))
+        story += [rbox, Spacer(1, 10)]
+
     # --- Activité ---
     if profile.get("summary"):
         story += [Paragraph("<b>Activité</b>", body),
