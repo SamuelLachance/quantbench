@@ -181,15 +181,22 @@ def conversion_en_tresorerie(F):
     ou benefice cumule negatif — il n'y a alors rien a convertir)."""
     if not F:
         return None
-    eb = [x for x in (F.get("ebit") or []) if x is not None]
-    cf = [x for x in (F.get("cfo") or []) if x is not None]
-    n = min(len(eb), len(cf))
-    if n < 4:
+    # LES DEUX SERIES SE FILTRENT ENSEMBLE, jamais separement. Chacune etait
+    # purgee de ses trous DANS SON COIN, puis les deux etaient tronquees a la
+    # longueur commune : un exercice sans EBIT decalait toute la serie des flux
+    # d'un cran, et le rapport cumulait alors des EBIT et des flux d'ANNEES
+    # DIFFERENTES. Mesure sur l'univers : 1,3 % des societes presentent ce
+    # decalage. Les series arrivent alignees par construction — `financials_from_fmp`
+    # les bâtit toutes sur la meme liste d'exercices — c'est donc le filtrage qui
+    # cassait cet alignement.
+    paires = [(e, c) for e, c in zip(F.get("ebit") or [], F.get("cfo") or [])
+              if e is not None and c is not None]
+    if len(paires) < 4:
         return None
-    somme_ebit = sum(eb[:n])
+    somme_ebit = sum(e for e, _ in paires)
     if somme_ebit <= 0:
         return None
-    return sum(cf[:n]) / somme_ebit
+    return sum(c for _, c in paires) / somme_ebit
 
 
 def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
@@ -308,7 +315,19 @@ def marge_de_cycle(F):
     if not F:
         return None
     eb, rv = F.get("ebit") or [], F.get("revenue") or []
-    paires = [(e, r) for e, r in zip(eb, rv) if e is not None and r]
+    # PRESENCE, ET NON VERITE. Le filtre testait `if r`, ce qui ecarte un chiffre
+    # d'affaires exactement NUL — donc les exercices ou une societe n'a rien vendu
+    # et beaucoup perdu. Elle disparaissait du numerateur ET du denominateur, alors
+    # qu'elle doit entrer au numerateur (la perte est reelle) et n'ajouter rien au
+    # denominateur (la vente est nulle). Sur un cas mesure, la marge de cycle
+    # passait de -192 % a +5,3 % : le modele appliquait a l'infini une marge
+    # POSITIVE a une societe qui a brule de l'argent trois ans sans un dollar de
+    # recette. C'est exactement ce que la docstring ci-dessus condamne — definir la
+    # rentabilite normale comme « ce que la societe gagne quand elle gagne ».
+    # Mesure sur l'univers : 14 % des societes ont au moins un exercice a chiffre
+    # d'affaires nul, et la correction rend leur marge de cycle plus severe sans
+    # exception de signe.
+    paires = [(e, r) for e, r in zip(eb, rv) if e is not None and r is not None]
     if len(paires) < 3:
         return None
     ca = sum(r for _, r in paires)

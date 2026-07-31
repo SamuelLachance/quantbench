@@ -2953,3 +2953,65 @@ def test_larchive_mensuelle_ne_survit_pas_a_un_build_refuse():
     i_dep = max(i for i, n in enumerate(noms) if "deploy-pages" in n)
     i_arc = next(i for i, n in enumerate(noms) if str(n).startswith("Conserver l'archive"))
     assert i_arc > i_dep, "l'archive est repassee avant le deploiement"
+
+
+# --------------------------------------------------------------------------- #
+# Marges de cycle : presence, alignement, et le zero qui est une donnee
+# --------------------------------------------------------------------------- #
+def test_un_exercice_sans_chiffre_daffaires_compte_dans_la_marge_de_cycle():
+    """Un exercice a chiffre d'affaires NUL n'est pas un exercice absent.
+
+    Le filtre testait la VERITE (`if r`) et non la presence : les exercices ou une
+    societe n'a rien vendu et beaucoup perdu disparaissaient du numerateur ET du
+    denominateur. Or ils doivent entrer au numerateur — la perte est reelle — et
+    n'ajouter rien au denominateur — la vente est nulle.
+
+    Sur le cas ci-dessous, la marge de cycle passait de -192 % a +5,3 % : le modele
+    appliquait a l'infini une marge POSITIVE a une societe qui a brule de l'argent
+    trois ans sans un dollar de recette. C'est exactement ce que la docstring de la
+    fonction condamne — definir la rentabilite normale comme « ce que la societe
+    gagne quand elle gagne ».
+    """
+    from quantbench.valuation.route import marge_de_cycle
+
+    F = {"years": [2025, 2024, 2023, 2022, 2021, 2020],
+         "ebit": [2.0, 1.0, -1.0, -30.0, -25.0, -20.0],
+         "revenue": [20.0, 12.0, 6.0, 0.0, 0.0, 0.0]}
+    m = marge_de_cycle(F)
+    assert m == pytest.approx(-73.0 / 38.0), \
+        f"marge {m} : les exercices sans recette sont de nouveau ignores"
+    assert m < 0, "une societe qui a brule 73 pour 38 de recettes n'a pas de marge positive"
+
+    # Un chiffre d'affaires ABSENT, lui, reste ecarte : on ne sait pas.
+    G = dict(F, revenue=[20.0, 12.0, 6.0, None, None, None])
+    assert marge_de_cycle(G) == pytest.approx(2.0 / 38.0)
+
+
+def test_lebit_et_les_flux_restent_alignes_sur_les_memes_exercices():
+    """Les deux series etaient purgees de leurs trous CHACUNE DANS SON COIN, puis
+    tronquees a la longueur commune : un exercice sans EBIT decalait toute la serie
+    des flux d'un cran, et le rapport cumulait des grandeurs d'ANNEES DIFFERENTES.
+
+    Les series arrivent pourtant alignees par construction — `financials_from_fmp`
+    les batit toutes sur la meme liste d'exercices — c'est donc le filtrage qui
+    cassait cet alignement. Mesure sur l'univers : 1,3 % des societes.
+    """
+    from quantbench.valuation.route import conversion_en_tresorerie
+
+    # Un trou d'EBIT en deuxieme position : l'exercice entier doit sauter, des DEUX
+    # cotes. Le flux de -4 ne doit pas se retrouver apparie a l'EBIT de 5.
+    F = {"years": [2025, 2024, 2023, 2022, 2021],
+         "ebit": [10.0, None, 5.0, 4.0, 3.0],
+         "cfo": [8.0, -4.0, 4.0, 3.0, 2.0]}
+    assert conversion_en_tresorerie(F) == pytest.approx((8 + 4 + 3 + 2) / (10 + 5 + 4 + 3))
+
+    # Symetrique : un trou de flux doit ecarter le meme exercice.
+    G = {"years": [2025, 2024, 2023, 2022, 2021],
+         "ebit": [10.0, 6.0, 5.0, 4.0, 3.0],
+         "cfo": [8.0, None, 4.0, 3.0, 2.0]}
+    assert conversion_en_tresorerie(G) == pytest.approx((8 + 4 + 3 + 2) / (10 + 5 + 4 + 3))
+
+    # Un flux exactement NUL est une donnee, pas un trou.
+    H = {"years": [2025, 2024, 2023, 2022], "ebit": [10.0, 6.0, 5.0, 4.0],
+         "cfo": [8.0, 0.0, 4.0, 3.0]}
+    assert conversion_en_tresorerie(H) == pytest.approx(15.0 / 25.0)
