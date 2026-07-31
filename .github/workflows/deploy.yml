@@ -58,7 +58,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: >
           python scripts/build_site_fmp.py
-          --exchanges NASDAQ,NYSE,TSX,TSXV,OTC
+          --exchanges NASDAQ,NYSE,CBOE,TSX,TSXV,OTC
           --shard ${{ matrix.shard }}/5 --workers 24
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4
         with:

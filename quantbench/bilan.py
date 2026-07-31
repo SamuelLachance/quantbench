@@ -38,7 +38,8 @@ La condition est donc `0 < fonds propres / actif < 15 %`, borne basse comprise.
 """
 from __future__ import annotations
 
-__all__ = ["est_une_activite_de_bilan", "PART_FONDS_PROPRES", "ACTIF_SUR_CA"]
+__all__ = ["est_une_activite_de_bilan", "bilan_lourd_et_endette",
+           "PART_FONDS_PROPRES", "PART_FONDS_PROPRES_DERNIER_RECOURS", "ACTIF_SUR_CA"]
 
 # Part maximale des fonds propres dans l'actif au-dela de laquelle la structure
 # n'est plus celle d'un bilan. CONSTANTE POSEE, ancree sur des faits externes :
@@ -50,6 +51,16 @@ PART_FONDS_PROPRES = 0.15
 # statut : posee. Un industriel ordinaire tourne autour de 1 a 2 ; au-dela de 4,
 # l'actif ne sert plus a produire un chiffre d'affaires mais EST l'activite.
 ACTIF_SUR_CA = 4.0
+
+# Seuil du DERNIER RECOURS, plus large. Il ne sert qu'aux societes deja rangees
+# dans le secteur financier par le fournisseur et dont l'industrie n'est reconnue
+# ni comme porteuse de risque (banque, assurance, credit hypothecaire) ni comme
+# metier de commissions (gestion d'actifs, bourse, donnees financieres). A ce
+# stade, la question n'est plus « est-ce une banque ? » mais « ce bilan lourd est-il
+# finance par de la dette ou par des fonds propres ? ».
+# POSEE, comme les deux precedentes. Elle est plus permissive que PART_FONDS_PROPRES
+# parce qu'elle s'applique a une population deja filtree par le secteur.
+PART_FONDS_PROPRES_DERNIER_RECOURS = 0.30
 
 
 def est_une_activite_de_bilan(total_actif, fonds_propres, chiffre_affaires) -> bool:
@@ -77,3 +88,27 @@ def est_une_activite_de_bilan(total_actif, fonds_propres, chiffre_affaires) -> b
         return False
     return ((fonds_propres / total_actif) < PART_FONDS_PROPRES
             and (total_actif / chiffre_affaires) >= ACTIF_SUR_CA)
+
+
+def bilan_lourd_et_endette(total_actif, fonds_propres, chiffre_affaires) -> bool:
+    """Dernier recours, pour une societe du secteur financier a l'industrie inconnue.
+
+    Le test precedent n'examinait QUE le rapport actif sur chiffre d'affaires : il
+    suffisait donc d'un bilan lourd pour etre declare activite de bilan. Global
+    Payments, processeur de paiements comme Visa, porte 43 % de fonds propres sur
+    actif et un actif de 6,9 fois son chiffre d'affaires — ce dernier venant
+    d'ECARTS D'ACQUISITION et non de prets. Elle etait valorisee en rendement
+    excedentaire sur ses fonds propres comptables.
+
+    C'est le LEVIER qui definit une activite de bilan, jamais le poids seul. Sans
+    fonds propres mesures, on garde le comportement d'avant : on ne devine pas.
+    """
+    if not total_actif or total_actif <= 0:
+        return False
+    if not chiffre_affaires or chiffre_affaires <= 0:
+        return False
+    if (total_actif / chiffre_affaires) < ACTIF_SUR_CA:
+        return False
+    if fonds_propres is None:
+        return True                      # poids seul, faute de mieux
+    return (fonds_propres / total_actif) < PART_FONDS_PROPRES_DERNIER_RECOURS

@@ -678,7 +678,12 @@ def financials_from_fmp(entry):
     return F
 
 
-_EX_CUR = {"NASDAQ": "USD", "NYSE": "USD", "AMEX": "USD", "TSX": "CAD", "TSXV": "CAD"}
+# Devise de cotation par place. CBOE y figure parce que Cboe Global Markets,
+# membre du S&P 500, cote sur SA PROPRE bourse — la seule ligne que cette place
+# porte chez le fournisseur. Sans elle, un titre de l'indice de reference
+# manquait a l'univers, et rien ne le signalait.
+_EX_CUR = {"NASDAQ": "USD", "NYSE": "USD", "AMEX": "USD", "CBOE": "USD",
+           "TSX": "CAD", "TSXV": "CAD"}
 
 
 def fundamentals_from_fmp(symbol, sr, entry, desc, reference=None):

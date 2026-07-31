@@ -28,7 +28,7 @@ from ..forensics.scores import default_probability
 from .build_universal import (build_dcf_from_fundamentals, country_erp,
                               pays_exploitation)
 from .dcf import value_dcf
-from ..bilan import est_une_activite_de_bilan
+from ..bilan import bilan_lourd_et_endette, est_une_activite_de_bilan
 
 
 def _clip(x, lo, hi):
@@ -100,13 +100,32 @@ def _financiere_de_bilan(fund) -> bool:
     # diverge — notamment sur des fonds propres nuls, negatifs ou absents.
     if est_une_activite_de_bilan(ta, be, rev):
         return True
+    # UN COURTIER N'EST PAS UN ASSUREUR. Le mot « insurance » attrapait aussi les
+    # COURTIERS, qui encaissent une commission sans porter le moindre risque a leur
+    # bilan : Arthur J. Gallagher (33 % de fonds propres sur actif), Brown & Brown
+    # (42 %), Aon, Marsh & McLennan, Willis Towers Watson. Un assureur du S&P 500
+    # porte entre 16 et 39 % de fonds propres et immobilise ses reserves ; un
+    # courtier n'immobilise rien. Les valoriser en multiple de valeur comptable est
+    # la meme faute que celle qui donnait Visa a -73 %.
+    # Le test precede les mots-cles d'inclusion, sans quoi « insurance » l'emporte.
+    if "broker" in ind and "insurance" in ind:
+        return False
     if any(k in ind for k in ("bank", "insurance", "mortgage", "thrift")):
         return True
     if any(k in ind for k in ("asset management", "stock exchange", "financial data",
                               "shell", "conglomerate")):
         return False
+    # DERNIER RECOURS : LE POIDS DU BILAN, MAIS AVEC SA CONDITION DE FONDS PROPRES.
+    # Ce repli testait le seul rapport actif sur chiffre d'affaires, sans rien dire
+    # des fonds propres — il suffisait donc d'un bilan lourd pour etre declare
+    # financiere de bilan. Global Payments, processeur de paiements comme Visa,
+    # porte 43 % de fonds propres sur actif et un actif de 6,9 fois son chiffre
+    # d'affaires, ce dernier venant d'ECARTS D'ACQUISITION et non de prets : elle
+    # etait valorisee en rendement excedentaire sur ses fonds propres comptables.
+    # Un bilan lourd finance par des FONDS PROPRES n'est pas une activite de bilan ;
+    # c'est le LEVIER qui la definit, et `est_une_activite_de_bilan` le sait deja.
     if ta and rev and rev > 0:
-        return (ta / rev) >= 4.0        # poids du bilan : banques ~20x, Visa ~2,7x
+        return bilan_lourd_et_endette(ta, be, rev)
     return True
 
 

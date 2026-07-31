@@ -3663,3 +3663,93 @@ def test_le_multiple_de_fonciere_reste_dans_une_fourchette_defendable():
     for ke in (0.06, 0.07, 0.08, 0.10, 0.12):
         m = (1 + 0.028) / ke
         assert 8.0 <= m <= 18.0, f"multiple {m:.2f} hors de toute fourchette a ke={ke}"
+
+
+# --------------------------------------------------------------------------- #
+# Reconnaitre une activite de bilan : le levier, jamais le poids seul
+# --------------------------------------------------------------------------- #
+def test_un_courtier_dassurance_nest_pas_un_assureur():
+    """Le mot « insurance » attrapait aussi les COURTIERS.
+
+    Un courtier encaisse une commission sans porter le moindre risque a son bilan :
+    Arthur J. Gallagher (33 % de fonds propres sur actif), Brown & Brown (42 %),
+    Aon, Marsh & McLennan, Willis Towers Watson. Un assureur du S&P 500 porte entre
+    16 et 39 % de fonds propres et immobilise ses reserves ; un courtier
+    n'immobilise rien. Les valoriser en multiple de valeur comptable est la meme
+    faute que celle qui donnait Visa a -73 %.
+    """
+    from quantbench.valuation.route import _financiere_de_bilan
+
+    courtier = {"industry": "Insurance - Brokers", "total_assets": 30.0,
+                "book_equity": 10.0, "revenue": 6.0}
+    assureur = {"industry": "Insurance - Property & Casualty", "total_assets": 200.0,
+                "book_equity": 50.0, "revenue": 45.0}
+    assert _financiere_de_bilan(courtier) is False, \
+        "un courtier est de nouveau valorise comme un porteur de risque"
+    assert _financiere_de_bilan(assureur) is True, \
+        "un assureur n'est plus reconnu"
+
+
+def test_un_bilan_lourd_finance_par_des_fonds_propres_nest_pas_une_banque():
+    """Le dernier repli testait le seul rapport actif sur chiffre d'affaires.
+
+    Il suffisait donc d'un bilan lourd pour etre declare financiere de bilan.
+    Global Payments, processeur de paiements comme Visa, porte 43 % de fonds
+    propres sur actif et un actif de 6,9 fois son chiffre d'affaires — ce dernier
+    venant d'ECARTS D'ACQUISITION et non de prets. Elle etait valorisee en
+    rendement excedentaire sur ses fonds propres comptables.
+
+    C'est le LEVIER qui definit une activite de bilan, jamais le poids seul.
+    """
+    from quantbench.valuation.route import _financiere_de_bilan
+
+    # Bilan lourd, mais finance par des fonds propres : un processeur.
+    processeur = {"industry": "Financial - Credit Services", "total_assets": 53.3,
+                  "book_equity": 22.9, "revenue": 7.7}
+    assert _financiere_de_bilan(processeur) is False
+
+    # Meme poids de bilan, mais finance par de la dette : un preteur.
+    preteur = {"industry": "Financial - Credit Services", "total_assets": 53.3,
+               "book_equity": 4.0, "revenue": 7.7}
+    assert _financiere_de_bilan(preteur) is True
+
+    # Sans fonds propres mesures, on garde le comportement d'avant : on ne devine pas.
+    inconnu = {"industry": "Financial - Credit Services", "total_assets": 53.3,
+               "book_equity": None, "revenue": 7.7}
+    assert _financiere_de_bilan(inconnu) is True
+
+
+def test_classify_recoit_lhistorique_a_la_bonne_place():
+    """`classify(fund, forensic, F)` : l'historique est le TROISIEME argument.
+
+    Un appelant qui le passe en deuxieme position ne provoque aucune erreur — le
+    forensique est optionnel et `_hist_margins(None)` rend une liste vide. La
+    societe est alors jugee SANS historique, donc « jeune », et valorisee sur la
+    marge mediane de son SECTEUR plutot que sur la sienne. Constate en auditant le
+    S&P 500 : General Mills, fondee en 1866, Boeing, Intel, Ford et Kraft Heinz
+    ressortaient en jeune pousse. C'etait le script d'audit qui appelait mal, pas
+    le moteur — mais le fait qu'une erreur d'appel degrade en SILENCE merite d'etre
+    verrouille.
+    """
+    import inspect
+
+    from quantbench.valuation import route
+
+    sig = list(inspect.signature(route.classify).parameters)
+    assert sig[:3] == ["fund", "forensic", "F"], sig
+
+    # Le seul appelant de production doit passer les trois dans le bon ordre.
+    src = inspect.getsource(route.value_stock)
+    assert "classify(fund, forensic, F)" in src, \
+        "l'appelant de production ne passe plus l'historique a la bonne place"
+
+    # Et le comportement : un historique fourni change la reponse.
+    F = {"years": [2025, 2024, 2023, 2022, 2021, 2020],
+         "ebit": [0.9, 3.3, 3.4, 3.4, 3.5, 3.1],
+         "revenue": [18.4, 19.5, 19.9, 20.1, 19.0, 18.1],
+         "net_income": [-0.1, 2.3, 2.5, 2.6, 2.7, 2.3]}
+    fund = {"ebit": 0.9, "net_income": -0.1, "revenue": 18.4, "sector": "Consumer Defensive",
+            "total_assets": 30.0, "book_equity": 8.0, "cfo": 3.0, "cash": 0.5}
+    assert route.classify(fund, None, F) == "mature_deficitaire"
+    assert route.classify(fund, None, None) == "jeune/deficitaire", \
+        "sans historique, la route jeune est la bonne — c'est bien l'appel qui compte"
