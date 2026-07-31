@@ -18,7 +18,11 @@ from ..data import market
 from ..data.build import _estimate_growth, _clamp
 from ..bilan import est_une_activite_de_bilan
 
-_DEFAULT_ERP = 0.045          # prime de risque d'un marche mature (Etats-Unis)
+# Prime de risque d'un marche mature : la prime IMPLICITE de Damodaran, lue chaque
+# nuit sur sa page (market.implied_erp), 4,5 % en secours declare. La constante
+# figee etait un instantane perime : 4,50 % contre 4,18 % publies au 1/7/2026,
+# soit ~5 % d'ecart uniforme sur toutes les valorisations du site.
+_DEFAULT_ERP = 0.045          # SECOURS seulement — la valeur vivante vient de market
 
 # Prime de risque PAYS (methode Damodaran : ERP total = ERP mature + CRP du pays
 # d'operation, deduite du spread de defaut souverain ajuste de la volatilite
@@ -106,8 +110,15 @@ def tax_rate(country) -> float:
     return _TAUX_IMPOT.get(str(country).strip().upper()[:2], _IMPOT_DEFAUT)
 
 
-def country_erp(country, erp_mature=_DEFAULT_ERP):
-    """ERP total = ERP mature + prime de risque pays (Damodaran)."""
+def country_erp(country, erp_mature=None):
+    """ERP total = ERP mature + prime de risque pays (Damodaran).
+
+    `erp_mature` se resout A L'APPEL et non a la definition : la prime implicite
+    est lue sur la page de Damodaran (une fois par processus, memorisee), et un
+    defaut par valeur liait la fonction a l'instantane du jour de deploiement.
+    """
+    if erp_mature is None:
+        erp_mature = market.implied_erp()
     if not country:
         return erp_mature
     return erp_mature + _CRP.get(str(country).strip().upper()[:2], _CRP_DEFAUT)

@@ -108,6 +108,48 @@ def _taux_fred() -> float | None:
     return None
 
 
+# Secours de la prime de risque implicite. Contrairement au taux sans risque —
+# dont une valeur fausse decale toutes les valorisations sans limite connue —
+# l'ERP implicite du marche americain evolue dans une bande etroite (4 a 6 % depuis
+# 2009, series de Damodaran). Publier avec le secours decale les valorisations de
+# quelques pourcents, dans un sens connu ; ne rien publier couterait plus. L'echec
+# est donc NON FATAL ici, et fatal pour le taux sans risque : c'est voulu.
+_ERP_SECOURS = 0.045
+_BANDE_ERP = (0.02, 0.09)
+
+
+@functools.lru_cache(maxsize=1)
+def implied_erp() -> float:
+    """Prime de risque implicite du marche americain, publiee par Damodaran.
+
+    C'est SA prescription : la prime FORWARD-LOOKING qu'il recalcule chaque mois et
+    affiche en tete de sa page d'accueil — « Implied ERP on July 1, 2026 = 4.18%
+    (Trailing 12 month, with adjusted payout) » — par opposition a la prime
+    historique. La premiere valeur citee (trailing 12 month, adjusted payout) est
+    sa mesure de reference.
+
+    Le nombre est COUPE PAR DES BALISES dans le HTML (« 4.<span...>18% ») : on
+    decape les balises de la fenetre avant de lire. La bande de vraisemblance
+    detecte un defaut de lecture, pas un fait de marche.
+    """
+    import re as _re
+    try:
+        r = requests.get("https://pages.stern.nyu.edu/~adamodar/New_Home_Page/home.htm",
+                         timeout=_TIMEOUT, headers=_YUA)
+        r.raise_for_status()
+        i = r.text.find("Implied ERP on")
+        if i >= 0:
+            fenetre = _re.sub(r"<[^>]*>", "", r.text[i:i + 400])
+            m = _re.search(r"=\s*([0-9]+[.,][0-9]+)\s*%", fenetre)
+            if m:
+                v = float(m.group(1).replace(",", ".")) / 100.0
+                if _BANDE_ERP[0] <= v <= _BANDE_ERP[1]:
+                    return v
+    except Exception:
+        pass
+    return _ERP_SECOURS
+
+
 @functools.lru_cache(maxsize=1)
 def risk_free_rate() -> float:
     """Rendement du Treasury 10 ans, en fraction decimale.

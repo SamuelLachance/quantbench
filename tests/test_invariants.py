@@ -32,12 +32,14 @@ from quantbench.valuation import route                                # noqa: E4
 # ci-dessous ne la remplace. Les invariants qui portent sur elle ne peuvent pas
 # passer par `market.risk_free_rate`, qui est une lambda pendant tous les tests.
 _RISK_FREE_REEL = market.risk_free_rate
+_IMPLIED_ERP_REEL = market.implied_erp
 
 
 @pytest.fixture(autouse=True)
 def _rf_fixe(monkeypatch):
-    """Taux sans risque fige : les tests ne doivent dependre d'aucun reseau."""
+    """Taux sans risque et ERP figes : les tests ne doivent dependre d'aucun reseau."""
     monkeypatch.setattr(market, "risk_free_rate", lambda: 0.042)
+    monkeypatch.setattr(market, "implied_erp", lambda: 0.045)
 
 
 _FOR = {"scores": {}, "flags": [], "positives": []}   # forensique neutre (hors sujet ici)
@@ -4566,3 +4568,37 @@ def test_le_pont_vers_l_equite_retranche_les_creances_senior():
     extreme = dict(groupe(10.0), market_cap=480.0)          # P/B = 10
     assert _creances_senior(extreme) == pytest.approx(10.0 * 3.0), (
         "le P/B de conversion n'est pas borne a 3,0")
+
+
+def test_l_erp_est_la_prime_implicite_de_damodaran_resolue_a_l_appel():
+    """Damodaran prescrit la prime IMPLICITE, forward-looking, qu'il recalcule
+    chaque mois — pas une prime historique ni un instantane fige. Le depot portait
+    4,50 % en dur, un instantane perime : 4,18 % publies au 1/7/2026, soit ~5 %
+    d'ecart uniforme sur toutes les valorisations du site.
+
+    `country_erp` doit resoudre la prime A L'APPEL — un defaut par valeur la
+    figerait au jour du deploiement — et l'echec de lecture doit rendre le secours
+    DANS LA BANDE, jamais une valeur aberrante.
+    """
+    import inspect
+
+    from quantbench.valuation.build_universal import country_erp
+
+    # Resolution a l'appel : la fixture fige implied_erp a 0,045.
+    assert country_erp("US") == pytest.approx(0.045)
+    # Un changement de la prime vivante traverse immediatement.
+    market.implied_erp = lambda: 0.0418
+    try:
+        assert country_erp("US") == pytest.approx(0.0418)
+    finally:
+        market.implied_erp = lambda: 0.045
+    # Une valeur explicite garde la priorite (Monte Carlo, tests, replays).
+    assert country_erp("US", 0.05) == pytest.approx(0.05)
+
+    # La vraie fonction lit la page de Damodaran et DECAPE les balises qui coupent
+    # le nombre ; son secours est dans la bande declaree.
+    code = "\n".join(l.split("#")[0]
+                     for l in inspect.getsource(_IMPLIED_ERP_REEL).splitlines())
+    assert "Implied ERP on" in code and "adamodar" in code
+    assert "_ERP_SECOURS" in code
+    assert market._BANDE_ERP[0] <= market._ERP_SECOURS <= market._BANDE_ERP[1]
