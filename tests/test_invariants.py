@@ -4594,3 +4594,36 @@ def test_l_erp_est_la_prime_implicite_de_damodaran_resolue_a_l_appel():
     assert "Implied ERP on" in code and "adamodar" in code
     assert "_ERP_SECOURS" in code
     assert market._BANDE_ERP[0] <= market._ERP_SECOURS <= market._BANDE_ERP[1]
+
+
+def test_une_fonciere_se_valorise_d_abord_sur_ses_dividendes_reels():
+    """La lettre de Damodaran pour l'immobilier cote (Investment Valuation ch. 26) :
+    les DIVIDENDES REELS actualises — un REIT distribue au moins 90 % de son
+    resultat imposable par obligation, son dividende est la mesure directe du flux
+    a l'actionnaire. La capitalisation du FFO (metrique NAREIT) n'existe nulle part
+    chez lui : elle ne subsiste qu'en REPLI, etiquetee comme telle, quand aucun
+    dividende n'est observe.
+    """
+    from quantbench.valuation.route import value_reit
+
+    o = {"net_income": 0.9, "dep_amort": 2.5, "cfo": 4.0, "book_equity": 38.0,
+         "market_cap": 45.0, "beta": 0.8, "country": "US", "sector": "Real Estate",
+         "industry": "REIT - Retail", "total_debt": 26.0, "cash": 0.4,
+         "revenue": 5.2, "tax_rate": 0.25}
+    F = {"years": ["2025", "2024", "2023"], "dividends": [-3.0, -2.9, -2.8],
+         "net_income": [0.9, 0.85, 0.9]}
+
+    avec = value_reit(dict(o), F)
+    assert avec["method"].startswith("Dividendes actualisés"), avec["method"]
+    assert avec["payout_ffo"] == pytest.approx(0.88, abs=0.01)
+    # La croissance est FINANCEE : retention x rendement du FFO, sous le plafond
+    # stable — jamais une croissance gratuite.
+    assert 0.0 <= avec["g"] <= 0.028
+
+    sans = value_reit(dict(o))
+    assert "repli" in sans["method"], (
+        "le repli FFO ne se declare plus comme un ecart a la lettre")
+
+    # Un seul exercice de dividende ne suffit pas a etablir une politique.
+    un_seul = value_reit(dict(o), {"years": ["2025"], "dividends": [-3.0]})
+    assert "repli" in un_seul["method"]

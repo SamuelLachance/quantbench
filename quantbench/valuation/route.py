@@ -838,12 +838,20 @@ def probabilite_de_survie(fund, valeur_en_jeu=None):
     return max(0.0, min(1.0, autonomie / _HORIZON_DE_REDRESSEMENT))
 
 
-def value_reit(fund):
-    """Foncières (REIT) — méthode Damodaran : le FCFF est inapplicable car les
-    amortissements immobiliers, purement comptables, écrasent l'EBIT et rendent la
-    valeur d'entreprise inférieure à la dette. On capitalise le FFO (résultat net +
-    amortissements), mesure de flux propre à l'immobilier. Valorisation CÔTÉ ÉQUITÉ
-    (le FFO est après intérêts) : aucune dette n'est soustraite."""
+def value_reit(fund, F=None):
+    """Foncières (REIT) — valorisation CÔTÉ ÉQUITÉ (le flux est après intérêts).
+
+    VOIE PRINCIPALE, la lettre de Damodaran (Investment Valuation ch. 26) : les
+    DIVIDENDES REELS actualisés. Un REIT distribue au moins 90 % de son résultat
+    imposable par obligation légale — son dividende est la mesure directe du flux à
+    l'actionnaire, et c'est sur lui que Damodaran valorise l'immobilier coté. La
+    croissance est FINANCÉE : g = part du FFO retenue x rendement du FFO sur fonds
+    propres, plafonnée à la croissance stable.
+
+    REPLI, quand aucun dividende n'est observé : capitalisation du FFO ancré sur le
+    flux d'exploitation. Ce repli est un choix du dépôt, PAS la lettre de Damodaran
+    — la capitalisation du FFO (métrique NAREIT) n'existe pas chez lui ; il est
+    déclaré comme tel dans la méthode publiée."""
     ni, da = fund.get("net_income"), fund.get("dep_amort")
     cfo = fund.get("cfo")
     # Le FFO n'a de sens que si l'exploitation ENCAISSE. C'est le flux de tresorerie,
@@ -900,9 +908,32 @@ def value_reit(fund):
     # C'est aussi la regle deja retenue pour les services publics regules, ou la
     # croissance suit g = rendement des fonds propres x taux de retention. Trois
     # methodes du site partagent desormais la meme discipline.
+    # --- VOIE PRINCIPALE : dividendes reels actualises (DDM, ch. 26) -----------
+    div = None
+    if F:
+        verses = [abs(d) for d in (F.get("dividends") or []) if d is not None and d != 0]
+        if len(verses) >= 2:
+            div = verses[0]                      # series plus recent en tete
+    if div and div > 0 and ffo > 0:
+        # Croissance FINANCEE par la retention : la part du FFO non distribuee,
+        # placee au rendement que la fonciere tire deja de ses fonds propres en
+        # FFO. Plafonnee a la croissance stable — une perpetuite ne croit pas plus
+        # vite que l'economie.
+        be = fund.get("book_equity")
+        retention = min(max(1.0 - div / ffo, 0.0), 1.0)
+        rendement_ffo = (ffo / be) if (be and be > 0) else 0.0
+        g_div = min(rf, 0.028, retention * rendement_ffo)
+        ke_div = max(ke, g_div + 0.02)
+        return {"equity_value": div * (1.0 + g_div) / (ke_div - g_div),
+                "method": "Dividendes actualisés (foncière — DDM Damodaran)",
+                "confidence": "moyenne", "ffo": round(ffo, 3),
+                "dividende": round(div, 3), "payout_ffo": round(div / ffo, 3),
+                "g": round(g_div, 4)}
+
+    # --- REPLI declare : capitalisation du FFO, croissance financee ------------
     retenu = g / ke                              # part du FFO reinvestie
     return {"equity_value": ffo * (1 - retenu) * (1 + g) / (ke - g),
-            "method": "FFO capitalisé (foncière — Damodaran REIT)",
+            "method": "FFO capitalisé (foncière — repli, dividende non observé)",
             "confidence": "moyenne", "ffo": round(ffo, 3),
             "multiple_ffo": round((1 - retenu) * (1 + g) / (ke - g), 2),
             "part_reinvestie": round(retenu, 4)}
@@ -1160,7 +1191,7 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
         elif cat == "holding":
             r = value_holding(fund, F)
         elif cat == "fonciere":
-            r = value_reit(fund)
+            r = value_reit(fund, F)
         elif cat == "reglementee":
             r = value_regulated(fund, F)
         elif cat == "financiere":
