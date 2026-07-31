@@ -756,8 +756,10 @@ def fundamentals_from_fmp(symbol, sr, entry, desc, reference=None):
     # filiales — l'assureur polonais PZU tombait a -0,45 Md$ au lieu de +9,6 Md$.
     # Seules les actions PRIVILEGIEES, creance prioritaire sur l'ordinaire, se
     # deduisent (Fannie Mae : 140 Md$ de privilegiees senior du Tresor).
+    privilegiees = _num(bal.get(y, {}).get("preferredStock")) or 0.0
+    minoritaires = _num(bal.get(y, {}).get("minorityInterest")) or 0.0
     if eq is not None:
-        eq -= (_num(bal.get(y, {}).get("preferredStock")) or 0.0)
+        eq -= privilegiees
     # TRESORERIE REALISABLE : liquidites ET placements court terme. Une societe de
     # biotechnologie place l'essentiel de ses fonds en titres negociables plutot
     # qu'en depots — Revolution Medicines detient 0,38 Md$ de liquidites pour
@@ -848,6 +850,13 @@ def fundamentals_from_fmp(symbol, sr, entry, desc, reference=None):
         "price_currency": price_cur, "financial_currency": rep_cur,
         "revenue": b(rev), "revenue_history": rev_hist, "ebit": b(ebit), "net_income": b(ni),
         "total_debt": b(debt), "cash": b(cash), "book_equity": b(eq),
+        # Creances SENIOR sur l'ordinaire, aux bornes du perimetre consolide. Elles
+        # servent au pont vers l'equite du DCF : les flux consolides portent 100 %
+        # des filiales, la valeur qui en derive aussi — Damodaran retranche donc la
+        # valeur des minoritaires et des privilegiees avant de parler d'equite
+        # ordinaire (« subtract the market value of the minority interest »).
+        "minoritaires": b(minoritaires) or 0.0,
+        "preferred_equity": b(privilegiees) or 0.0,
         "total_assets": b(tot_assets),
         # Passif total CONVERTI en USD : indispensable pour verifier l'identite
         # actif = passif + fonds propres. Le comparer au passif BRUT (en devise

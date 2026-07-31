@@ -62,7 +62,7 @@ CHAMPS_VARIABLES = frozenset({
     "risk_free_rate", "erp", "size_premium",
     "unlevered_beta", "terminal_unlevered_beta",
     "current_pretax_kd", "terminal_pretax_kd",
-    "equity_value", "debt_value", "cash_and_non_operating",
+    "equity_value", "debt_value", "cash_and_non_operating", "minority_and_preferred",
     "revenue_base", "current_roic", "terminal_roic",
     "additional_roic_in_perpetuity", "asset_liquidation_during_negative_growth",
     "current_invested_capital",
@@ -238,6 +238,7 @@ def equites_dcf(base: DcfInputs, tirages: dict, n: int) -> np.ndarray:
         pv_terminal = (fcff_t / (wacc_t - gt)) / discount[:, -1]
 
     equity = (pv_fcff.sum(axis=1) + pv_terminal
-              + col("cash_and_non_operating")[:, 0] - dt[:, 0])
+              + col("cash_and_non_operating")[:, 0] - dt[:, 0]
+              - col("minority_and_preferred")[:, 0])
     equity[invalide] = np.nan
     return equity

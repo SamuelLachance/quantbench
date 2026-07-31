@@ -196,6 +196,27 @@ def beta_ascendant(fund, tx):
     return bu * (1 + (1 - tx) * de), bu, "industrie"
 
 
+def _creances_senior(fund):
+    """Minoritaires en valeur de MARCHE + privilegiees au nominal, pour le pont.
+
+    Damodaran : « subtract the market value of the minority interest » — le
+    comptable sous-estime la part des minoritaires exactement comme le book
+    sous-estime l'equite du groupe. Faute de connaitre le P/B de la FILIALE, on
+    applique celui du GROUPE, borne a [0,5 ; 3,0] : au-dela, ce n'est plus une
+    conversion mais une speculation, et un P/B de micro-cap decotee ou de societe a
+    book minuscule fausserait la conversion bien plus qu'un nominal prudent.
+    Les privilegiees restent au nominal : creance a valeur faciale, servie avant
+    l'ordinaire.
+    """
+    minor = fund.get("minoritaires") or 0.0
+    pref = fund.get("preferred_equity") or 0.0
+    if minor > 0:
+        be, mc = fund.get("book_equity"), fund.get("market_cap")
+        pb = (mc / be) if (be and be > 0 and mc and mc > 0) else 1.0
+        minor *= _clamp(pb, 0.5, 3.0)
+    return max(minor, 0.0) + max(pref, 0.0)
+
+
 def beta_de_comparables(fund, tx):
     """Beta ENDETTE moyen des comparables de l'industrie — la lettre de Damodaran
     pour les FINANCIERES.
@@ -395,6 +416,7 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         beta_converge_start=5,
         current_pretax_kd=kd, terminal_pretax_kd=kd, kd_converge_start=5,
         equity_value=market_cap, debt_value=debt, cash_and_non_operating=cash,
+        minority_and_preferred=_creances_senior(fund),
         reinvestment_mode="roic", current_roic=cur_roic, terminal_roic=term_roic,
         roic_converge_start=5,
     )

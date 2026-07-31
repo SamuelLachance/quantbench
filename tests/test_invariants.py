@@ -4523,3 +4523,46 @@ def test_la_croissance_d_une_financiere_est_fondamentale():
     tout_distribue = value_financial(dict(f), dict(F, dividends=[-1.9] * n))
     assert tout_distribue["equity_value"] < sans, (
         "un payout de 100 % devrait porter g a zero, sous le repli min(rf, 3 %)")
+
+
+def test_le_pont_vers_l_equite_retranche_les_creances_senior():
+    """Les flux actualises sont CONSOLIDES — ils portent 100 % des filiales — donc
+    la valeur qui en derive aussi. Damodaran retranche explicitement la valeur de
+    MARCHE des minoritaires et les privilegiees avant de parler d'equite ordinaire
+    (« Value of Equity = Firm Value - Debt - Minority Interests », dcfstabl p.207).
+
+    Le pont ne retranchait que la dette : une meme societe avec 0 ou 12 Md$ de
+    minoritaires rendait STRICTEMENT la meme equite (+16 a +42 % de surestimation
+    de la part du groupe selon le profil).
+    """
+    from quantbench.valuation.build_universal import (_creances_senior,
+                                                      build_dcf_from_fundamentals)
+    from quantbench.valuation.dcf import value_dcf
+
+    def groupe(minor, pref=0.0):
+        return {"revenue": 36.0, "ebit": 6.1, "net_income": 3.9, "book_equity": 48.0,
+                "total_equity": 48.0 + minor + pref, "minoritaires": minor,
+                "preferred_equity": pref, "total_debt": 28.0, "cash": 6.0,
+                "total_assets": 120.0, "market_cap": 55.0, "shares": 500.0,
+                "price": 110.0, "beta": 0.9, "country": "US",
+                "sector": "Consumer Defensive", "industry": "Beverages - Brewers",
+                "operating_margin": 0.169, "tax_rate": 0.25, "dep_amort": 2.4,
+                "capex": -2.9, "cfo": 5.6,
+                "revenue_history": [30.0, 31.5, 32.8, 34.0, 35.0, 36.0]}
+
+    def equite(minor, pref=0.0):
+        x, _ = build_dcf_from_fundamentals(groupe(minor, pref), erp=0.045, rf=0.042)
+        return value_dcf(x)["equity_value"]
+
+    base = equite(0.0)
+    pb = 55.0 / 48.0                       # P/B du groupe, dans la bande [0,5 ; 3,0]
+    assert equite(12.0) == pytest.approx(base - 12.0 * pb, rel=1e-9), (
+        "les minoritaires ne sont pas retranches a leur valeur de marche")
+    assert equite(12.0, 3.0) == pytest.approx(base - 12.0 * pb - 3.0, rel=1e-9), (
+        "les privilegiees ne sont pas retranchees au nominal")
+
+    # La conversion au P/B est BORNEE : un P/B extreme ne doit pas transformer la
+    # soustraction en speculation.
+    extreme = dict(groupe(10.0), market_cap=480.0)          # P/B = 10
+    assert _creances_senior(extreme) == pytest.approx(10.0 * 3.0), (
+        "le P/B de conversion n'est pas borne a 3,0")

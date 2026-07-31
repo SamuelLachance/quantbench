@@ -177,6 +177,12 @@ class DcfInputs:
     equity_value: float = 1.0          # market cap (pour les poids D/E)
     debt_value: float = 0.0
     cash_and_non_operating: float = 0.0
+    # Creances SENIOR sur l'actionnaire ordinaire : interets minoritaires (en valeur
+    # de marche) et actions privilegiees (au nominal). Les flux actualises sont
+    # CONSOLIDES — ils portent 100 % des filiales — donc la valeur qui en derive
+    # aussi ; Damodaran les retranche explicitement dans son pont vers l'equite
+    # (« Value of Equity = Firm Value - Debt - Minority Interests », dcfstabl p.207).
+    minority_and_preferred: float = 0.0
     additional_roic_in_perpetuity: float = 0.0
     asset_liquidation_during_negative_growth: float = 0.0
     current_invested_capital: float = float("nan")   # NaN -> implicite
@@ -333,7 +339,7 @@ def value_dcf(x: DcfInputs) -> dict:
     # --- Agregation ---
     value_operating = float(pv_fcff.sum() + pv_terminal)
     firm_value = value_operating + x.cash_and_non_operating
-    equity_value = firm_value - x.debt_value
+    equity_value = firm_value - x.debt_value - x.minority_and_preferred
 
     # --- Capital investi & ROIC (diagnostic) ---
     # LE REPLI NE SERT QUE SI LA VALEUR EXPLICITE MANQUE. Ecrit avec un `or`, il
