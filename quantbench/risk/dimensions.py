@@ -227,6 +227,15 @@ def d2_autonomie(fund, F, reg):
         # Le flux d'exploitation d'une banque suit ses encours de credit, pas son
         # exploitation : JPMorgan convertit 0,41 sans la moindre anomalie.
         return None, None
+    # « AUCUN TABLEAU DE FLUX » N'EST PAS « L'EXPLOITATION S'AUTOFINANCE ».
+    # `consommation_de_tresorerie` rend 0,0 dans les deux cas, et cette dimension
+    # lisait ce zero comme la meilleure nouvelle possible : une coquille sans
+    # comptes decrochait -inf, soit le meilleur rang de tout l'univers, devant
+    # Apple. Une dimension non definissable doit dire qu'elle ne l'est pas — son
+    # poids se redistribue alors sur les autres, ce que le module sait faire.
+    from ..valuation.route import consommation_est_mesurable
+    if not consommation_est_mesurable(fund):
+        return None, None
     conso = consommation_selon_le_regime(fund, reg)
     if conso <= 0:
         return -math.inf, "l'exploitation finance ses investissements"

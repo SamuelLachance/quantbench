@@ -15,6 +15,7 @@ d'elles ne puisse revenir silencieusement. Chacun correspond a un bug reel :
 """
 
 import inspect
+import math
 import sys
 from pathlib import Path
 
@@ -3258,3 +3259,75 @@ def test_un_rendement_du_capital_nul_est_une_mesure():
     assert "or 0.12" not in code, "le piege du zero est revenu sur le ROIC"
     assert "_roic_mesure is None" in code, \
         "le ROIC absent n'est plus distingue du ROIC nul"
+
+
+def test_tout_pays_fabrique_par_la_table_des_devises_a_une_prime_declaree():
+    """Neuf pays sortaient de la table des devises sans exister dans celle des
+    primes, et heritaient du defaut « emergent prudent » de 3 %.
+
+    Cela place Hong Kong, le Qatar, les Emirats, le Koweit et l'Arabie saoudite
+    AU-DESSUS de l'Italie, alors que leur dette souveraine est mieux notee : une
+    societe de Hong Kong etait actualisee a un cout des fonds propres surestime de
+    2,4 points, et le Bangladesh sous-estime de 5,6 points dans l'autre sens.
+
+    Ce test ferme la faille de maniere STRUCTURELLE : ajouter demain une devise
+    sans sa prime fera rougir la suite, au lieu de laisser une valeur par defaut
+    s'appliquer en silence.
+    """
+    from quantbench.valuation.build_universal import (_CRP, _DEVISE_PAYS,
+                                                      _TAUX_IMPOT, country_erp)
+
+    manquants = sorted(set(_DEVISE_PAYS.values()) - set(_CRP))
+    assert not manquants, (
+        f"ces pays heritent d'une prime par defaut : {manquants}")
+
+    # Coherence d'ordre : un pays mieux note que l'Italie ne peut pas porter une
+    # prime SUPERIEURE a la sienne.
+    for mieux_notes in ("HK", "AE", "QA", "KW", "SA", "CZ"):
+        assert _CRP[mieux_notes] < _CRP["IT"], (
+            f"{mieux_notes} porte une prime superieure a celle de l'Italie")
+
+    # Les Etats-Unis restent la reference : prime de pays nulle.
+    assert _CRP["US"] == 0.0
+    assert country_erp("US") == pytest.approx(country_erp("DE"))
+    assert country_erp("AR") > country_erp("BR") > country_erp("CL")
+
+    # Meme exigence pour le taux d'impot, sur les pays que nous fabriquons.
+    sans_impot = sorted(set(_DEVISE_PAYS.values()) - set(_TAUX_IMPOT))
+    assert len(sans_impot) <= 12, (
+        f"trop de pays sans taux d'impot declare : {sans_impot}")
+
+
+def test_labsence_de_comptes_ne_vaut_pas_une_exploitation_qui_sautofinance():
+    """`consommation_de_tresorerie` rend 0,0 dans DEUX situations que rien ne
+    distinguait : une societe qui ne consomme pas — une bonne nouvelle — et une
+    societe dont nous n'avons ni tableau de flux ni resultat — nous n'en savons
+    rien.
+
+    Le zero d'IGNORANCE etait lu comme un zero de MESURE. La dimension d'autonomie
+    decernait a une coquille vide -inf, soit le MEILLEUR rang de tout l'univers,
+    devant Apple ; et la probabilite de survie lui accordait 1,0, c'est-a-dire la
+    certitude de traverser. Une societe sans comptes etait donc mieux notee qu'une
+    societe qui en publie.
+    """
+    from quantbench.risk.dimensions import d2_autonomie
+    from quantbench.valuation.route import (consommation_est_mesurable,
+                                            probabilite_de_survie)
+
+    coquille = {"cash": 0.1}
+    assert consommation_est_mesurable(coquille) is False
+    assert d2_autonomie(coquille, {}, "exploitante") == (None, None), \
+        "une dimension non definissable doit le DIRE, pas prendre le meilleur rang"
+    assert probabilite_de_survie(coquille) == 0.0, \
+        "l'absence de comptes ne vaut pas une survie certaine"
+
+    # Une societe qui degage REELLEMENT garde le meilleur rang et la survie pleine.
+    solide = {"cash": 10.0, "cfo": 2.0, "capex": -1.0, "net_income": 1.0}
+    assert consommation_est_mesurable(solide) is True
+    signal, libelle = d2_autonomie(solide, {}, "exploitante")
+    assert signal == -math.inf and "finance ses investissements" in (libelle or "")
+    assert probabilite_de_survie(solide) == 1.0
+
+    # Un seul poste suffit a rendre la question mesurable.
+    for poste in ("cfo", "capex", "net_income"):
+        assert consommation_est_mesurable({poste: 0.0}) is True, poste

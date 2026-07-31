@@ -35,6 +35,17 @@ _CRP = {
     "IN": 0.026, "ID": 0.026, "PH": 0.026, "PE": 0.026, "ZA": 0.043, "BR": 0.037,
     "CO": 0.037, "VN": 0.043, "GR": 0.043, "TR": 0.075, "EG": 0.086, "NG": 0.086,
     "AR": 0.115, "PK": 0.115, "RU": 0.115, "UA": 0.115,
+    # NEUF PAYS QUE LA TABLE DES DEVISES FABRIQUE ET QUE CELLE-CI IGNORAIT. Ils
+    # heritaient du defaut « emergent prudent » de 3 %, ce qui place Hong Kong, le
+    # Qatar, les Emirats, le Koweit et l'Arabie saoudite AU-DESSUS de l'Italie —
+    # alors que leur dette souveraine est mieux notee. Une societe de Hong Kong
+    # etait donc actualisee a un cout des fonds propres surestime de 2,4 points, et
+    # le Bangladesh l'etait de 5,6 points dans l'autre sens.
+    # Les valeurs suivent l'echelle DEJA UTILISEE par cette table, calee sur les
+    # notations souveraines : Aa2-Aa3 autour de 0,6-0,8 %, A1-A2 autour de 1,0 %,
+    # Baa2-Baa3 autour de 2,4-2,6 %, B2 autour de 8,6 %.
+    "HK": 0.010, "AE": 0.008, "QA": 0.008, "KW": 0.010, "SA": 0.010,
+    "CZ": 0.008, "HU": 0.024, "RO": 0.026, "BD": 0.086,
 }
 _CRP_DEFAUT = 0.030           # pays non liste : prime emergente prudente
 

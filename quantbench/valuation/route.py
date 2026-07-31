@@ -606,6 +606,21 @@ def erosion_par_les_pertes(fund, valeur):
     return valeur * p_survie, round(p_survie, 2)
 
 
+def consommation_est_mesurable(fund) -> bool:
+    """Dispose-t-on de quoi mesurer la consommation de tresorerie ?
+
+    `consommation_de_tresorerie` rend 0,0 dans DEUX situations que rien ne
+    distinguait : une societe qui ne consomme pas — c'est une bonne nouvelle — et
+    une societe dont nous n'avons ni tableau de flux ni resultat — nous n'en savons
+    rien. Le zero d'IGNORANCE etait alors lu comme un zero de MESURE : la dimension
+    d'autonomie decernait a une coquille vide le meilleur rang de l'univers, et la
+    probabilite de survie lui accordait 1,0.
+
+    Cette fonction ne juge pas, elle dit seulement si la question a une reponse.
+    """
+    return any(fund.get(k) is not None for k in ("cfo", "capex", "net_income"))
+
+
 def consommation_de_tresorerie(fund):
     """Tresorerie consommee par an — FLUX LIBRE : exploitation MOINS investissements.
 
@@ -668,6 +683,10 @@ def probabilite_de_survie(fund, valeur_en_jeu=None):
         pleine consommation se voyait donc creditee d'une chance sur trois de
         survivre, chiffre pose a la main et sans fondement. Elle vaut desormais zero
         quand l'autonomie est nulle, ce qui est la seule reponse defendable."""
+    if not consommation_est_mesurable(fund):
+        # Ni flux ni resultat : nous ne savons pas si elle consomme. Lui accorder
+        # une survie certaine reviendrait a recompenser l'absence de comptes.
+        return 0.0
     conso = consommation_de_tresorerie(fund)
     if conso <= 0:
         return 1.0                              # la societe ne consomme pas
