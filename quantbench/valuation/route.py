@@ -896,7 +896,8 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
     if F is None:
         F = get_financials(ticker)
     if forensic is None:
-        forensic = forensic_analyze(ticker, financials=F) if F else None
+        forensic = forensic_analyze(ticker, financials=F,
+                                    secteur=(fund or {}).get("sector")) if F else None
     # Mesure portee sur `fund` pour que le moteur DCF y accede sans dependre du
     # module de routage. Neutre par construction quand elle n'est pas mesurable.
     if fund.get("conversion_tresorerie") is None:

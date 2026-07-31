@@ -3092,3 +3092,81 @@ def test_le_chemin_vectorise_traite_les_pertes_comme_le_chemin_de_reference():
                 assert np.isnan(equites_dcf(b, {}, 1)[0])
                 continue
             assert float(equites_dcf(b, {}, 1)[0]) == ref, (g, marge)
+
+
+# --------------------------------------------------------------------------- #
+# Forensique : le signe d'une variation, et le domaine de validite d'Altman
+# --------------------------------------------------------------------------- #
+def test_une_variation_garde_son_sens_sur_une_base_negative():
+    """`a / b - 1` inverse le sens des que la base est NEGATIVE — le cas courant du
+    resultat net et des flux d'exploitation d'une societe en perte.
+
+        de -100 a  -50 (la perte se REDUIT)   -> rendait -50 %, une degradation
+        de -100 a -150 (la perte S AGGRAVE)   -> rendait +50 %, une croissance
+        de -100 a  +50 (retour au benefice)   -> rendait -150 %
+        de +100 a  -50 (bascule en perte)     -> rendait -150 %, LE MEME CHIFFRE
+
+    Les deux dernieres lignes sont les pires : deux situations opposees produisaient
+    une valeur identique, impossible a distinguer en aval. Ces variations alimentent
+    le detecteur de DIVERGENCE — resultat net qui monte pendant que la tresorerie
+    descend — donc chaque signal etait lu a l'envers sur une societe deficitaire.
+    """
+    from quantbench.forensics.scores import _growth
+
+    assert _growth([120.0, 100.0]) == pytest.approx(0.20)
+    assert _growth([80.0, 100.0]) == pytest.approx(-0.20)
+    # Base negative : le SENS doit tenir.
+    assert _growth([-50.0, -100.0]) > 0, "une perte reduite est une amelioration"
+    assert _growth([-150.0, -100.0]) < 0, "une perte aggravee est une degradation"
+    assert _growth([50.0, -100.0]) > 0, "un retour au benefice est une amelioration"
+    assert _growth([-50.0, 100.0]) < 0, "une bascule en perte est une degradation"
+    # Et deux situations OPPOSEES ne doivent plus donner le meme chiffre.
+    assert _growth([50.0, -100.0]) != _growth([-50.0, 100.0])
+    # Base nulle : indefinissable, et on le dit.
+    assert _growth([10.0, 0.0]) is None
+
+
+def test_le_z_daltman_se_tait_hors_de_son_domaine_de_validite():
+    """Altman exclut les financieres ; foncieres et services publics ont
+    structurellement un Z bas — actifs lourds, dette elevee — sans etre en detresse.
+
+    Cette liste existait, mais UNIQUEMENT dans le routage : la valorisation refusait
+    d'utiliser le Z, et la fiche l'affichait quand meme avec son verdict. Une banque
+    parfaitement solvable pouvait donc etre presentee comme en detresse sur la page
+    qui refusait par ailleurs d'en tenir compte pour la valoriser.
+    """
+    from quantbench.forensics.scores import SECTEURS_SANS_ALTMAN, analyze
+    from quantbench.valuation.route import _NO_ALTMAN
+
+    assert set(SECTEURS_SANS_ALTMAN) == set(_NO_ALTMAN), \
+        "le routage et la publication n'excluent plus les memes secteurs"
+
+    F = _financiere_temoin()
+    ordinaire = analyze("TEST", financials=F, secteur="Technology")["scores"]
+    assert ordinaire["altman_z"] is not None
+    assert ordinaire["altman_hors_domaine"] is False
+
+    for secteur in ("Financial Services", "Real Estate", "Utilities"):
+        s = analyze("TEST", financials=F, secteur=secteur)["scores"]
+        assert s["altman_z"] is None, f"{secteur} : le Z est publie hors domaine"
+        assert s["altman_verdict"] is None, f"{secteur} : un verdict est publie"
+        assert s["altman_hors_domaine"] is True, (
+            f"{secteur} : rien ne distingue un Z tu d'un Z incalculable")
+
+    # Sans secteur, le comportement d'origine est preserve : on ne devine pas.
+    assert analyze("TEST", financials=F)["scores"]["altman_z"] is not None
+
+
+def _financiere_temoin():
+    return {"years": [2025, 2024, 2023], "total_assets": [100.0, 95.0, 90.0],
+            "working_capital": [10.0, 9.0, 8.0], "retained_earnings": [20.0, 18.0, 16.0],
+            "ebit": [8.0, 7.0, 6.0], "equity": [40.0, 38.0, 36.0],
+            "total_liab": [60.0, 57.0, 54.0], "net_income": [5.0, 4.0, 3.0],
+            "cfo": [6.0, 5.0, 4.0], "revenue": [80.0, 75.0, 70.0],
+            "cogs": [50.0, 47.0, 44.0], "receivables": [10.0, 9.0, 8.0],
+            "inventory": [5.0, 4.0, 3.0], "current_assets": [30.0, 28.0, 26.0],
+            "net_ppe": [40.0, 38.0, 36.0], "dep_amort": [4.0, 4.0, 4.0],
+            "sga": [10.0, 9.0, 8.0], "current_liab": [20.0, 19.0, 18.0],
+            "long_term_debt": [30.0, 28.0, 26.0], "total_debt": [30.0, 28.0, 26.0],
+            "shares": [10.0, 10.0, 10.0], "gross_profit": [30.0, 28.0, 26.0],
+            "cfi": [-2.0, -2.0, -2.0], "total_liabilities": [60.0, 57.0, 54.0]}

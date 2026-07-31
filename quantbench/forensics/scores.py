@@ -240,21 +240,61 @@ def accruals_ratio(F, i=0) -> float | None:
 
 
 def _growth(series, i0=0, i1=1):
+    """Variation relative, NORMALISEE PAR LA VALEUR ABSOLUE de la base.
+
+    `a / b - 1` inverse le sens des que la base est NEGATIVE, ce qui est le cas
+    courant du resultat net et des flux d'exploitation d'une societe en perte :
+
+        de -100 a  -50 (la perte se REDUIT)   -> rendait -50 %, une degradation
+        de -100 a -150 (la perte S AGGRAVE)   -> rendait +50 %, une croissance
+        de -100 a  +50 (retour au benefice)   -> rendait -150 %
+        de +100 a  -50 (bascule en perte)     -> rendait -150 %, LE MEME CHIFFRE
+
+    Les deux dernieres lignes sont le plus grave : deux situations opposees
+    produisaient une valeur identique, impossible a distinguer en aval.
+
+    Ces variations alimentent le detecteur de DIVERGENCE — resultat net qui monte
+    pendant que la tresorerie descend, creances qui croissent plus vite que les
+    ventes. Sur une societe deficitaire, chaque signal etait donc lu a l'envers.
+
+    (a - b) / |b| conserve le sens : positif quand la situation s'ameliore, negatif
+    quand elle se degrade, quel que soit le signe de la base.
+    """
     a, b = series[i0], series[i1]
     if a is None or b is None or b == 0:
         return None
-    return a / b - 1.0
+    return (a - b) / abs(b)
 
 
-def analyze(ticker: str, financials=None) -> dict:
+# HORS DU DOMAINE DE VALIDITE DU Z''-EMS. Altman exclut explicitement les
+# financieres — leur bilan n'a pas la meme grammaire, les interets y sont une
+# matiere premiere. Foncieres et services publics ont structurellement un Z bas,
+# actifs lourds et dette elevee, SANS etre en detresse.
+# Cette liste existait deja, mais uniquement dans le ROUTAGE : la valorisation
+# refusait d'utiliser le Z, et la fiche l'AFFICHAIT quand meme, avec son verdict.
+# Une banque parfaitement solvable pouvait donc etre presentee comme en detresse
+# sur la page qui refusait par ailleurs d'en tenir compte pour la valoriser.
+SECTEURS_SANS_ALTMAN = ("financial", "real estate", "utilities")
+
+
+def analyze(ticker: str, financials=None, secteur=None) -> dict:
     """Analyse forensique complete d'un titre : scores + suivi annee/annee +
-    points positifs et alertes (libelles NEUTRES, jamais 'fraude')."""
+    points positifs et alertes (libelles NEUTRES, jamais 'fraude').
+
+    `secteur` sert a taire le Z d'Altman hors de son domaine de validite. Il est
+    facultatif : sans lui, le score est publie comme avant — mais tous les
+    appelants du build le fournissent.
+    """
     F = financials or get_financials(ticker)
     if F is None:
         return {"ticker": ticker.upper(), "available": False}
 
     m = beneish_m_score(F)
     z = altman_z_score(F)
+    sec = (secteur or "").lower()
+    hors_domaine = bool(sec) and any(x in sec for x in SECTEURS_SANS_ALTMAN)
+    if hors_domaine:
+        z = None
     piotroski = piotroski_f_score(F)
     accr = accruals_ratio(F)
 
@@ -327,6 +367,9 @@ def analyze(ticker: str, financials=None) -> dict:
             # Verdict calcule AVEC la formule, jamais recalcule par l'affichage.
             "altman_verdict": verdict_z,
             "altman_seuils": [Z_DETRESSE, Z_SAIN],
+            # Un Z absent parce qu'INCALCULABLE et un Z tu parce qu'HORS DOMAINE
+            # sont deux choses differentes, et la fiche doit pouvoir les dire.
+            "altman_hors_domaine": hors_domaine,
             "piotroski_f": piotroski["score"] if piotroski else None,
             "piotroski_tests": piotroski["tests"] if piotroski else None,
             "accruals_ratio": None if accr is None else round(accr, 4),

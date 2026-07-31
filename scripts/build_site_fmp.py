@@ -481,7 +481,11 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
     # distingue ces lignes n'est pas leur decote mais leur NATURE : ce sont des
     # emissions obligataires, reconnaissables a leur libelle, et c'est la que le
     # filtre appartient.
-    forensic = analyze(symbol, financials=F) if F else None
+    # Le secteur accompagne l'analyse : le Z d'Altman n'a pas de sens pour une
+    # financiere, une fonciere ou un service public, et la fiche l'affichait
+    # pourtant alors que la valorisation refusait de s'en servir.
+    forensic = analyze(symbol, financials=F,
+                       secteur=fund.get("sector")) if F else None
     with _etape("valorisation"):
         val = value_stock(symbol, fund=fund, forensic=forensic, F=F)
     if not val.get("ok"):
