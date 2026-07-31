@@ -18,6 +18,8 @@ import re
 
 import requests
 
+from ..series import serie_continue
+
 # Actions privilégiées / notes / débentures émises par banques & sociétés (quasi-
 # obligataire, pas des actions ordinaires) : à exclure de l'univers. Le modèle
 # excess-return les valorise comme des capitaux propres -> upside aberrant.
@@ -50,6 +52,7 @@ _PREF_TICKER = re.compile(r"-P[A-Z]{1,2}(\.(TO|V))?$")
 # tronque le libelle et le signe "%" disparait, si bien que le motif de coupon
 # habituel ne s'applique plus.
 _COUPON_FIN = re.compile(r"\s\d{1,2}\.\d*\s*$")
+
 
 
 def _is_preferred(symbol, name):
@@ -761,8 +764,14 @@ def fundamentals_from_fmp(symbol, sr, entry, desc, reference=None):
             cash = min(cash, tot_assets)
         if debt is not None:
             debt = min(max(debt, 0.0), tot_assets)
-    rev_hist = [_num(inc.get(yy, {}).get("revenue")) for yy in sorted(inc)]
-    rev_hist = [v * fxs / B for v in rev_hist if v is not None]
+    # SERIE CONTINUE D'EXERCICES. Elle etait batie sur les seules annees PRESENTES
+    # dans `inc`, puis purgee de ses valeurs manquantes : ses trous disparaissaient
+    # DEUX FOIS, et sans laisser de trace. Rien n'indiquait plus que deux elements
+    # voisins pouvaient etre distants de deux ans, et `_estimate_growth` annualisait
+    # alors une croissance pluriannuelle.
+    _annees, _rev = serie_continue(
+        ((yy, _num(inc.get(yy, {}).get("revenue"))) for yy in inc))
+    rev_hist = [None if v is None else v * fxs / B for v in _rev]
     price, mcap = _num(sr.get("price")), _num(sr.get("market_cap"))
     # COHERENCE capitalisation <-> comptes. Une societe ne se traite pas a 3 % de
     # son chiffre d'affaires ni a 5 % de ses fonds propres : un tel ecart signale

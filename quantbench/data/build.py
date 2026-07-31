@@ -44,32 +44,58 @@ def _clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 
+from ..series import paires_voisines, portee, renseigne
+
 def _estimate_growth(revenues):
     """Croissance de depart calibree : melange du dernier YoY, du CAGR 3 ans et du
     CAGR complet, borne. Corrige le biais de la mediane historique qui sous-estime
     l'acceleration recente (ex. NVDA). Retourne (g_start, diagnostics)."""
-    revs = [r for r in revenues if r > 0]
+    # LA SERIE GARDE SES TROUS. Elle etait purgee ici, puis lue par rapports
+    # d'indices voisins et par un taux compose dont l'exposant comptait les VALEURS
+    # RETENUES : un exercice manquant faisait lire un intervalle de deux ans comme
+    # une croissance annuelle, et raccourcissait le span du taux compose. Les deux
+    # erreurs vont dans le meme sens — elles SURESTIMENT la croissance, donc la
+    # valeur.
+    positif = lambda r: renseigne(r) and r > 0
+    revs = [r if positif(r) else None for r in (revenues or [])]
     # Historique SIGNIFICATIF seulement : on ne garde que la serie continue la plus
     # recente ou chaque exercice pese >=10% du dernier. Un passage de ~0 a X
     # (lancement produit, paiement d'etape ponctuel, societe issue de scission)
     # n'est pas une croissance extrapolable -- l'extrapoler donnait des valeurs
     # absurdes (ex. Keros : CA [0, 0, 0.004, 0.244] -> 45%/an pendant 10 ans).
-    if revs:
-        seuil = 0.10 * revs[-1]
+    dernier = next((r for r in reversed(revs) if r is not None), None)
+    if dernier is not None:
+        seuil = 0.10 * dernier
         keep = []
         for r in reversed(revs):
-            if r < seuil:
+            # UN TROU N'INTERROMPT PAS LA SERIE SIGNIFICATIVE : il ne dit pas que
+            # l'exercice etait petit, il dit qu'on ne le connait pas. L'interrompre
+            # dessus reviendrait a traiter l'ignorance comme une mesure.
+            if r is not None and r < seuil:
                 break
             keep.append(r)
         revs = list(reversed(keep))
-    n = len(revs)
-    if n < 2:
+    # La PROFONDEUR se compte sur les exercices renseignes, la PORTEE sur les indices.
+    bornes = portee(revs)
+    if bornes is None:
         return 0.05, {"historique_non_significatif": True}
+    plus_ancien, plus_recent, span = bornes
+    voisines = paires_voisines(revs)
+    if not voisines:
+        return 0.05, {"historique_non_significatif": True}
+    n = len(revs)
     import statistics as _st
-    g_last = revs[-1] / revs[-2] - 1
-    k3 = min(3, n - 1)
-    g_cagr3 = (revs[-1] / revs[-1 - k3]) ** (1 / k3) - 1
-    g_cagr_full = (revs[-1] / revs[0]) ** (1 / (n - 1)) - 1
+    # Le dernier taux annuel : le couple d'exercices VOISINS le plus recent.
+    g_last = voisines[-1][1] / voisines[-1][0] - 1
+    # Trois ANNEES, et non trois valeurs retenues.
+    i_fin = max(i for i, r in enumerate(revs) if r is not None)
+    k3 = min(3, span)
+    i_deb = next((i for i in range(i_fin - k3, -1, -1) if revs[i] is not None), None)
+    if i_deb is None or i_fin == i_deb:
+        g_cagr3 = g_last
+    else:
+        g_cagr3 = (revs[i_fin] / revs[i_deb]) ** (1 / (i_fin - i_deb)) - 1
+    g_cagr_full = (plus_recent / plus_ancien) ** (1 / span) - 1
     # Melange ROBUSTE aux exercices exceptionnels : on prend la MEDIANE des
     # croissances annuelles plutot que la derniere annee ponderee a 50 %. Un
     # paiement d'etape, une cession ou une acquisition faisaient sinon extrapoler
@@ -77,7 +103,7 @@ def _estimate_growth(revenues):
     # 2,54 Md$ en une annee grace a un accord de licence, se voyait attribuer
     # 45 %/an de croissance perpetuelle. La mediane resiste a un seul exercice
     # aberrant tout en captant une acceleration REELLE (tous les exercices eleves).
-    gs = [revs[i] / revs[i - 1] - 1 for i in range(1, n)]
+    gs = [b_ / a_ - 1 for a_, b_ in voisines]
     g_med = float(_st.median(gs))
     blend = 0.60 * g_med + 0.40 * g_cagr_full
     g_start = _clamp(blend, -0.05, 0.45)

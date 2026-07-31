@@ -4148,3 +4148,122 @@ def test_un_taux_hors_bande_est_un_defaut_de_lecture_et_non_un_fait_de_marche():
     assert market._borne(4.68) is None, "le facteur d'echelle manquant doit etre rejete"
     assert market._borne(-0.01) is None
     assert market._borne(None) is None
+
+
+def test_une_serie_continue_rend_ses_trous_lisibles():
+    """La forme la plus dangereuse du defaut ne contient AUCUNE valeur manquante.
+
+    `[m[a] for a in sorted(m)]` bati sur les seules annees presentes ne porte pas
+    de `None`, et pourtant deux elements voisins peuvent etre distants de deux ans.
+    Rien dans la liste ne permet de le detecter — c'est ce qui la rend pire qu'une
+    serie trouee.
+
+    Les trois producteurs designent leurs exercices differemment : dates de cloture
+    pour EDGAR, annees en chaine pour FMP, annees entieres pour les jeux SEC.
+    """
+    from quantbench.series import serie_continue
+
+    attendu = ([2021, 2022, 2023, 2024], [1.0, 1.2, None, 1.7])
+    assert serie_continue([("2021-12-31", 1.0), ("2022-12-31", 1.2),
+                           ("2024-12-31", 1.7)]) == attendu
+    assert serie_continue([("2021", 1.0), ("2022", 1.2), ("2024", 1.7)]) == attendu
+    assert serie_continue({2021: 1.0, 2022: 1.2, 2024: 1.7}) == attendu
+    # Une serie dense ne doit rien gagner ni rien perdre.
+    assert serie_continue({2021: 1.0, 2022: 1.2, 2023: 1.4}) == \
+        ([2021, 2022, 2023], [1.0, 1.2, 1.4])
+    # Une cle illisible ne devient pas l'exercice zero.
+    assert serie_continue([("n/a", 9.9), ("2022", 1.2)]) == ([2022], [1.2])
+
+
+def test_on_n_apparie_que_des_exercices_reellement_voisins():
+    """`paires_voisines` doit faire DISPARAITRE les deux couples qui touchent un
+    trou, jamais en fabriquer un qui l'enjambe. Et `portee` doit compter les
+    INTERVALLES sur les indices d'origine : c'est cet exposant qui annualise.
+    """
+    from quantbench.series import paires_voisines, portee, renseigne
+
+    s = [1.0, 1.2, None, 1.7, 2.0]
+    assert paires_voisines(s) == [(1.0, 1.2), (1.7, 2.0)], \
+        "un couple enjambe le trou"
+    assert portee(s) == (1.0, 2.0, 4), \
+        "la portee compte les valeurs retenues au lieu des intervalles"
+    # Quatre valeurs retenues mais QUATRE intervalles parcourus : prendre la racine
+    # troisieme au lieu de la quatrieme surestime le taux compose.
+    assert portee(s)[2] == len(s) - 1
+
+    # ZERO EST UNE VALEUR, pas un trou — le second defaut recurrent du depot.
+    assert renseigne(0.0) and not renseigne(None)
+    assert paires_voisines([2.0, 0.0, 1.0]) == [(2.0, 0.0), (0.0, 1.0)]
+    # Un appelant qui a besoin d'un argument strictement positif le dit lui-meme.
+    positif = lambda v: renseigne(v) and v > 0
+    assert paires_voisines([2.0, 0.0, 1.0], positif) == []
+
+
+def test_la_croissance_de_depart_n_annualise_pas_une_variation_de_deux_ans():
+    """`_estimate_growth` lisait des rapports d'indices voisins sur une serie
+    PURGEE et un taux compose dont l'exposant comptait les valeurs retenues. Les
+    deux erreurs vont dans le MEME sens : elles raccourcissent la duree attribuee a
+    une variation, donc surestiment la croissance et par elle la valeur.
+
+    Sur une serie dense la correction doit etre RIGOUREUSEMENT neutre.
+    """
+    from quantbench.data.build import _estimate_growth
+
+    dense = [0.42, 0.53, 0.66, 0.82, 1.03, 1.28, 1.60]       # +25 %/an
+    g_dense, _ = _estimate_growth(dense)
+    assert g_dense == pytest.approx(0.2485, abs=5e-4)
+
+    # Le meme historique, avec des exercices manquants : la croissance REELLE n'a
+    # pas change, la mesure ne doit donc pas changer non plus.
+    un_trou = [0.42, 0.53, 0.66, None, 1.03, 1.28, 1.60]
+    deux_trous = [0.42, None, 0.66, None, 1.03, 1.28, 1.60]
+    g1, _ = _estimate_growth(un_trou)
+    g2, _ = _estimate_growth(deux_trous)
+    assert abs(g1 - g_dense) < 0.005, f"un trou deplace la croissance de {g1-g_dense:+.2%}"
+    assert abs(g2 - g_dense) < 0.010, f"deux trous la deplacent de {g2-g_dense:+.2%}"
+
+    # La forme d'hier, reproduite, montre l'ampleur de ce qui est corrige.
+    def refermee(serie):
+        return _estimate_growth([v for v in serie if v is not None])[0]
+    assert refermee(un_trou) > g_dense + 0.02, "le cas de reference ne mord plus"
+    assert refermee(deux_trous) > g_dense + 0.08
+
+
+def test_la_dilution_ne_se_mesure_pas_sur_une_serie_refermee():
+    """Meme piege sur D5. Une emission de 4,36 %/an mesuree sur une serie refermee
+    ressortait a 5,48 % avec un exercice manquant et a 8,33 % avec deux — soit le
+    DOUBLE de la realite. Le trou raccourcit a la fois le rapport recent et le span
+    du taux compose : les deux erreurs s'additionnent.
+    """
+    from quantbench.risk.dimensions import d5_dilution
+
+    # Series PLUS RECENT EN TETE, dilution reguliere de 4,36 %/an.
+    dense = [52e6, 50e6, 48e6, 46e6, 44e6, 42e6]
+    ref, _ = d5_dilution({}, {"shares": dense}, None)
+    assert ref == pytest.approx(0.0436, abs=1e-3)
+    for serie in ([52e6, 50e6, None, 46e6, 44e6, 42e6],
+                  [52e6, None, 48e6, None, 44e6, 42e6]):
+        sig, _ = d5_dilution({}, {"shares": serie}, None)
+        assert abs(sig - ref) < 0.005, (
+            f"un exercice manquant deplace la dilution de {sig-ref:+.2%}")
+
+
+def test_les_producteurs_de_series_ne_referment_plus_leurs_trous():
+    """Quatre modules batissent `revenue_history`. Un seul qui referme sa serie
+    suffit a rendre le trou indetectable en aval, ou qu'on l'ait corrige. Le test
+    porte sur le CODE et non sur les commentaires, qui citent necessairement la
+    forme fautive pour l'expliquer.
+    """
+    import re
+    from pathlib import Path
+
+    racine = Path(__file__).resolve().parent.parent
+    for chemin in ("quantbench/data/fmp.py", "quantbench/data/sec_fundamentals.py",
+                   "quantbench/data/sec_datasets.py", "quantbench/data/universal.py",
+                   "quantbench/valuation/build_universal.py"):
+        code = "\n".join(l.split("#")[0]
+                         for l in (racine / chemin).read_text(encoding="utf-8").splitlines())
+        for motif in (r"for\s+\w+\s+in\s+rev_hist\s+if\s+",
+                      r"\[\s*x\s+for\s+x\s+in\s*\(?\s*fund\.get\(\"revenue_history\"\)"):
+            assert not re.search(motif, code), (
+                f"{chemin} referme encore la serie de chiffre d'affaires")

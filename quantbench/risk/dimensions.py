@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 from ..bilan import est_une_activite_de_bilan
+from ..series import paires_voisines, portee, renseigne
 
 # Nombre minimal d'exercices pour un ecart interquartile : contrainte arithmetique,
 # pas une opinion.
@@ -289,10 +290,15 @@ def d4_volatilite(fund, F, reg):
     iqr_marge = _quartiles(marges)
     if iqr_marge is not None:
         composantes.append(iqr_marge)
-    revenus = [r for r in ((F or {}).get("revenue") or []) if r and r > 0]
-    if len(revenus) >= _MIN_EXERCICES_IQR + 1:
-        croissances = [math.log(revenus[i] / revenus[i + 1])
-                       for i in range(len(revenus) - 1) if revenus[i + 1] > 0]
+    # LA SERIE NE SE PURGE PAS AVANT D'EN TIRER DES CROISSANCES ANNUELLES.
+    # Elle etait refermee sur ses trous, puis lue par indices voisins : un exercice
+    # manquant fabriquait une pseudo-croissance de DEUX ans, qui gonfle l'ecart
+    # interquartile et donc la volatilite mesuree. La profondeur exigee se comptait
+    # de surcroit sur la serie PURGEE, donc surestimee.
+    revenus = list((F or {}).get("revenue") or [])
+    positif = lambda r: renseigne(r) and r > 0
+    if sum(1 for r in revenus if positif(r)) >= _MIN_EXERCICES_IQR + 1:
+        croissances = [math.log(a / b) for a, b in paires_voisines(revenus, positif)]
         iqr_croissance = _quartiles(croissances)
         if iqr_croissance is not None:
             composantes.append(iqr_croissance)
@@ -324,13 +330,22 @@ def d5_dilution(fund, F, reg):
     et bons emis SOUS la valeur, qu'il valorise et soustrait explicitement. Cette
     dimension mesure donc une realite empirique des micro-capitalisations, pas un
     enseignement de Damodaran."""
-    actions = [a for a in ((F or {}).get("shares") or []) if a and a > 0]
-    if len(actions) < 2:
+    # MEME PIEGE. La serie etait refermee sur ses trous avant d'etre lue par indices
+    # voisins ET avant que le nombre d'ANNEES ne serve d'exposant au taux compose :
+    # un exercice manquant raccourcissait la duree attribuee a une dilution donnee,
+    # et la surestimait donc deux fois.
+    actions = list((F or {}).get("shares") or [])
+    positif = lambda a: renseigne(a) and a > 0
+    voisines = paires_voisines(actions, positif)
+    if not voisines:
         return None, None
-    recente = (actions[0] / actions[1]) - 1.0
-    if len(actions) >= 4:
-        annees = len(actions) - 1
-        composee = (actions[0] / actions[-1]) ** (1.0 / annees) - 1.0
+    recente = (voisines[0][0] / voisines[0][1]) - 1.0
+    # L'exposant se compte sur les INTERVALLES parcourus, jamais sur le nombre de
+    # valeurs retenues.
+    bornes = portee(actions, positif)
+    if bornes is not None and bornes[2] >= 3:
+        recent, ancien, annees = bornes
+        composee = (recent / ancien) ** (1.0 / annees) - 1.0
     else:
         composee = recente
     # Les deux composantes sont fortement redondantes : on retient la PIRE, jamais la

@@ -212,7 +212,12 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     if not rev or rev <= 0:
         raise ValueError(f"CA indisponible pour {fund.get('ticker')}")
 
-    rev_hist = [x for x in (fund.get("revenue_history") or []) if x]
+    # LA SERIE PASSE AVEC SES TROUS. Ce filtre les refermait juste avant
+    # `_estimate_growth`, qui lit ensuite des rapports d'indices voisins et un taux
+    # compose : un exercice manquant faisait annualiser une croissance de deux ans.
+    # `_estimate_growth` sait desormais lire une serie trouee ; la purger ici
+    # reviendrait a lui cacher l'information dont elle a besoin.
+    rev_hist = list(fund.get("revenue_history") or [])
     if len(rev_hist) >= 2:
         g_start, _ = _estimate_growth(rev_hist)
     else:

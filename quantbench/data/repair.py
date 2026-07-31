@@ -169,7 +169,8 @@ def reparer(symbol, fund, F, entry, motifs):
                       "book_equity", "total_assets", "dep_amort", "cfo"):
                 if fund.get(k) is not None:
                     fund[k] = fund[k] * t
-            fund["revenue_history"] = [v * t for v in (fund.get("revenue_history") or [])]
+            fund["revenue_history"] = [None if v is None else v * t
+                                       for v in (fund.get("revenue_history") or [])]
             fund["fx_indisponible"] = False
             faites.append(f"taux {fund.get('financial_currency')} obtenu via l'euro")
 

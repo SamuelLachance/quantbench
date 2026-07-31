@@ -18,12 +18,14 @@ import functools
 import requests
 
 from . import edgar, market
+from ..series import serie_continue
 
 _UA = edgar._UA
 _B = 1e9
 
 
 @functools.lru_cache(maxsize=8192)
+
 def submission_meta(cik: str) -> dict:
     r = requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json",
                      headers=_UA, timeout=30)
@@ -201,7 +203,10 @@ def get_fundamentals(ticker: str) -> dict:
     cash = edgar.latest(facts, edgar.TAGS["cash"], "instant", 0.0) or 0.0
     shares = latest("shares", "instant") or edgar.latest(
         facts, edgar.TAGS["shares_diluted"], "duration")
-    rev_hist = [v for _, v in edgar.annual_series(facts, _F_TAGS["revenue"])]  # oldest->newest
+    # SERIE CONTINUE : `annual_series` ne rend que les exercices DEPOSES. Un
+    # exercice absent des donnees EDGAR disparaissait de la liste sans laisser de
+    # trace, et deux elements voisins pouvaient couvrir deux ans.
+    _annees, rev_hist = serie_continue(edgar.annual_series(facts, _F_TAGS["revenue"]))
 
     price = market.latest_price(ticker)
     try:
@@ -218,7 +223,7 @@ def get_fundamentals(ticker: str) -> dict:
         "sector": sector, "industry": meta.get("sicDescription"),
         "price": price, "market_cap": market_cap, "shares": shares, "beta": beta,
         "currency_ok": True, "price_currency": "USD", "financial_currency": "USD",
-        "revenue": b(revenue), "revenue_history": [x / _B for x in rev_hist],
+        "revenue": b(revenue), "revenue_history": [None if x is None else x / _B for x in rev_hist],
         "ebit": b(ebit), "net_income": b(ni),
         "total_debt": b(debt), "cash": b(cash), "book_equity": b(equity),
         "operating_margin": (ebit / revenue) if (ebit is not None and revenue) else None,

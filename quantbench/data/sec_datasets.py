@@ -24,6 +24,7 @@ import requests
 
 from . import edgar
 from .sec_fundamentals import _F_TAGS, _INSTANT, sic_to_sector
+from ..series import serie_continue
 
 _BASE = "https://www.sec.gov/files/dera/data/financial-statement-data-sets/"
 _CACHE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
@@ -34,6 +35,7 @@ _WANT = set()
 for _labs in _F_TAGS.values():
     _WANT |= set(_labs)
 _WANT |= set(edgar.TAGS["cash"])
+
 
 
 def recent_quarters(n: int, as_of: date | None = None):
@@ -194,7 +196,9 @@ def extract_fundamentals(entry, ticker, quote) -> dict:
             break
     cash = cash_m[max(cash_m)] if cash_m else 0.0
     rev_map = _merge_years(entry, "revenue")
-    rev_hist = [rev_map[y] for y in sorted(rev_map)]     # ancien -> recent
+    # SERIE CONTINUE : un exercice absent de `rev_map` disparaissait sans laisser
+    # de trace, et deux elements voisins pouvaient couvrir deux ans.
+    _annees, rev_hist = serie_continue(rev_map)          # ancien -> recent, trous compris
 
     B = 1e9
     price = quote.get("price")
@@ -209,7 +213,7 @@ def extract_fundamentals(entry, ticker, quote) -> dict:
         "sector": sic_to_sector(entry.get("sic")), "industry": None,
         "price": price, "market_cap": mcap, "shares": shares, "beta": beta,
         "currency_ok": True, "price_currency": "USD", "financial_currency": "USD",
-        "revenue": bb(revenue), "revenue_history": [x / B for x in rev_hist],
+        "revenue": bb(revenue), "revenue_history": [None if x is None else x / B for x in rev_hist],
         "ebit": bb(ebit), "net_income": bb(ni),
         "total_debt": bb(debt), "cash": bb(cash), "book_equity": bb(equity),
         "operating_margin": (ebit / revenue) if (ebit is not None and revenue) else None,
