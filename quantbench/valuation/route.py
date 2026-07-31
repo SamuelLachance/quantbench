@@ -170,9 +170,23 @@ def _roe_normalise(fund, F):
     exceptionnel ne doit pas fixer la valeur (Capital One : 2,2 % une annee)."""
     roes = []
     if F:
-        for ni, eq in zip(F.get("net_income", []), F.get("equity", [])):
-            if ni is not None and eq and eq > 0:
-                roes.append(ni / eq)
+        # FONDS PROPRES D'OUVERTURE, jamais de cloture. Le rendement d'un exercice
+        # se rapporte au capital dont la societe DISPOSAIT pour le produire ; les
+        # fonds propres de cloture contiennent deja le benefice qu'on leur rapporte,
+        # plus toute augmentation de capital de l'annee. Le rendement mesure valait
+        # donc ROE / (1 + croissance des fonds propres) — sous-estime a chaque
+        # exercice, dans le meme sens, si bien que la mediane n'y remedie pas.
+        # C'est en outre ce que suppose la forme fermee de `value_financial` :
+        # l'exces de l'annee t y porte sur BE_{t-1}. Les deux bouts du modele
+        # parlaient de deux capitaux differents.
+        # Les series arrivent PLUS RECENT EN TETE (`sorted(..., reverse=True)`) :
+        # l'ouverture de l'exercice i est donc la cloture de l'exercice i+1. Le plus
+        # ancien exercice n'a pas d'ouverture connue et sort de la mesure.
+        eq = F.get("equity") or []
+        for i, ni in enumerate(F.get("net_income") or []):
+            ouverture = eq[i + 1] if i + 1 < len(eq) else None
+            if ni is not None and ouverture and ouverture > 0:
+                roes.append(ni / ouverture)
     r = float(np.median(roes)) if len(roes) >= 3 else fund.get("roe")
     return None if r is None else max(-1.0, min(r, 0.40))
 
@@ -377,7 +391,9 @@ def value_financial(fund, F=None):
     """Financieres DE BILAN — modele de rendement excedentaire (Damodaran).
     V = BE x [1 + (ROE - ke) x A], ou A actualise l'exces de rentabilite sur une
     periode d'avantage concurrentiel de 10 ans, au terme de laquelle ROE = ke (les
-    rentes sont competees). Cela remplace un multiplicateur PERPETUEL qui explosait
+    rentes sont competees). L'ecart de rentabilite est CONSTANT sur ces dix ans puis
+    NUL — la forme de Damodaran — et non decroissant : le libelle publie annoncait
+    une "erosion" que le calcul ne fait pas. Cela remplace un multiplicateur PERPETUEL qui explosait
     des que ke - g devenait minuscule (assureurs a faible beta : Allstate ressortait
     a +121 %) et qu'il fallait brider par des bornes arbitraires figeant le P/B de
     TOUTE financiere dans [0,40 ; 5,00]."""
@@ -399,7 +415,7 @@ def value_financial(fund, F=None):
     A = (n / (1.0 + ke)) if abs(1.0 - q) < 1e-9 else         (1.0 / (1.0 + ke)) * (1.0 - q ** n) / (1.0 - q)
     val = be * (1.0 + (roe - ke) * A)
     return {"equity_value": max(val, 0.0), "confidence": "moyenne",
-            "method": "Rendement excedentaire a erosion 10 ans (financiere de bilan)",
+            "method": "Rendement excedentaire, avantage concurrentiel 10 ans (financiere de bilan)",
             "roe_normalise": round(roe, 4), "pb_implicite": round(1.0 + (roe - ke) * A, 2)}
 
 

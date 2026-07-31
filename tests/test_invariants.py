@@ -3964,3 +3964,66 @@ def test_le_regime_change_les_modalites_donc_l_argument_n_est_pas_decoratif():
     assert "moins_d_un_an_d_autonomie" in sans
     assert "moins_d_un_an_d_autonomie" not in avec, (
         "corrige du capex de croissance, un regule ne consomme pas sa tresorerie")
+
+
+def test_le_roe_se_mesure_sur_les_fonds_propres_d_ouverture():
+    """Le rendement d'un exercice se rapporte au capital dont la societe DISPOSAIT
+    pour le produire. Les fonds propres de cloture contiennent deja le benefice
+    qu'on leur rapporte : le rendement mesure valait ROE / (1 + croissance des
+    fonds propres), sous-estime a CHAQUE exercice et donc pas rattrape par la
+    mediane. Sur une banque au rendement rigoureusement stable, la mesure doit
+    rendre ce rendement EXACTEMENT.
+    """
+    from quantbench.valuation.route import _roe_normalise
+
+    for roe_vrai, retention in ((0.17, 0.50), (0.09, 0.30), (0.20, 0.65)):
+        g = roe_vrai * retention
+        ni, eq, e = [], [], 200000.0
+        for _ in range(10):                      # du plus ancien au plus recent
+            ni.append(e * roe_vrai)
+            e *= (1.0 + g)
+            eq.append(e)                         # cloture de l'exercice
+        F = {"years": list(range(10)),
+             "net_income": ni[::-1], "equity": eq[::-1]}   # plus recent en tete
+        mesure = _roe_normalise({"book_equity": eq[-1]}, F)
+        assert abs(mesure - roe_vrai) < 1e-12, (
+            f"rendement stable a {roe_vrai:.1%} mesure a {mesure:.4%} : le "
+            f"denominateur n'est pas l'ouverture")
+
+
+def test_le_rendement_excedentaire_egale_sa_somme_annee_par_annee():
+    """La forme fermee de `value_financial` doit valoir, au centime, la definition
+    de Damodaran : fonds propres d'aujourd'hui plus valeur actuelle des exces
+    annuels, l'exces de l'annee t portant sur les fonds propres d'OUVERTURE
+    BE_{t-1}, eux-memes croissant au rythme finance par la retention.
+
+    Ce test verifie l'ALGEBRE, pas le texte : il reconstruit la somme a la main.
+    """
+    from quantbench.valuation.route import value_financial
+
+    def somme_explicite(be0, roe, ke, g, n=10):
+        v, be = be0, be0
+        for t in range(1, n + 1):
+            v += (roe - ke) * be / (1.0 + ke) ** t
+            be *= (1.0 + g)
+        return v
+
+    pire = 0.0
+    for roe in (0.02, 0.08, 0.12, 0.25):
+        for ke in (0.06, 0.09, 0.14):
+            for g in (0.0, 0.01, 0.03):
+                if ke <= g + 0.02:
+                    continue
+                q = (1.0 + g) / (1.0 + ke)
+                a = (1.0 / (1.0 + ke)) * (1.0 - q ** 10) / (1.0 - q)
+                ferme = 200000.0 * (1.0 + (roe - ke) * a)
+                pire = max(pire, abs(ferme - somme_explicite(200000.0, roe, ke, g))
+                           / max(abs(ferme), 1.0))
+    assert pire < 1e-12, f"la forme fermee derive de sa definition : {pire:.2e}"
+
+    # Le libelle publie doit decrire ce que le calcul fait : un ecart CONSTANT sur
+    # la periode d'avantage puis nul, et non une erosion progressive.
+    m = value_financial({"book_equity": 1e5, "net_income": 12000.0, "revenue": 4e4,
+                         "beta": 1.0, "country": "US", "roe": 0.12}, None)
+    assert m and "erosion" not in m["method"], (
+        "le libelle annonce une erosion que le calcul ne fait pas")
