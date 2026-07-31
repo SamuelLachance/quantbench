@@ -45,6 +45,17 @@ def _charger():
 _CAL = _charger()
 
 
+# Dimensions dont le SIGNAL LUI-MEME change de nature selon le regime, et qui
+# exigent donc une table de centiles distincte — non par relativite, mais par
+# incommensurabilite :
+#   d1 : couverture d'interets (exploitante), couverture sur excedent avant
+#        amortissements (amortissement lourd), coussin de fonds propres tangibles
+#        rapporte a l'actif (financiere). Trois grandeurs sans commune mesure.
+#   d3 : marge de cycle ailleurs, rendement des fonds propres chez les financieres.
+# Toutes les autres mesurent la MEME chose partout et gardent la table globale.
+_DIMENSIONS_A_GRANDEUR_VARIABLE = frozenset({"d1", "d3"})
+
+
 def rang(cle, signal, cal, secteur=None, industrie=None, niveau="univers",
          regime=None):
     """Rang percentile du signal dans la table GELEE — la part de la population de
@@ -67,7 +78,7 @@ def rang(cle, signal, cal, secteur=None, industrie=None, niveau="univers",
         return 0.0
     tables = (cal or {}).get("quantiles", {}).get(cle) or {}
     grille = None
-    # TABLE PROPRE AU REGIME, quand le signal CHANGE DE NATURE avec lui.
+    # TABLE PROPRE AU REGIME, UNIQUEMENT quand le signal change de NATURE.
     #
     # La solvabilite d'un industriel est une couverture d'interets, celle d'une
     # banque un coussin de fonds propres tangibles : deux grandeurs sans commune
@@ -80,7 +91,16 @@ def rang(cle, signal, cal, secteur=None, industrie=None, niveau="univers",
     # La table du regime prime donc sur celle du secteur et sur la globale. Son
     # absence fait retomber sur le comportement d'avant, si bien qu'un calibrage
     # ancien reste lisible.
-    if regime:
+    #
+    # ET UNIQUEMENT LA OU LA GRANDEUR CHANGE — c'est la limite qui compte. Etendre
+    # les tables de regime a TOUTES les dimensions retablit la RELATIVITE que le
+    # gel des tables existe pour interdire : une dilution est une dilution, un mur
+    # de refinancement est un mur, quel que soit le regime. Les ranger par regime
+    # reviendrait a dire qu'un secteur entier peut se degrader sans que personne ne
+    # soit degrade. Mesure de cette faute, commise puis corrigee : Prologis passait
+    # de A a B+ et Duke Energy de A- a B+ non parce qu'elles avaient faibli, mais
+    # parce qu'elles etaient soudain comparees a leurs seules semblables.
+    if regime and cle in _DIMENSIONS_A_GRANDEUR_VARIABLE:
         grille = (tables.get("regimes") or {}).get(regime)
     if grille:
         pass

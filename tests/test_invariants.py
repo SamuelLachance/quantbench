@@ -3543,3 +3543,69 @@ def test_lidentite_du_bilan_porte_sur_les_fonds_propres_totaux():
     code = "\n".join(l.split("#")[0] for l in src.splitlines())
     assert "fp_totaux" in code, "l'identite compare de nouveau la part attribuable"
     assert "- fp_totaux)" in code or "- fp_totaux" in code
+
+
+def test_les_tables_de_regime_ne_servent_que_la_ou_la_grandeur_change():
+    """Une table par regime pour TOUTES les dimensions retablit la RELATIVITE que
+    le gel des tables existe pour interdire.
+
+    Le gel a une raison precise, ecrite sur chaque fiche : « une degradation
+    signale une degradation de la societe et non un mouvement de ses voisines ».
+    Ranger la dilution ou le mur de refinancement par regime reviendrait a dire
+    qu'un secteur entier peut se degrader sans que personne ne soit degrade.
+
+    La table de regime n'est legitime que la ou le SIGNAL change de nature :
+      d1 : couverture d'interets, couverture sur excedent avant amortissements, ou
+           coussin de fonds propres tangibles — trois grandeurs sans commune mesure ;
+      d3 : marge de cycle ailleurs, rendement des fonds propres chez les financieres.
+
+    Mesure de la faute, commise puis corrigee : avec des tables de regime partout,
+    45 % des societes changeaient de note contre 35 % apres restriction — et
+    Prologis passait de A a B+, Duke Energy de A- a B+, non parce qu'elles avaient
+    faibli mais parce qu'elles etaient soudain comparees a leurs seules semblables.
+    """
+    import inspect
+
+    from quantbench.risk import dimensions as D
+    from quantbench.risk.score import _DIMENSIONS_A_GRANDEUR_VARIABLE, rang
+
+    assert _DIMENSIONS_A_GRANDEUR_VARIABLE == frozenset({"d1", "d3"})
+
+    # Le perimetre se DEDUIT du code : une dimension qui se branche sur le regime
+    # change de grandeur, les autres non. Si quelqu'un ajoute demain une branche de
+    # regime a une dimension, ce test le forcera a trancher explicitement.
+    variables = set()
+    for cle, _nom, f, _niv in D.DIMENSIONS:
+        src = inspect.getsource(f)
+        if src.count("if reg ==") + src.count("elif reg ==") >= 2:
+            variables.add(cle)
+    assert variables == _DIMENSIONS_A_GRANDEUR_VARIABLE, (
+        f"le code branche sur le regime pour {sorted(variables)} mais la liste "
+        f"declare {sorted(_DIMENSIONS_A_GRANDEUR_VARIABLE)}")
+
+    # Une dimension hors perimetre ignore la table de regime, meme si elle existe.
+    cal = {"quantiles": {"d5": {"global": [0.0, 1.0, 2.0],
+                                "regimes": {"financiere": [10.0, 20.0, 30.0]}}}}
+    assert rang("d5", 1.5, cal, regime="financiere") == rang("d5", 1.5, cal), \
+        "d5 utilise une table de regime alors que sa grandeur ne change pas"
+
+
+def test_le_calibrage_porte_des_tables_de_regime_pour_d1_et_d3():
+    """Sans elles, le coussin de fonds propres d'une banque est classe contre les
+    centiles des couvertures d'interets : toute l'etendue plausible d'un bilan
+    bancaire — de 20 % a 1 % — se comprimait sur 0,101 d'echelle, entierement
+    au-dessus de la mediane de risque."""
+    from quantbench.risk.score import _CAL, rang
+
+    for cle in ("d1", "d3"):
+        regimes = ((_CAL.get("quantiles", {}).get(cle) or {}).get("regimes") or {})
+        assert "financiere" in regimes, f"{cle} n'a pas de table pour les financieres"
+        assert len(regimes["financiere"]) >= 50, "table trop courte pour interpoler"
+
+    # La discrimination doit etre REELLE : un coussin de 20 % et un coussin de 1 %
+    # ne peuvent pas tomber au meme endroit de l'echelle.
+    solide = rang("d1", -0.20, _CAL, niveau="univers", regime="financiere")
+    fragile = rang("d1", -0.01, _CAL, niveau="univers", regime="financiere")
+    assert fragile - solide > 0.5, (
+        f"etendue {fragile - solide:.3f} : la dimension ne separe pas les banques")
+    assert solide < 0.25 and fragile > 0.75
