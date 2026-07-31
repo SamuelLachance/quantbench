@@ -295,16 +295,26 @@ def test_un_refus_de_la_sec_ne_se_deguise_pas_en_ticker_introuvable(monkeypatch)
 # 3. Series annuelles : les chiffres faux ne levent aucune exception
 # --------------------------------------------------------------------------- #
 def test_seuls_les_rapports_annuels_alimentent_la_serie():
-    """Melanger un 10-Q a la serie annuelle divise le chiffre d'affaires par
-    quatre sur l'exercice concerne — sans la moindre erreur, et avec un DCF qui
-    tourne comme si de rien n'etait."""
+    """Le filtre de forme n'est pas redondant avec le filtre de duree. Un 10-Q
+    porte des periodes GLISSANTES de douze mois — que la fenetre 350-380 jours
+    laisse passer — et surtout des postes de bilan INSTANTANES, que le mode
+    'instant' n'examine pas du tout. Sans le filtre de forme, la tresorerie de fin
+    d'exercice devient celle du 31 mars, et le DCF tourne sur un bilan de
+    trimestre sans qu'aucune erreur ne soit levee."""
     f = faits({"Revenues": [
         ligne_duree(2023, 100.0),
         ligne_duree(2024, 120.0),
-        {"form": "10-Q", "start": "2025-01-01", "end": "2025-03-31",
-         "val": 31.0, "filed": "2025-04-30"}]})
+        # douze mois glissants publies dans un 10-Q : duree parfaitement annuelle
+        {"form": "10-Q", "start": "2024-04-01", "end": "2025-03-31",
+         "val": 131.0, "filed": "2025-04-30"}]})
     assert edgar.annual_series(f, "Revenues") == [("2023-12-31", 100.0),
                                                   ("2024-12-31", 120.0)]
+
+    bilan = faits({"CashAndCashEquivalentsAtCarryingValue": [
+        ligne_instant(2024, 50.0),
+        {"form": "10-Q", "end": "2025-03-31", "val": 12.0, "filed": "2025-04-30"}]})
+    assert edgar.annual_series(bilan, edgar.TAGS["cash"], "instant") == [
+        ("2024-12-31", 50.0)], "un bilan de trimestre est entre dans la serie annuelle"
 
 
 @pytest.mark.parametrize("jours,retenu", [
@@ -520,11 +530,14 @@ def test_la_liste_des_documents_est_bornee_et_filtree(monkeypatch):
     laisser passer un formulaire sans libelle, qui s'affiche a l'utilisateur sous
     son code brut. Le bloc se limite aux formes documentaires connues, plafonnees
     a huit."""
-    lignes = []
-    for i in range(30):
-        lignes.append(("8-K", f"comm{i}.htm", f"0000320193-24-{i:06d}", "2024-06-01"))
-    lignes.append(("4", "form4.xml", "0000320193-24-000900", "2024-06-02"))
-    lignes.append(("SC 13G", "sc13g.htm", "0000320193-24-000901", "2024-06-03"))
+    # Les formes a ecarter sont EN TETE : chez une grande capitalisation, les
+    # depots les plus recents sont des formulaires 4 (declarations de dirigeants).
+    # Placees en fin de liste, elles seraient masquees par le seul plafond.
+    lignes = [("4", f"form4-{i}.xml", f"0000320193-24-{i:06d}", "2024-06-10")
+              for i in range(9)]
+    lignes += [("SC 13G", "sc13g.htm", "0000320193-24-000900", "2024-06-09")]
+    lignes += [("8-K", f"comm{i}.htm", f"0000320193-24-{i + 100:06d}", "2024-06-01")
+               for i in range(30)]
     faux = FauxRequests(Reponse(depots(*lignes)))
     monkeypatch.setattr(sf, "requests", faux)
     out = sf.annual_report_docs("0000320193")

@@ -26,7 +26,13 @@ const QB = {
     if (this._uni) return this._uni;
     try {
       const d = await (await fetch('us/_screener.json', {cache: 'no-store'})).json();
-      this._uni = (d.rows || []).concat(d.suspects || []);
+      /* `suspects` n'existe plus : le producteur l'ecrivait en dur comme une
+         liste VIDE, a cote d'un compteur `n_suspect` fige a zero, pendant que
+         5 033 titres reellement non couverts n'apparaissaient nulle part. Le
+         `|| []` rendait la disparition indolore, mais garder la lecture d'un champ
+         supprime laisse croire qu'il pourrait revenir. L'index de recherche ne
+         porte donc que les lignes REELLEMENT publiees. */
+      this._uni = d.rows || [];
     } catch (e) { this._uni = []; }
     return this._uni;
   },
