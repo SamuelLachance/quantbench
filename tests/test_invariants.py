@@ -4627,3 +4627,46 @@ def test_une_fonciere_se_valorise_d_abord_sur_ses_dividendes_reels():
     # Un seul exercice de dividende ne suffit pas a etablir une politique.
     un_seul = value_reit(dict(o), {"years": ["2025"], "dividends": [-3.0]})
     assert "repli" in un_seul["method"]
+
+
+def test_le_cout_de_la_dette_se_lit_sur_la_couverture_des_interets():
+    """La notation synthetique de Damodaran (ratings.html, janvier 2026) : le
+    spread de credit se lit sur EBIT / charge d'interets, mappe vers une notation
+    puis un spread — jamais sur le levier. L'ancienne formule en levier au carre
+    confinait kd dans [5,5 ; 8,8 %] : un emetteur sain tres endette payait 6,61 %
+    au lieu de 4,60, et un emetteur qui ne couvre pas ses interets payait 5,48 %
+    au lieu de 20,20 — quatorze points de risque de credit invisibles.
+    """
+    from quantbench.valuation.build_universal import (_SPREADS_ICR,
+                                                      build_dcf_from_fundamentals,
+                                                      spread_de_notation)
+
+    # Les crans de la table, bornes basses INCLUSES (convention ratings.xls).
+    assert spread_de_notation(12.0) == 0.0040          # AAA
+    assert spread_de_notation(8.5) == 0.0040
+    assert spread_de_notation(1.5) == 0.0321           # B, pas B-
+    assert spread_de_notation(1.4999) == 0.0509        # B-
+    assert spread_de_notation(0.5) == 0.1600           # C
+    assert spread_de_notation(-3.0) == 0.1900          # EBIT negatif -> cran D
+    # La table est MONOTONE : moins on couvre, plus on paie.
+    spreads = [sp for _, sp in _SPREADS_ICR]
+    assert spreads == sorted(spreads), "la table n'est plus monotone"
+
+    def kd(f):
+        x, _ = build_dcf_from_fundamentals(f, erp=0.045, rf=0.042)
+        return x.current_pretax_kd
+
+    base = {"revenue": 10.0, "ebit": 1.2, "net_income": 0.8, "book_equity": 6.0,
+            "total_debt": 6.0, "cash": 1.0, "total_assets": 20.0, "market_cap": 10.0,
+            "shares": 100.0, "price": 100.0, "beta": 1.0, "country": "US",
+            "sector": "Industrials", "industry": "Specialty Industrial Machinery",
+            "operating_margin": 0.12, "tax_rate": 0.25, "dep_amort": 0.4,
+            "capex": -0.5, "cfo": 1.4,
+            "revenue_history": [8.2, 8.6, 9.0, 9.3, 9.7, 10.0]}
+
+    assert kd(dict(base, couverture_interets=12.0)) == pytest.approx(0.042 + 0.0040)
+    assert kd(dict(base, couverture_interets=0.5)) == pytest.approx(0.042 + 0.1600)
+    # REPLI declare : sans mesure de couverture, l'ancienne formule par le levier
+    # subsiste — un trou de donnees ne doit pas planter la valorisation.
+    sans = dict(base)
+    assert 0.05 < kd(sans) < 0.09

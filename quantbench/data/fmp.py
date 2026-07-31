@@ -833,6 +833,16 @@ def fundamentals_from_fmp(symbol, sr, entry, desc, reference=None):
         # positives tantot negatives selon l'emetteur, et une couverture d'interets
         # dont le denominateur change de signe est ininterpretable.
         "interest_expense": b(abs(g(inc, "interestExpense") or 0.0)) or None,
+        # COUVERTURE DES INTERETS, mediane pluriannuelle — l'entree de la notation
+        # synthetique de Damodaran (ratings.html) : le spread de credit se lit sur
+        # EBIT / charge d'interets. Mediane et non dernier exercice, pour qu'un
+        # cyclique en creux ne perde pas trois crans une annee et les reprenne la
+        # suivante — la meme discipline que la dimension de solvabilite D1.
+        "couverture_interets": (lambda cs: sorted(cs)[len(cs) // 2] if cs else None)(
+            [_num(inc[yy].get("operatingIncome")) / abs(_num(inc[yy].get("interestExpense")))
+             for yy in inc
+             if _num(inc[yy].get("operatingIncome")) is not None
+             and _num(inc[yy].get("interestExpense")) not in (None, 0)]),
         # Ecart entre resultat operationnel PUBLIE et resultat ECONOMIQUE : mesure
         # de la qualite de la liasse, calculee plus haut et jusqu'ici jetee.
         "ecart_ebit": ecart_ebit,

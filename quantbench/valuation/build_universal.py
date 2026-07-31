@@ -207,6 +207,36 @@ def beta_ascendant(fund, tx):
     return bu * (1 + (1 - tx) * de), bu, "industrie"
 
 
+# TABLE COUVERTURE -> SPREAD DE DEFAUT, grandes societes non financieres.
+# POSEE, source : Damodaran, ratings.html, JANVIER 2026. Sa variante « petites
+# capitalisations » (smallrating.htm) serait conceptuellement plus adaptee a cet
+# univers, mais elle est figee a janvier 2017 : melanger deux millesimes casserait
+# la coherence des spreads. Un seul millesime, le sien, pour tout l'univers.
+# Les financieres ne passent jamais ici : routees cote equite, sans WACC.
+_SPREADS_ICR = ((8.5, 0.0040), (6.5, 0.0055), (5.5, 0.0070), (4.25, 0.0078),
+                (3.0, 0.0089), (2.5, 0.0111), (2.25, 0.0138), (2.0, 0.0184),
+                (1.75, 0.0275), (1.5, 0.0321), (1.25, 0.0509), (0.8, 0.0885),
+                (0.65, 0.1261), (0.2, 0.1600))
+_SPREAD_DEFAUT_D = 0.1900
+
+
+def spread_de_notation(couverture) -> float:
+    """Spread de credit lu sur la couverture des interets (notation synthetique).
+
+    Une couverture NEGATIVE — EBIT sous zero avec des interets a payer — tombe
+    mecaniquement sur le dernier cran, comme dans le classeur ratings.xls de
+    Damodaran ; c'est la mediane pluriannuelle calculee en amont qui amortit les
+    creux d'un exercice isole.
+    """
+    # Bornes BASSES incluses — la convention du classeur ratings.xls de Damodaran
+    # (IF(icr > 8.499999, "AAA", ...) : une couverture d'exactement 1,50 est notee
+    # B, pas B-).
+    for seuil, spread in _SPREADS_ICR:
+        if couverture >= seuil:
+            return spread
+    return _SPREAD_DEFAUT_D
+
+
 def _creances_senior(fund):
     """Minoritaires en valeur de MARCHE + privilegiees au nominal, pour le pont.
 
@@ -402,7 +432,23 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     # divisant par ce meme facteur, plutot que d'appliquer a la dette une prime
     # calibree pour les actions, ce qui la surestimerait d'un tiers.
     spread_pays = country_erp(pays_exploitation(fund), 0.0) / _VOLATILITE_RELATIVE
-    kd = rf + spread_pays + 0.010 + 0.10 * _clamp(lev, 0.0, 1.0) ** 2
+    # NOTATION SYNTHETIQUE DE DAMODARAN, la vraie : le spread de credit se lit sur
+    # la COUVERTURE DES INTERETS (EBIT / charge d'interets), mappee vers une
+    # notation puis un spread — jamais sur le levier. L'ancienne formule en
+    # levier au carre confinait kd dans [5,5 ; 8,8 %] : elle sur-facturait un
+    # emetteur sain tres endette (6,61 % au lieu de 4,60 a couverture 12x) et
+    # sous-facturait massivement un emetteur qui ne couvre pas ses interets
+    # (5,48 % au lieu de 20,20 a couverture 0,5x — quatorze points d'ecart).
+    # Elle ne subsiste qu'en REPLI, quand la charge d'interets manque.
+    couv = fund.get("couverture_interets")
+    if couv is None:
+        it, eb = fund.get("interest_expense"), fund.get("ebit")
+        if it and it > 0 and eb is not None:
+            couv = eb / it
+    if couv is not None:
+        kd = max(rf, rf + spread_pays + spread_de_notation(couv))
+    else:
+        kd = rf + spread_pays + 0.010 + 0.10 * _clamp(lev, 0.0, 1.0) ** 2
 
     term = min(rf, 0.028)
     if g_start < 0:
