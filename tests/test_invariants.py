@@ -4670,3 +4670,90 @@ def test_le_cout_de_la_dette_se_lit_sur_la_couverture_des_interets():
     # subsiste — un trou de donnees ne doit pas planter la valorisation.
     sans = dict(base)
     assert 0.05 < kd(sans) < 0.09
+
+
+def test_aucune_prime_de_taille_ne_survit_dans_le_cout_des_fonds_propres():
+    """« I have never used a small cap premium, when valuing a company and I don't
+    plan to start now » (Damodaran, The Small Cap Premium: Where is the beef?,
+    2015). La grille par capitalisation — jusqu'a +5 points sous 25 M$ — etait
+    exactement la prime qu'il rejette, et elle COMPOSAIT en perpetuite : +5 points
+    equivalaient a une decote plate de 50,5 %, au-dela meme des 20-30 % qu'il
+    reserve aux societes entierement privees.
+    """
+    import inspect
+
+    from quantbench.valuation import build_universal as bu
+    from quantbench.valuation.route import _coe
+
+    assert not hasattr(bu, "prime_taille"), "la grille de prime de taille est revenue"
+
+    # Le cout des fonds propres de deux societes identiques hors taille ne differe
+    # plus que par le beta — donc pas du tout ici.
+    def soc(mc):
+        return {"market_cap": mc, "beta": 1.0, "country": "US",
+                "sector": "Industrials", "total_debt": 0.0,
+                "industry": "Specialty Industrial Machinery"}
+    ke_nano, _ = _coe(soc(0.01))
+    ke_mega, _ = _coe(soc(500.0))
+    assert ke_nano == pytest.approx(ke_mega), (
+        f"la taille traverse encore le taux : {ke_nano:.2%} vs {ke_mega:.2%}")
+
+    # Et le moteur recoit un size_premium NUL de la construction.
+    src = "\n".join(l.split("#")[0]
+                    for l in inspect.getsource(bu.build_dcf_from_fundamentals).splitlines())
+    assert "size_premium=0.0" in src
+
+
+def test_l_illiquidite_est_une_decote_sur_la_valeur_bornee_a_son_domaine():
+    """Sa lettre (Marketability and Value, 2005) : l'illiquidite se paie en DECOTE
+    SUR LA VALEUR, firm-specific — CA, rentabilite, tresorerie, volume reellement
+    echange. Son exemple canonique (societe rentable de 10 M$ de CA, sans volume)
+    donne 12,2 % ; ses spreads mesures valent 2-6 % pour les petites lignes cotees
+    et ~0,5 % pour les grandes — d'ou le DOMAINE : au-dela de 2 Md$ de
+    capitalisation, ou des 10 % de rotation mensuelle, la decote est NULLE. La
+    regression brute, calibree sur les annees 1990, preterait sinon ~9 % a Apple.
+    """
+    from quantbench.valuation.build_universal import decote_illiquidite
+
+    def soc(mc, vol):
+        rev = mc * 0.8
+        return {"revenue": rev, "net_income": rev * 0.08, "market_cap": mc,
+                "total_debt": rev * 0.25, "cash": rev * 0.12,
+                "volume_dollars_median": vol}
+
+    # L'exemple canonique, a un point pres.
+    assert decote_illiquidite(soc(0.010, 2_000)) == pytest.approx(0.122, abs=0.02)
+    # Un titre liquide ne porte AUCUNE decote, quelle que soit sa taille.
+    assert decote_illiquidite(soc(0.500, 12_000_000)) == 0.0
+    assert decote_illiquidite(soc(5.0, 25_000_000)) == 0.0
+    assert decote_illiquidite(soc(3400.0, 1e10)) == 0.0
+    assert decote_illiquidite(soc(5.0, None)) == 0.0
+    # MONOTONE en rotation : plus le titre s'echange, moins il decote.
+    d = [decote_illiquidite(soc(0.08, v)) for v in (0.0, 30_000, 120_000, 400_000)]
+    assert all(a >= b - 1e-12 for a, b in zip(d, d[1:])), d
+    # Bornee, jamais negative.
+    assert 0.0 <= decote_illiquidite(soc(0.003, 0.0)) <= 0.30
+    # Capitalisation ABSENTE : proxy du chiffre d'affaires, pas de penalite
+    # maximale d'ignorance.
+    sans_cap = {"revenue": 8.0, "net_income": 0.6, "total_debt": 2.0, "cash": 1.0,
+                "volume_dollars_median": None}
+    assert decote_illiquidite(sans_cap) == 0.0        # 8 Md$ de CA : presume liquide
+
+
+def test_la_decote_s_applique_une_fois_en_fin_de_chaine_et_au_miroir():
+    """Une seule application, sur la valeur finale, toutes routes confondues — et
+    jamais cumulee avec une prime au taux (double comptage denonce par Damodaran).
+    Le miroir Monte Carlo doit la reproduire, sinon la mediane simulee l'ecrase.
+    """
+    import inspect
+
+    from quantbench.valuation import route
+
+    src = "\n".join(l.split("#")[0]
+                    for l in inspect.getsource(route._finalise).splitlines())
+    assert "decote_illiquidite" in src, "_finalise n'applique plus la decote"
+
+    import build_site_fmp as bs
+    src_mc = "\n".join(l.split("#")[0]
+                       for l in inspect.getsource(bs.run_mc).splitlines())
+    assert "decote_illiquidite" in src_mc, "le Monte Carlo ignore la decote"

@@ -372,6 +372,15 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
                         eq = np.maximum(eq, 0.0)
     except Exception:
         return None
+    # MIROIR de la decote d'illiquidite appliquee par _finalise : sans lui, la
+    # mediane simulee ecraserait la decote — meme angle mort que les ponderations.
+    try:
+        from quantbench.valuation.build_universal import decote_illiquidite
+        d = decote_illiquidite(fund)
+        if d > 0.0:
+            eq = eq * (1.0 - d)
+    except Exception:
+        pass
     return _mc_stats(eq, mcap, shares)
 
 warnings.filterwarnings("ignore")

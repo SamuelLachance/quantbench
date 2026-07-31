@@ -61,7 +61,6 @@ def _coe(fund, activite_de_bilan=False):
     rf = market.risk_free_rate()
     from .build_universal import beta_ascendant, beta_de_comparables, tax_rate
     pays = pays_exploitation(fund)
-    from .build_universal import prime_taille
     if activite_de_bilan:
         beta = beta_de_comparables(fund, tax_rate(pays))
         if beta is None:
@@ -70,7 +69,9 @@ def _coe(fund, activite_de_bilan=False):
     else:
         beta, _unlev, _src = beta_ascendant(fund, tax_rate(pays))
     erp = country_erp(pays)
-    ke = rf + beta * erp + prime_taille(fund.get("market_cap"))
+    # AUCUNE prime de taille : Damodaran la rejette (« Where is the beef? », 2015).
+    # L'illiquidite se paie en decote sur la valeur, en fin de chaine.
+    ke = rf + beta * erp
     return max(ke, rf + 0.03), rf
 
 
@@ -1299,6 +1300,15 @@ def _finalise(ticker, fund, r, cat):
                 "reason": "valorisation impossible", "category": cat}
     shares, mcap = fund.get("shares"), fund.get("market_cap")
     eq = max(float(r["equity_value"]), 0.0)         # Md USD — responsabilite limitee : equite >= 0
+    # DECOTE D'ILLIQUIDITE SUR LA VALEUR — la voie de Damodaran, en remplacement de
+    # la prime de taille au taux qu'il rejette. Une seule fois, en fin de chaine,
+    # toutes routes confondues ; jamais cumulee avec une prime au taux.
+    from .build_universal import decote_illiquidite
+    decote = decote_illiquidite(fund)
+    if decote > 0.0 and eq > 0.0:
+        eq *= (1.0 - decote)
+        r = dict(r)
+        r["decote_illiquidite"] = round(decote, 4)
     vps = eq * 1e9 / shares if shares else None
     upside = (eq / mcap - 1.0) if (mcap and mcap > 0) else None
     return {

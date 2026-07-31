@@ -149,25 +149,84 @@ def repere(fund, cle, defaut=None):
     return g[cle] if g.get(cle) is not None else defaut
 
 
-# Prime de TAILLE et d'ILLIQUIDITE ajoutee au cout des fonds propres. Damodaran
-# l'analyse comme un effet de liquidite et de risque de financement plutot que de
-# taille en soi, mais son application est la meme : une societe de 3 M$ de
-# capitalisation ne se finance pas au cout du capital d'Apple. Sans elle, notre DCF
-# actualisait un nano-cap a ~9 % et le valorisait 16 fois ses benefices — d'ou une
-# cohorte entiere de micro-caps a +2 000 % d'upside.
-_PRIME_TAILLE = ((10.0, 0.0), (2.0, 0.005), (0.5, 0.010),
-                 (0.1, 0.020), (0.025, 0.035))
-_PRIME_TAILLE_MAX = 0.05          # en dessous de 25 M$ de capitalisation
+# --------------------------------------------------------------------------- #
+# Illiquidite : une DECOTE SUR LA VALEUR, jamais des points de taux.
+#
+# Damodaran REJETTE la prime de taille au cout des fonds propres (« I have never
+# used a small cap premium, when valuing a company and I don't plan to start
+# now », The Small Cap Premium: Where is the beef?, 2015) : la prime historique a
+# quasi disparu apres 1980, et en forward-looking le cout implicite des small
+# caps n'est PAS superieur a celui des grandes. L'illiquidite, elle, se paie en
+# DECOTE SUR LA VALEUR, specifique a la societe (Marketability and Value:
+# Measuring the Illiquidity Discount, 2005) — et il denonce explicitement le
+# double comptage prime au taux + decote sur la valeur.
+#
+# L'ancienne grille par capitalisation (jusqu'a +5 points de taux sous 25 M$)
+# etait exactement la prime qu'il rejette, et son effet COMPOSAIT en perpetuite :
+# +5 points equivalaient a une decote plate de 50,5 % — au-dela meme des 20-30 %
+# qu'il reserve aux societes entierement PRIVEES.
+# --------------------------------------------------------------------------- #
+
+# Regression de SPREAD SYNTHETIQUE du papier de 2005 (p. 34) : le cout d'une
+# transaction en part du prix, estime sur les titres cotes americains.
+#   spread = 0,145 - 0,0022 ln(CA en M$) - 0,015 x (benefice positif)
+#            - 0,016 x (tresorerie / valeur d'entreprise)
+#            - 0,11 x (volume mensuel en $ / capitalisation)
+# Son exemple canonique — societe privee rentable de 10 M$ de CA — donne 12,2 %.
+# POSEE, source datee ; le plafond de 30 % est la borne des etudes de titres
+# restreints qu'il cite (mediane Silber 33,75 %).
+_DECOTE_MAX = 0.30
+
+# La regression date des annees 1990 : appliquee brute, elle preterait ~9 % de
+# spread a Apple. Sa lettre est sans ambiguite — un titre LIQUIDE ne porte AUCUNE
+# decote — donc la decote s'eteint avec la liquidite MESUREE : pleine quand moins
+# de 2 % de la capitalisation tourne par mois (titre reellement mince), nulle
+# au-dela de 10 % (rotation d'un titre normalement echange). Bornes POSEES.
+_ROTATION_MINCE = 0.02
+_ROTATION_LIQUIDE = 0.10
+# DOMAINE DE VALIDITE : les preuves du papier — spreads de 2 a 6 % — portent sur
+# les PETITES capitalisations ; pour les grandes, il mesure ~0,5 % et sa lettre ne
+# leur applique aucune decote. La regression, calibree sur les annees 1990,
+# preterait pourtant ~9 % de spread a Apple : hors de son domaine, elle ne
+# s'applique pas, quel que soit le volume observe. Au-dela de ce seuil la decote
+# est nulle ; en dessous sans volume observe, on retient la rotation nulle —
+# l'absence de volume sur une petite ligne est elle-meme un signal d'illiquidite.
+_CAP_PRESUMEE_LIQUIDE = 2.0
 
 
-def prime_taille(market_cap) -> float:
-    """Prime de taille/illiquidite selon la capitalisation, en Md USD."""
-    if not market_cap or market_cap <= 0:
-        return _PRIME_TAILLE_MAX
-    for seuil, prime in _PRIME_TAILLE:
-        if market_cap >= seuil:
-            return prime
-    return _PRIME_TAILLE_MAX
+def decote_illiquidite(fund) -> float:
+    """Decote d'illiquidite sur la VALEUR des fonds propres, en fraction [0 ; 0,30].
+
+    Firm-specific, comme sa lettre l'exige : chiffre d'affaires, rentabilite,
+    tresorerie et volume reellement echange — jamais une grille de capitalisation.
+    S'applique une seule fois, sur la valeur finale ; ne JAMAIS la cumuler avec
+    une prime au taux (double comptage denonce par Damodaran).
+    """
+    import math as _m
+    mc = fund.get("market_cap")
+    if not mc or mc <= 0:
+        # Plus jamais de penalite maximale d'ignorance : le proxy du chiffre
+        # d'affaires, deja utilise par le moteur, sert aussi ici.
+        mc = fund.get("revenue") or 0.0
+    if mc >= _CAP_PRESUMEE_LIQUIDE:
+        return 0.0                                   # hors du domaine de la regression
+    vol = fund.get("volume_dollars_median")          # $ par seance
+    if vol is None:
+        rotation = 0.0
+    else:
+        rotation = _clamp((vol * 21.0) / max(mc * 1e9, 1e-9), 0.0, 1.0)
+    if rotation >= _ROTATION_LIQUIDE:
+        return 0.0
+    ca_musd = max((fund.get("revenue") or 0.0) * 1000.0, 1.0)
+    ni = fund.get("net_income")
+    rentable = 1.0 if (ni is not None and ni > 0) else 0.0
+    ve = max(mc + (fund.get("total_debt") or 0.0) - (fund.get("cash") or 0.0), 1e-9)
+    part_cash = _clamp((fund.get("cash") or 0.0) / ve, 0.0, 1.0)
+    spread = (0.145 - 0.0022 * _m.log(ca_musd) - 0.015 * rentable
+              - 0.016 * part_cash - 0.11 * rotation)
+    extinction = _clamp((_ROTATION_LIQUIDE - rotation)
+                        / (_ROTATION_LIQUIDE - _ROTATION_MINCE), 0.0, 1.0)
+    return _clamp(spread, 0.0, _DECOTE_MAX) * extinction
 
 
 def beta_ascendant(fund, tx):
@@ -407,7 +466,7 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
 
     rf = rf if rf is not None else market.risk_free_rate()
     lev_beta, unlev, _src = beta_ascendant(fund, tx)
-    cost_equity = rf + lev_beta * erp + prime_taille(fund.get("market_cap"))
+    cost_equity = rf + lev_beta * erp
     term_roic = _clamp(cost_equity + 0.02, 0.07, max(cur_roic, 0.08))
 
     # Croissance perpetuelle : plafonnee par le taux sans risque (Damodaran : une
@@ -468,7 +527,10 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         # des fonds propres. Elle etait auparavant divisee par le beta puis injectee
         # dans l'ERP — l'annulation n'etait exacte que la PREMIERE annee, le beta
         # convergeant ensuite vers sa valeur terminale et emportant la prime avec lui.
-        risk_free_rate=rf, erp=erp, size_premium=prime_taille(fund.get("market_cap")),
+        # AUCUNE prime de taille au cout des fonds propres : Damodaran la rejette.
+        # L'illiquidite se paie en decote sur la VALEUR (decote_illiquidite),
+        # appliquee une seule fois en fin de chaine — jamais les deux.
+        risk_free_rate=rf, erp=erp, size_premium=0.0,
         unlevered_beta=unlev, terminal_unlevered_beta=_clamp(unlev, 0.8, 1.2),
         beta_converge_start=5,
         current_pretax_kd=kd, terminal_pretax_kd=kd, kd_converge_start=5,
