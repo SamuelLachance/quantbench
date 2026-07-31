@@ -289,6 +289,12 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
     et équité plancher à 0 (responsabilité limitée : une action ne vaut jamais < 0).
     Excess-return simulé pour les financières. `rf` imposé pour le backtest."""
     shares, mcap = fund.get("shares"), fund.get("market_cap")
+    # Miroir de la dilution appliquee par _finalise (approche treasury stock).
+    _dil = fund.get("facteur_dilution") or 1.0
+    if shares:
+        shares = shares * _dil
+    if mcap:
+        mcap = mcap * _dil
     if category in ("actif_net", "fonciere", "reglementee", "financiere", "holding"):
         return None      # actif net, FFO, benefices regules, rendement excedentaire :
                          # valeurs POINT — la simulation reproduisait un autre modele

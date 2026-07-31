@@ -1309,8 +1309,17 @@ def _finalise(ticker, fund, r, cat):
         eq *= (1.0 - decote)
         r = dict(r)
         r["decote_illiquidite"] = round(decote, 4)
-    vps = eq * 1e9 / shares if shares else None
-    upside = (eq / mcap - 1.0) if (mcap and mcap > 0) else None
+    # OPTIONS DES EMPLOYES, par l'approche « treasury stock » de Damodaran : la
+    # valeur d'equite revient aussi aux porteurs d'options dans la monnaie — on
+    # divise par la base DILUEE (facteur dilue/base du dernier exercice), a defaut
+    # de pouvoir valoriser les options une a une (strike absent des flux).
+    dilution = fund.get("facteur_dilution") or 1.0
+    shares_eff = shares * dilution if shares else None
+    vps = eq * 1e9 / shares_eff if shares_eff else None
+    # L'upside se mesure sur la base DILUEE, comme la valeur par action : la
+    # capitalisation observee porte sur les actions de base, l'equite calculee
+    # revient a la base diluee — l'identite vps/cours - 1 == upside est preservee.
+    upside = (eq / (mcap * dilution) - 1.0) if (mcap and mcap > 0) else None
     return {
         "ticker": ticker.upper(), "ok": True, "category": cat,
         "method": r["method"], "confidence": r.get("confidence"),

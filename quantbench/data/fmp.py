@@ -828,6 +828,16 @@ def fundamentals_from_fmp(symbol, sr, entry, desc, reference=None):
         # L'ecart est donc publie tel quel : c'est une information sur la CONFIANCE
         # que merite la donnee, pas un verdict sur la societe.
         "actions_publiees": g(inc, "weightedAverageShsOutDil") or g(inc, "weightedAverageShsOut"),
+        # FACTEUR DE DILUTION : moyenne diluee / moyenne de base du MEME exercice.
+        # La moyenne diluee applique la methode du rachat — l'approche « treasury
+        # stock » de Damodaran pour les options des employes, la deuxieme de sa
+        # hierarchie (la premiere, valoriser les options en Black-Scholes, exige un
+        # strike et un encours que le flux ne porte pas). Le RAPPORT est sans unite
+        # et insensible aux ratios ADR, contrairement aux niveaux. Borne a [1 ; 1,5] :
+        # au-dela, ce n'est plus une dilution mais une donnee corrompue.
+        "facteur_dilution": (lambda d, b_: min(max(d / b_, 1.0), 1.5)
+                             if (d and b_ and b_ > 0) else 1.0)(
+            g(inc, "weightedAverageShsOutDil"), g(inc, "weightedAverageShsOut")),
         # --- Champs nourrissant la NOTE DE RISQUE -----------------------------
         # Charges d'interets en VALEUR ABSOLUE : le fournisseur les publie tantot
         # positives tantot negatives selon l'emetteur, et une couverture d'interets

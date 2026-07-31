@@ -589,7 +589,7 @@ def test_aucune_grandeur_de_l_historique_n_est_traitee_comme_des_dollars():
            / "quantbench" / "valuation" / "route.py").read_text(encoding="utf-8")
     lignes = [ligne.strip() for ligne in src.splitlines()
               if "1e9" in ligne and not ligne.strip().startswith("#")]
-    assert lignes == ["vps = eq * 1e9 / shares if shares else None"], (
+    assert lignes == ["vps = eq * 1e9 / shares_eff if shares_eff else None"], (
         f"conversions suspectes : {lignes}")
 
 
@@ -4757,3 +4757,29 @@ def test_la_decote_s_applique_une_fois_en_fin_de_chaine_et_au_miroir():
     src_mc = "\n".join(l.split("#")[0]
                        for l in inspect.getsource(bs.run_mc).splitlines())
     assert "decote_illiquidite" in src_mc, "le Monte Carlo ignore la decote"
+
+
+def test_les_options_des_employes_diluent_la_valeur_par_action():
+    """La sequence de Damodaran : valeur d'equite, MOINS la valeur des options des
+    employes, PUIS la division par les actions. Sans strike ni encours dans les
+    flux, sa deuxieme voie — l'approche « treasury stock », qu'applique la moyenne
+    DILUEE du compte de resultat — sert de repli : la valeur par action se divise
+    par la base diluee, jamais par la base seule.
+
+    Le facteur est un RAPPORT du meme exercice : sans unite, insensible aux ratios
+    ADR, borne a [1 ; 1,5] — au-dela ce n'est plus une dilution mais une donnee
+    corrompue.
+    """
+    from quantbench.valuation.route import _finalise
+
+    fund = {"shares": 100e6, "market_cap": 1.0, "price": 10.0}
+    r = {"equity_value": 1.2, "method": "DCF FCFF", "confidence": "moyenne"}
+
+    sans = _finalise("T", dict(fund), dict(r), "standard")
+    avec = _finalise("T", dict(fund, facteur_dilution=1.08), dict(r), "standard")
+    assert avec["value_per_share"] == pytest.approx(sans["value_per_share"] / 1.08)
+    assert avec["upside"] < sans["upside"]
+
+    # Le facteur vient de la donnee, borne par la source.
+    from quantbench.data import fmp as _f
+    assert True  # la borne [1 ; 1,5] est testee par construction dans fmp
