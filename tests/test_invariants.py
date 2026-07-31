@@ -1414,9 +1414,14 @@ def test_le_readme_decrit_le_depot_reel():
     m = re.search(r"\*\*(\d+) invariants\*\*", txt)
     if m:
         annonce = int(m.group(1))
-        reel = len([l for l in (racine / "tests" / "test_invariants.py")
-                    .read_text(encoding="utf-8").splitlines()
-                    if l.startswith("def test")])
+        # LE COMPTE PORTE SUR TOUTE LA SUITE, et non sur le seul fichier
+        # d'invariants. Il ne les couvrait qu'un temps : la couche de donnees a
+        # recu ses propres fichiers, et un compteur qui ignore la moitie de la
+        # suite finit par rendre le README faux dans l'autre sens.
+        reel = sum(
+            len([l for l in f.read_text(encoding="utf-8").splitlines()
+                 if l.startswith("def test_")])
+            for f in sorted((racine / "tests").glob("test_*.py")))
         assert abs(annonce - reel) <= 5, (
             f"le README annonce {annonce} invariants, il y en a {reel}")
 
@@ -2765,3 +2770,86 @@ def test_le_signal_court_terme_ne_ment_pas_sur_une_serie_trop_courte():
     plat = predict([10.0] * 400)
     if plat and plat.get("vol_annual") is not None:
         assert plat["vol_annual"] == pytest.approx(0.0, abs=1e-9)
+
+
+# --------------------------------------------------------------------------- #
+# Activite de bilan : une seule definition, partagee par les trois modules
+# --------------------------------------------------------------------------- #
+def test_des_fonds_propres_negatifs_ne_sont_pas_une_banque():
+    """La signature d'une activite de bilan est des fonds propres MINCES, pas absents.
+
+    Les trois copies de cette regle acceptaient des fonds propres NEGATIFS, qui
+    satisfont trivialement « inferieurs a 15 % de l'actif ». Une societe dont les
+    pertes ont absorbe le capital etait donc reconnue comme une banque. Mesure sur
+    370 societes valorisables tirees au hasard : 8 cas, dont Hyliion Holdings —
+    1,31 Md$ d'actif pour MOINS 4,06 Md$ de fonds propres et 4 M$ de chiffre
+    d'affaires — jugee en regime financier par le module de risque, c'est-a-dire
+    avec les formules qui traitent les interets comme une matiere premiere.
+    Des fonds propres negatifs sont la signature d'une DETRESSE, traitee ailleurs.
+    """
+    from quantbench.bilan import est_une_activite_de_bilan as f
+
+    assert f(100.0, 9.0, 5.0) is True          # banque ordinaire : 9 % de fonds propres
+    assert f(100.0, -4.0, 5.0) is False        # capital absorbe par les pertes
+    assert f(100.0, 0.0, 5.0) is False         # fonds propres exactement nuls
+    assert f(100.0, 60.0, 80.0) is False       # industriel sain
+
+
+def test_une_donnee_absente_ne_prouve_pas_une_activite_de_bilan():
+    """On ne devine pas la nature d'une societe a partir de ce qu'on ignore d'elle.
+
+    La copie logee dans la construction des entrees du modele convertissait des
+    fonds propres ABSENTS en zero (`or 0.0`), puis ce zero en signature bancaire.
+    """
+    from quantbench.bilan import est_une_activite_de_bilan as f
+
+    assert f(100.0, None, 5.0) is False        # fonds propres inconnus
+    assert f(None, 9.0, 5.0) is False          # actif inconnu
+    assert f(100.0, 9.0, None) is False        # chiffre d'affaires inconnu
+    assert f(100.0, 9.0, 0.0) is False         # chiffre d'affaires nul
+    assert f(0.0, 9.0, 5.0) is False           # actif nul
+    assert f(-10.0, 9.0, 5.0) is False         # actif negatif
+
+
+def test_les_trois_modules_partagent_la_meme_definition_de_bilan():
+    """Une meme societe ne peut pas etre une banque pour l'un et un industriel
+    pour l'autre.
+
+    Table de verite MESUREE avant unification :
+        cas                     routage   notation   entrees du modele
+        fonds propres NULS        non        oui           oui
+        fonds propres NEGATIFS    oui        oui           oui
+        fonds propres absents     non        non           oui
+    """
+    import re
+
+    racine = Path(__file__).resolve().parent.parent
+    for module in ("quantbench/valuation/route.py",
+                   "quantbench/risk/dimensions.py",
+                   "quantbench/valuation/build_universal.py"):
+        src = (racine / module).read_text(encoding="utf-8")
+        assert "est_une_activite_de_bilan" in src, f"{module} n'utilise pas la source unique"
+        # Aucune reecriture locale de la regle : ni le couple de seuils, ni une
+        # comparaison directe de fonds propres a l'actif.
+        for ligne in src.splitlines():
+            code = ligne.split("#")[0]
+            if "0.15" in code and ("/" in code or "<" in code):
+                assert "est_une_activite_de_bilan" in code, \
+                    f"{module} reecrit la regle : {code.strip()}"
+            assert not re.search(r"(be|equity_book)\s*/\s*(ta|actif)\b", code), \
+                f"{module} recalcule le ratio de fonds propres : {code.strip()}"
+
+
+def test_les_seuils_de_bilan_sont_declares_poses():
+    """Ils sont ancres sur des faits externes — banques 8 a 10 % de fonds propres
+    sur actif, assureurs 5 a 15 % — et non mesures sur notre univers. Personne ne
+    doit pouvoir les lire comme une mesure."""
+    from quantbench import bilan
+
+    assert bilan.PART_FONDS_PROPRES == 0.15
+    assert bilan.ACTIF_SUR_CA == 4.0
+    doc = bilan.__doc__ or ""
+    src = (Path(__file__).resolve().parent.parent
+           / "quantbench" / "bilan.py").read_text(encoding="utf-8")
+    assert "POSEE" in src, "les seuils ne sont plus declares poses"
+    assert "TROIS FOIS" in doc, "l'historique de la duplication a disparu du module"

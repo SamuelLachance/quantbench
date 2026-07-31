@@ -28,6 +28,23 @@ def _safe_ratio(num, den):
     return num / den
 
 
+def _sinon(*valeurs):
+    """Premiere valeur RENSEIGNEE, zero compris. Remplace `a or b`.
+
+    CINQUIEME OCCURRENCE DU PIEGE DU ZERO. `_first` sait deja distinguer 0 de None,
+    mais son resultat etait aussitot passe a `or`, qui, lui, ne le sait pas : en
+    Python, `0 or x` vaut x. Un resultat net exactement NUL, une dette NULLE, un
+    chiffre d'affaires NUL — soit le cas normal d'une biotechnologie avant son
+    premier produit, ou d'une societe a l'equilibre parfait — declenchaient donc le
+    repli sur les etats financiers, puis valaient None si ceux-ci manquaient.
+    Un poste comptable a zero est une DONNEE, pas une absence de donnee.
+    """
+    for v in valeurs:
+        if v is not None and v == v:            # non-None et non-NaN
+            return v
+    return None
+
+
 def _first(d: dict, *keys):
     for k in keys:
         v = d.get(k)
@@ -103,12 +120,14 @@ def get_fundamentals(ticker: str) -> dict:
     # Tout converti en USD (deux groupes de devises distincts) :
     price_usd = (price * fx_price) if (price is not None and fx_price) else None
     market_cap = usd_price(_first(info, "marketCap"))
-    revenue = usd_fin(_first(info, "totalRevenue") or _row(inc, "Total Revenue"))
+    revenue = usd_fin(_sinon(_first(info, "totalRevenue"), _row(inc, "Total Revenue")))
     ebit_usd = usd_fin(ebit)
     ebitda = usd_fin(_first(info, "ebitda"))
-    net_income = usd_fin(_first(info, "netIncomeToCommon") or _row(inc, "Net Income"))
-    total_debt = usd_fin(_first(info, "totalDebt") or _row(bal, "Total Debt"))
-    cash = usd_fin(_first(info, "totalCash") or _row(bal, "Cash And Cash Equivalents"))
+    net_income = usd_fin(_sinon(_first(info, "netIncomeToCommon"),
+                            _row(inc, "Net Income")))
+    total_debt = usd_fin(_sinon(_first(info, "totalDebt"), _row(bal, "Total Debt")))
+    cash = usd_fin(_sinon(_first(info, "totalCash"),
+                      _row(bal, "Cash And Cash Equivalents")))
     equity_usd = usd_fin(book_equity)
     ev = None if market_cap is None else market_cap + (total_debt or 0) - (cash or 0)
 

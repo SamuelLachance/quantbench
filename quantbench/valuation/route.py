@@ -28,6 +28,7 @@ from ..forensics.scores import default_probability
 from .build_universal import (build_dcf_from_fundamentals, country_erp,
                               pays_exploitation)
 from .dcf import value_dcf
+from ..bilan import est_une_activite_de_bilan
 
 
 def _clip(x, lo, hi):
@@ -94,9 +95,11 @@ def _financiere_de_bilan(fund) -> bool:
     # (banques 8-10 %, assureurs 5-15 %). Apollo, etiquetee "Asset Management",
     # detient l'assureur Athene : 460 Md$ d'actif pour 4,8 % de fonds propres —
     # elle etait valorisee en DCF et ressortait a +532 %.
-    if ta and ta > 0 and be and rev and rev > 0:
-        if (be / ta) < 0.15 and (ta / rev) >= 4.0:
-            return True
+    # SOURCE UNIQUE. Cette regle etait ecrite ici, dans la notation du risque et
+    # dans la construction des entrees du modele, et les trois copies avaient
+    # diverge — notamment sur des fonds propres nuls, negatifs ou absents.
+    if est_une_activite_de_bilan(ta, be, rev):
+        return True
     if any(k in ind for k in ("bank", "insurance", "mortgage", "thrift")):
         return True
     if any(k in ind for k in ("asset management", "stock exchange", "financial data",

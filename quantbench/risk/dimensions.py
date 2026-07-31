@@ -13,6 +13,7 @@ winsorisation dont l'effet sur le rang est nul par monotonie.
 from __future__ import annotations
 
 import math
+from ..bilan import est_une_activite_de_bilan
 
 # Nombre minimal d'exercices pour un ecart interquartile : contrainte arithmetique,
 # pas une opinion.
@@ -99,9 +100,10 @@ def regime(fund, F=None, seuil_amortissement=None) -> str:
         pass
     ind = (fund.get("industry") or "").lower()
     ta, rev, be = fund.get("total_assets"), fund.get("revenue"), fund.get("book_equity")
-    if ta and ta > 0 and be is not None and rev and rev > 0:
-        if (be / ta) < 0.15 and (ta / rev) >= 4.0:
-            return "financiere"
+    # SOURCE UNIQUE, partagee avec le routage de valorisation : une meme societe
+    # ne peut pas etre une banque pour l'un et un industriel pour l'autre.
+    if est_une_activite_de_bilan(ta, be, rev):
+        return "financiere"
     # Mots-cles STRICTEMENT non ambigus. "Capital Markets" et "Credit Services"
     # designent aussi bien un preteur qu'un reseau de paiement ou un editeur de
     # logiciels : Visa et Mastercard portent le second, FDCTech le premier. Les

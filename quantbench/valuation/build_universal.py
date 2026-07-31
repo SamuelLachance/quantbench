@@ -16,6 +16,7 @@ import numpy as np
 from . import DcfInputs
 from ..data import market
 from ..data.build import _estimate_growth, _clamp
+from ..bilan import est_une_activite_de_bilan
 
 _DEFAULT_ERP = 0.045          # prime de risque d'un marche mature (Etats-Unis)
 
@@ -252,8 +253,11 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     # "Financial Services" alors qu'elle vend des logiciels, et une exclusion par
     # libelle laissait passer precisement le cas que la mesure devait attraper.
     conv = fund.get("conversion_tresorerie")
-    actif = fund.get("total_assets") or 0.0
-    de_bilan = (actif > 0 and equity_book / actif < 0.15 and actif / rev >= 4)
+    # SOURCE UNIQUE. Cette copie etait la plus permissive des trois : elle
+    # reconnaissait une activite de bilan a des fonds propres ABSENTS, `or 0.0`
+    # transformant l'ignorance en zero puis le zero en signature bancaire.
+    de_bilan = est_une_activite_de_bilan(fund.get("total_assets"),
+                                         fund.get("book_equity"), rev)
     if conv is not None and conv < 0.60 and not de_bilan:
         cur_roic = _clamp(cur_roic * _clamp(conv / 0.60, 0.0, 1.0), 0.02, 0.40)
 
