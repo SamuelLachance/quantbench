@@ -3170,3 +3170,91 @@ def _financiere_temoin():
             "long_term_debt": [30.0, 28.0, 26.0], "total_debt": [30.0, 28.0, 26.0],
             "shares": [10.0, 10.0, 10.0], "gross_profit": [30.0, 28.0, 26.0],
             "cfi": [-2.0, -2.0, -2.0], "total_liabilities": [60.0, 57.0, 54.0]}
+
+
+# --------------------------------------------------------------------------- #
+# Audit mathematique : partage, tolerance, alignement, zero mesure
+# --------------------------------------------------------------------------- #
+def test_les_minoritaires_subissent_la_meme_decote_que_nous():
+    """Ce sont des ACTIONNAIRES, pas des creanciers.
+
+    Ils etaient retranches a leur valeur COMPTABLE du net realisable : tout le
+    rabais de realisation retombait alors sur la maison mere, alors qu'ils n'ont
+    pas plus de droit que nous sur ce qui reste apres le passif. Le partage est
+    proportionnel aux fonds propres.
+    """
+    from quantbench.valuation.route import valeur_de_liquidation
+
+    sans = {"total_assets": 200.0, "total_liab": 60.0, "cash": 10.0,
+            "sector": "Industrials", "total_equity": 40.0, "book_equity": 40.0}
+    avec = dict(sans, book_equity=30.0)          # 25 % aux minoritaires
+    v_sans, v_avec = valeur_de_liquidation(sans), valeur_de_liquidation(avec)
+    assert v_avec == pytest.approx(v_sans * 0.75), \
+        f"part attribuable {v_avec / v_sans:.4f} au lieu de 0,75"
+
+    # FONDS PROPRES ATTRIBUABLES INTROUVABLES : on ne partage pas ce qu'on ignore.
+    # Le `or 0.0` les prenait pour zero, les minoritaires absorbaient tout, et la
+    # liquidation tombait a zero par ignorance.
+    inconnu = dict(sans, book_equity=None)
+    assert valeur_de_liquidation(inconnu) == pytest.approx(v_sans), \
+        "des fonds propres attribuables inconnus annulent la valeur de liquidation"
+
+
+def test_la_tolerance_de_marge_relache_le_seuil_meme_sur_une_cible_negative():
+    """La bande de 10 % s'ecrivait `marge_visee * 0.9`.
+
+    Un produit ABAISSE le seuil pour une cible positive — le comportement voulu —
+    mais le RELEVE pour une cible negative : viser -10 % de marge exigeait alors
+    d'avoir fait -9 %, soit MIEUX que la cible. Un exercice ayant reellement
+    atteint l'objectif etait compte comme un echec, et la probabilite de
+    redressement sous-estimee — precisement pour les societes deficitaires, ou la
+    marge visee est le plus souvent negative.
+    """
+    from quantbench.valuation.route import probabilite_de_realisation
+
+    F = {"years": [2025, 2024, 2023, 2022],
+         "ebit": [-9.5, -30.0, -40.0, -50.0],
+         "revenue": [100.0, 100.0, 100.0, 100.0]}
+    p = probabilite_de_realisation({"operating_margin": -0.30}, F, -0.10)
+    assert p == pytest.approx(0.25), \
+        f"probabilite {p} : l'exercice a -9,5 % n'atteint pas une cible de -10 %"
+
+    # Et le sens reste correct sur une cible POSITIVE : la bande abaisse le seuil.
+    G = {"years": [2025, 2024, 2023, 2022],
+         "ebit": [9.5, 2.0, 1.0, 0.0], "revenue": [100.0, 100.0, 100.0, 100.0]}
+    assert probabilite_de_realisation({"operating_margin": 0.01}, G, 0.10) == \
+        pytest.approx(0.25)
+
+
+def test_le_resultat_normalise_des_regulees_reste_aligne():
+    """Resultats nets et chiffres d'affaires etaient purges de leurs trous chacun
+    de son cote puis tronques a la longueur commune : un exercice sans resultat net
+    decalait toute la serie des ventes d'un cran, et la marge normalisee rapportait
+    des grandeurs d'ANNEES DIFFERENTES."""
+    import inspect
+
+    from quantbench.valuation import route
+
+    src = inspect.getsource(route.value_regulated)
+    assert "min(len(nis), len(revs))" not in src, "la troncature desalignee est revenue"
+    assert "zip(" in src, "les deux series ne sont plus appariees"
+
+
+def test_un_rendement_du_capital_nul_est_une_mesure():
+    """`or 0.12` prenait un ROIC MESURE A ZERO — resultat d'exploitation exactement
+    nul, cas d'une societe a l'equilibre — pour un ROIC ABSENT, et lui accordait
+    12 % de rendement du capital. Un rendement nul est une mesure, pas une lacune ;
+    la borne inferieure de 2 % suffit ensuite a eviter la division par zero dans
+    l'identite de croissance financable."""
+    import inspect
+
+    from quantbench.valuation import build_universal as B
+
+    src = inspect.getsource(B.build_dcf_from_fundamentals)
+    # Le balayage porte sur le CODE : le commentaire qui raconte le defaut cite
+    # forcement la forme fautive, et un test qui s'y declencherait apprendrait a
+    # ignorer ses propres alertes.
+    code = "\n".join(ligne.split("#")[0] for ligne in src.splitlines())
+    assert "or 0.12" not in code, "le piege du zero est revenu sur le ROIC"
+    assert "_roic_mesure is None" in code, \
+        "le ROIC absent n'est plus distingue du ROIC nul"

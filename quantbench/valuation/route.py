@@ -413,15 +413,22 @@ def value_regulated(fund, F=None):
     # Rapport des sommes, non moyenne de rapports : ces societes traversent des
     # exercices deficitaires (couverture energetique, gel tarifaire) sur des volumes
     # tres inegaux.
+    # LES DEUX SERIES SE FILTRENT PAR PAIRES. Chacune etait purgee de ses trous
+    # dans son coin puis tronquee a la longueur commune : un exercice sans resultat
+    # net decalait toute la serie des chiffres d'affaires d'un cran, et la marge
+    # normalisee rapportait alors des resultats et des ventes d'ANNEES DIFFERENTES.
+    # Le filtre `if x` sur le chiffre d'affaires ecartait de surcroit un exercice a
+    # recettes NULLES, qui est une donnee et non une absence — meme piege que dans
+    # `marge_de_cycle`.
     ni = None
-    nis = [x for x in (F or {}).get("net_income", []) if x is not None]
-    revs = [x for x in (F or {}).get("revenue", []) if x]
+    paires = [(a, b) for a, b in zip((F or {}).get("net_income") or [],
+                                     (F or {}).get("revenue") or [])
+              if a is not None and b is not None]
     rev_usd = fund.get("revenue")
-    if len(nis) >= 3 and len(revs) >= 3 and rev_usd:
-        n = min(len(nis), len(revs))
-        total = sum(revs[:n])
+    if len(paires) >= 3 and rev_usd:
+        total = sum(b for _, b in paires)
         if total > 0:
-            ni = (sum(nis[:n]) / total) * rev_usd
+            ni = (sum(a for a, _ in paires) / total) * rev_usd
     if ni is None:
         ni = fund.get("net_income")
     roe = _roe_normalise(fund, F)
@@ -539,9 +546,23 @@ def valeur_de_liquidation(fund):
         # attribuables NEGATIFS mais aux minoritaires importants ressortait avec une
         # valeur de liquidation positive — Qingdao Footwear a +1 282 295 %, Etao
         # International a +5 291 567 %, alors que l'actionnaire ne detient rien.
-        minoritaires = max((fund.get("total_equity") or 0.0)
-                           - (fund.get("book_equity") or 0.0), 0.0)
-        return max(realisable - tl - minoritaires, 0.0)
+        #
+        # LE PARTAGE EST PROPORTIONNEL, PAS NOMINAL. Les minoritaires etaient
+        # retranches a leur valeur COMPTABLE, comme un creancier : tout le rabais
+        # de realisation retombait alors sur la maison mere. Or ce sont des
+        # ACTIONNAIRES — ils subissent la meme decote d'actif, et n'ont pas plus de
+        # droit que nous sur ce qui reste apres le passif. Le net realisable se
+        # partage donc au prorata des fonds propres.
+        #
+        # Et le partage n'a lieu QUE SI les deux grandeurs sont mesurees : le
+        # `or 0.0` faisait passer des fonds propres attribuables INTROUVABLES pour
+        # zero, les minoritaires absorbaient alors la totalite, et la valeur de
+        # liquidation tombait mecaniquement a zero pour cause d'ignorance.
+        net = realisable - tl
+        te, be_att = fund.get("total_equity"), fund.get("book_equity")
+        if te is not None and be_att is not None and te > 0 and be_att < te:
+            net *= max(be_att, 0.0) / te
+        return max(net, 0.0)
     # Bilan incomplet : on retombe sur les fonds propres, faute de pouvoir separer
     # actif et passif. Cette voie SURESTIME les societes endettees — c'est le defaut
     # que l'on vient de corriger — et ne doit servir qu'en dernier recours.
@@ -745,7 +766,16 @@ def probabilite_de_realisation(fund, F, marge_visee):
     courante = fund.get("operating_margin")
     if courante is not None and courante >= marge_visee:
         return 1.0                       # aucun redressement suppose
-    atteints = sum(1 for m in ms if m >= marge_visee * 0.9)
+    # TOLERANCE ADDITIVE, ET NON MULTIPLICATIVE. La bande de 10 % s'ecrivait
+    # `marge_visee * 0.9`, ce qui ABAISSE le seuil pour une cible positive — le
+    # comportement voulu — mais le RELEVE pour une cible negative : viser -10 % de
+    # marge exigeait alors d'avoir fait -9 %, soit MIEUX que la cible. Un exercice
+    # ayant reellement atteint l'objectif etait compte comme un echec, et la
+    # probabilite de redressement sous-estimee — precisement pour les societes
+    # deficitaires, ou la marge visee est le plus souvent negative.
+    # `- 0,1 x |cible|` relache la contrainte dans les deux cas.
+    seuil = marge_visee - 0.1 * abs(marge_visee)
+    atteints = sum(1 for m in ms if m >= seuil)
     p = atteints / len(ms)
     # AUCUN PLANCHER. Cette ligne planchait la probabilite a 0,15 : une societe qui
     # n'a JAMAIS atteint la marge visee sur son historique se voyait tout de meme

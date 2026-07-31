@@ -217,7 +217,13 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     # nul -> valeur surestimee (cas Embecta).
     invested = rev / s2c
     nopat = op_margin * rev * (1.0 - tx)
-    cur_roic = _clamp(_safe_div(nopat, invested) or 0.12, 0.02, 0.40)
+    # PRESENCE, ET NON VERITE. `or 0.12` prenait un ROIC MESURE A ZERO — resultat
+    # d'exploitation exactement nul, cas d'une societe a l'equilibre — pour un ROIC
+    # ABSENT, et lui accordait 12 % de rendement du capital. Un rendement nul est
+    # une mesure, pas une lacune ; la borne inferieure de 2 % suffit ensuite a
+    # eviter la division par zero dans l'identite de croissance financable.
+    _roic_mesure = _safe_div(nopat, invested)
+    cur_roic = _clamp(0.12 if _roic_mesure is None else _roic_mesure, 0.02, 0.40)
     # Quand le capital investi est INTROUVABLE — bilan quasi vide ou fonds propres
     # negatifs, ce qui sature la borne du ratio ventes/capital — le ROIC mesure
     # n'a plus de sens : il ressort tres eleve et le modele conclut que la
