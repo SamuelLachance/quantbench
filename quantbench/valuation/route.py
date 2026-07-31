@@ -910,11 +910,21 @@ def value_reit(fund, F=None):
     # croissance suit g = rendement des fonds propres x taux de retention. Trois
     # methodes du site partagent desormais la meme discipline.
     # --- VOIE PRINCIPALE : dividendes reels actualises (DDM, ch. 26) -----------
+    # DE F ON NE TIRE QUE DES RAPPORTS, JAMAIS DES MONTANTS : les series sont en
+    # DEVISE LOCALE et en unites brutes, la ou `fund` est en milliards de dollars.
+    # La premiere version consommait le dividende comme un montant : Prologis
+    # ressortait a +32 milliards de pour cent et la barriere de qualite a refuse le
+    # build — 352 foncieres sur 364 upsides absurdes. On mesure donc la PART DU
+    # FLUX distribuee (dividende / flux d'exploitation, meme exercice, meme
+    # devise), et on l'applique au flux DEJA CONVERTI de `fund`.
     div = None
     if F:
-        verses = [abs(d) for d in (F.get("dividends") or []) if d is not None and d != 0]
-        if len(verses) >= 2:
-            div = verses[0]                      # series plus recent en tete
+        paires = [(abs(d), c) for d, c in zip(F.get("dividends") or [],
+                                              F.get("cfo") or [])
+                  if d is not None and d != 0 and c is not None and c > 0]
+        if len(paires) >= 2:
+            part_distribuee = min(paires[0][0] / paires[0][1], 1.5)
+            div = part_distribuee * cfo          # cfo du fund : deja en Md USD
     if div and div > 0 and ffo > 0:
         # Croissance FINANCEE par la retention : la part du FFO non distribuee,
         # placee au rendement que la fonciere tire deja de ses fonds propres en

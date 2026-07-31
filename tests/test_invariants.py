@@ -4610,22 +4610,40 @@ def test_une_fonciere_se_valorise_d_abord_sur_ses_dividendes_reels():
          "market_cap": 45.0, "beta": 0.8, "country": "US", "sector": "Real Estate",
          "industry": "REIT - Retail", "total_debt": 26.0, "cash": 0.4,
          "revenue": 5.2, "tax_rate": 0.25}
-    F = {"years": ["2025", "2024", "2023"], "dividends": [-3.0, -2.9, -2.8],
-         "net_income": [0.9, 0.85, 0.9]}
+    # F en UNITES BRUTES et en devise locale, comme en production. Ma premiere
+    # version consommait le dividende comme un MONTANT : Prologis ressortait a
+    # +32 milliards de pour cent et la barriere de qualite a refuse le build. De F
+    # on ne tire que des RAPPORTS — la regle cardinale du depot s'applique aussi
+    # aux dividendes.
+    F = {"years": ["2025", "2024", "2023"],
+         "dividends": [-3.0e9, -2.9e9, -2.8e9], "cfo": [4.0e9, 3.9e9, 3.8e9],
+         "net_income": [0.9e9, 0.85e9, 0.9e9]}
 
     avec = value_reit(dict(o), F)
     assert avec["method"].startswith("Dividendes actualisés"), avec["method"]
     assert avec["payout_ffo"] == pytest.approx(0.88, abs=0.01)
+    assert 40.0 < avec["equity_value"] < 50.0, (
+        f"{avec['equity_value']} : le dividende de F a ete pris pour un montant")
     # La croissance est FINANCEE : retention x rendement du FFO, sous le plafond
     # stable — jamais une croissance gratuite.
     assert 0.0 <= avec["g"] <= 0.028
+
+    # INVARIANCE PAR LA DEVISE DE PUBLICATION : la meme fonciere publiee en pesos
+    # (x1400) doit valoir exactement pareil.
+    F_pesos = {"years": F["years"],
+               "dividends": [d * 1400 for d in F["dividends"]],
+               "cfo": [c * 1400 for c in F["cfo"]],
+               "net_income": [n * 1400 for n in F["net_income"]]}
+    en_pesos = value_reit(dict(o), F_pesos)
+    assert en_pesos["equity_value"] == pytest.approx(avec["equity_value"], rel=1e-12)
 
     sans = value_reit(dict(o))
     assert "repli" in sans["method"], (
         "le repli FFO ne se declare plus comme un ecart a la lettre")
 
     # Un seul exercice de dividende ne suffit pas a etablir une politique.
-    un_seul = value_reit(dict(o), {"years": ["2025"], "dividends": [-3.0]})
+    un_seul = value_reit(dict(o), {"years": ["2025"], "dividends": [-3.0e9],
+                                   "cfo": [4.0e9]})
     assert "repli" in un_seul["method"]
 
 
