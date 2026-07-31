@@ -35,10 +35,20 @@ def _clip(x, lo, hi):
     return max(lo, min(hi, x))
 
 
-def _coe(fund):
+def _coe(fund, activite_de_bilan=False):
     """Cout des fonds propres = rf + beta x ERP, ERP incluant la prime de risque
     PAYS (Damodaran) — sinon une banque chinoise ou bresilienne serait actualisee
     au cout du capital americain.
+
+    FINANCIERES (`activite_de_bilan`) : le beta ne se re-endette JAMAIS au levier
+    propre. « Do not adjust for financial leverage ... we would skip this step »
+    (Damodaran, Valuing Financial Service Firms, 2009, p.17) — la dette d'une banque
+    est sa matiere premiere, pas une structure qu'on retire puis remet. Le
+    re-endettement de Hamada au D/E propre transformait une banque DECOTEE en
+    societe extreme : capitalisation deprimee -> D/E de marche 15 -> beta 4,8 ->
+    ke 26 % -> valeur divisee par presque trois, precisement sur les banques que la
+    decote rendait interessantes a examiner. On prend le beta endette moyen des
+    comparables, a defaut le beta de regression publie — ses deux voies.
 
     PLANCHER DE BETA : une cotation OTC/ADR peu liquide produit un beta de
     regression artificiellement bas (0,20 pour la fonciere mexicaine Fibra UNO,
@@ -49,10 +59,16 @@ def _coe(fund):
     au-dessus du taux sans risque augmente de 3 points : aucune action n'est moins
     risquee qu'une obligation d'Etat."""
     rf = market.risk_free_rate()
-    from .build_universal import beta_ascendant, tax_rate
+    from .build_universal import beta_ascendant, beta_de_comparables, tax_rate
     pays = pays_exploitation(fund)
     from .build_universal import prime_taille
-    beta, _unlev, _src = beta_ascendant(fund, tax_rate(pays))
+    if activite_de_bilan:
+        beta = beta_de_comparables(fund, tax_rate(pays))
+        if beta is None:
+            b_pub = fund.get("beta")
+            beta = b_pub if (b_pub and 0.1 <= b_pub <= 3.5) else 1.0
+    else:
+        beta, _unlev, _src = beta_ascendant(fund, tax_rate(pays))
     erp = country_erp(pays)
     ke = rf + beta * erp + prime_taille(fund.get("market_cap"))
     return max(ke, rf + 0.03), rf
@@ -441,9 +457,28 @@ def value_financial(fund, F=None):
     if ni is not None and rev and rev > 0 and ni > rev:
         return {"equity_value": be, "confidence": "faible",
                 "method": "Valeur comptable (resultat net non recurrent)"}
-    ke, rf = _coe(fund)
-    g = min(rf, 0.03)
-    ke = max(ke, g + 0.02)
+    ke, rf = _coe(fund, activite_de_bilan=True)
+    # CROISSANCE FONDAMENTALE DE LA PERIODE D'AVANTAGE : g = ROE x retention.
+    # « Expected growth in earnings = Return on equity x (1 - Dividend Payout
+    # ratio) » (Valuing Financial Service Firms, 2009, p.19). Le plafond au taux
+    # sans risque ne vaut que pour la phase STABLE — ici, apres l'an 10, l'exces de
+    # rentabilite est deja nul, donc la croissance n'ajoute plus rien par
+    # construction. g etait fige a min(rf, 3 %) : une banque a ROE 18 % retenant
+    # 70 % de son resultat croit de 12,6 % l'an, pas de 3 — la sous-evaluation
+    # atteignait 23 %.
+    # La retention se MESURE sur l'historique des dividendes verses ; a defaut de
+    # trois exercices apparies, l'ancien min(rf, 3 %) sert de repli, declare.
+    g = None
+    if F:
+        paires = [(abs(d), n_) for d, n_ in zip(F.get("dividends") or [],
+                                                F.get("net_income") or [])
+                  if d is not None and n_ is not None and n_ > 0]
+        if len(paires) >= 3:
+            payouts = sorted(min(d / n_, 1.0) for d, n_ in paires)
+            retention = 1.0 - payouts[len(payouts) // 2]
+            g = max(0.0, roe) * retention
+    if g is None:
+        g = min(rf, 0.03)
     n = 10                                   # periode d'avantage concurrentiel
     q = (1.0 + g) / (1.0 + ke)
     A = (n / (1.0 + ke)) if abs(1.0 - q) < 1e-9 else         (1.0 / (1.0 + ke)) * (1.0 - q ** n) / (1.0 - q)

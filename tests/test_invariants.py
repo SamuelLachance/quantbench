@@ -4460,3 +4460,66 @@ def test_la_continuite_d_exploitation_s_eteint_au_lieu_d_etre_coupee():
     valeurs = [v(m) for m in (18.0, 21.0, 24.0, 27.0, 30.0)]
     for a, b in zip(valeurs, valeurs[1:]):
         assert b <= a + 1e-9, "la valeur remonte quand le silence s'allonge"
+
+
+def test_le_beta_d_une_financiere_ne_se_reendette_pas_a_son_propre_levier():
+    """« Do not adjust for financial leverage ... we would skip this step »
+    (Damodaran, Valuing Financial Service Firms, 2009, p.17). La dette d'une banque
+    est sa matiere premiere : la re-endetter au D/E PROPRE via Hamada transformait
+    une banque DECOTEE en societe extreme — capitalisation deprimee -> D/E de
+    marche 15 -> beta 4,8 -> ke 26-32 % -> valeur divisee par trois, precisement
+    sur les banques que la decote rendait interessantes.
+
+    Le cout des fonds propres d'une financiere ne doit donc dependre de sa
+    capitalisation qu'a travers la prime de taille, jamais a travers le levier.
+    """
+    from quantbench.valuation.route import _coe
+
+    def banque(mcap):
+        return {"book_equity": 10.0, "total_assets": 120.0, "revenue": 9.0,
+                "net_income": 1.9, "total_debt": 30.0, "market_cap": mcap,
+                "beta": 1.1, "country": "US", "sector": "Financial Services",
+                "industry": "Banks - Regional", "tax_rate": 0.25}
+
+    ke_normale, _ = _coe(banque(14.0), activite_de_bilan=True)
+    ke_decotee, _ = _coe(banque(2.0), activite_de_bilan=True)
+    # Seule la prime de taille (au plus ~2 points ici) peut les separer.
+    assert abs(ke_decotee - ke_normale) < 0.025, (
+        f"le levier propre traverse encore le beta : {ke_normale:.2%} -> {ke_decotee:.2%}")
+
+    # La voie Hamada, elle, doit continuer de re-endetter les non-financieres.
+    ke_ind_normale, _ = _coe(dict(banque(14.0), sector="Industrials",
+                                  industry="Specialty Industrial Machinery"))
+    ke_ind_decotee, _ = _coe(dict(banque(2.0), sector="Industrials",
+                                  industry="Specialty Industrial Machinery"))
+    assert ke_ind_decotee > ke_ind_normale + 0.05, (
+        "Hamada ne joue plus sur les non-financieres — il y est pourtant canonique")
+
+
+def test_la_croissance_d_une_financiere_est_fondamentale():
+    """g = ROE x (1 - payout) pendant la periode d'avantage (Valuing Financial
+    Service Firms, 2009, p.19). Le plafond min(rf, 3 %) ne subsiste qu'en REPLI,
+    quand l'historique de dividendes manque : une banque a ROE 19 % retenant 60 %
+    de son resultat croit de 11,4 % l'an, pas de 3.
+    """
+    from quantbench.valuation.route import value_financial
+
+    n = 8
+    f = {"book_equity": 10.0, "total_equity": 10.4, "total_assets": 120.0,
+         "revenue": 9.0, "net_income": 1.9, "total_debt": 30.0, "shares": 100.0,
+         "market_cap": 14.0, "beta": 1.1, "country": "US",
+         "sector": "Financial Services", "industry": "Banks - Regional",
+         "roe": 0.19, "tax_rate": 0.25}
+    F = {"years": [str(2025 - i) for i in range(n)], "net_income": [1.9] * n,
+         "equity": [10.0 * (1.045 ** -i) for i in range(n)], "revenue": [9.0] * n,
+         "dividends": [-0.76] * n}                     # payout 40 %
+
+    avec = value_financial(dict(f), F)["equity_value"]
+    sans = value_financial(dict(f), dict(F, dividends=[None] * n))["equity_value"]
+    assert avec > sans * 1.15, (
+        f"la retention mesuree ne nourrit pas la croissance : {avec:.2f} vs {sans:.2f}")
+
+    # Une banque qui distribue TOUT ne croit pas : g = 0, en dessous du repli a 3 %.
+    tout_distribue = value_financial(dict(f), dict(F, dividends=[-1.9] * n))
+    assert tout_distribue["equity_value"] < sans, (
+        "un payout de 100 % devrait porter g a zero, sous le repli min(rf, 3 %)")

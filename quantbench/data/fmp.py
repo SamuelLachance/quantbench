@@ -669,6 +669,14 @@ def financials_from_fmp(entry):
          "retained_earnings": col(bal, "retainedEarnings"),
          "equity": col(bal, "totalStockholdersEquity"), "total_liab": col(bal, "totalLiabilities"),
          "cfo": col(cf, "operatingCashFlow"), "dep_amort": col(cf, "depreciationAndAmortization"),
+         # Dividendes VERSES (tableau de flux). Le nom du champ a change d'une
+         # version de l'API a l'autre : on essaie les trois formes connues. Sert a
+         # la retention des financieres (g = ROE x retention, Damodaran) et au DDM.
+         "dividends": [next((_num(cf.get(y, {}).get(k)) for k in
+                             ("commonDividendsPaid", "netDividendsPaid",
+                              "dividendsPaid")
+                             if cf.get(y, {}).get(k) is not None), None)
+                       for y in yrs],
          # Charges d'interets, en valeur absolue : la couverture doit se mesurer sur
          # la MEDIANE de plusieurs exercices, un instantane faisant perdre plusieurs
          # crans a un cyclique en creux puis les lui rendant l'annee suivante.

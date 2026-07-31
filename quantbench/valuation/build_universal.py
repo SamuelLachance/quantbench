@@ -196,6 +196,30 @@ def beta_ascendant(fund, tx):
     return bu * (1 + (1 - tx) * de), bu, "industrie"
 
 
+def beta_de_comparables(fund, tx):
+    """Beta ENDETTE moyen des comparables de l'industrie — la lettre de Damodaran
+    pour les FINANCIERES.
+
+    « Do not adjust for financial leverage : ... with financial service firms, we
+    would skip this step » (Valuing Financial Service Firms, 2009, p.17) : la dette
+    d'une banque est sa matiere premiere, son levier n'est pas une structure de
+    financement qu'on retire puis remet. On prend donc le beta des comparables TEL
+    QUEL, a leur levier typique — jamais re-endette au levier PROPRE de la societe.
+
+    Le depot ne stocke que le beta desendette median et le D/E MEDIAN de l'industrie
+    (`dette_sur_capitalisation` est un D/E de marche, voir build_industry_stats) ;
+    le re-endettement au D/E MEDIAN reconstruit exactement le beta endette median
+    des comparables, puisque c'est par ce meme D/E que chaque beta avait ete
+    desendette. Rend None faute de reperes — l'appelant se replie alors sur le beta
+    de regression publie, l'autre voie que Damodaran cite pour les financieres.
+    """
+    bu = repere(fund, "beta_desendette")
+    de_ind = repere(fund, "dette_sur_capitalisation")
+    if bu is None or de_ind is None:
+        return None
+    return bu * (1 + (1 - tx) * _clamp(de_ind, 0.0, 50.0))
+
+
 def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = None,
                                 marge_terminale: float | None = None,
                                 erp: float | None = None, rf: float | None = None):
