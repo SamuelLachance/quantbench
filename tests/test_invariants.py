@@ -4412,3 +4412,51 @@ def test_l_extinction_de_detresse_ne_touche_que_ceux_qui_traversent_la_frontiere
     # Sans Z mesure, aucune extinction : on ne devine pas une detresse.
     _, c = R.conditions_de_detresse(base, {"scores": {}})
     assert not c
+
+
+def test_la_continuite_d_exploitation_s_eteint_au_lieu_d_etre_coupee():
+    """Le critere ne porte pas sur l'age comme jugement de valeur mais sur un FAIT
+    DE PUBLICATION : une societe en activite depose des comptes chaque annee. Ce
+    fait est certain, contrairement au Z-score — ce qui est incertain, c'est
+    l'INFERENCE qu'on en tire.
+
+    Le basculement etait binaire a trente mois : une societe valait 1 035,8 a
+    vingt-neuf mois et 29,8 a trente et un, soit -97 % pour un mois de plus. Rien
+    dans la realite ne change a ce point en un mois.
+
+    LES DEUX CHEMINS DOIVENT SE REJOINDRE EXACTEMENT au seuil, puisque `classify` y
+    route vers l'actif net : le poids d'extinction y vaut un par construction.
+    """
+    from quantbench.valuation.route import (_MOIS_CONTINUITE_NON_ATTESTEE,
+                                            _MOIS_PREMIER_EXERCICE_MANQUE,
+                                            value_stock)
+
+    fund = {"book_equity": 800.0, "total_equity": 820.0, "total_assets": 3000.0,
+            "total_liab": 2200.0, "cash": 150.0, "cfo": 250.0, "capex": -120.0,
+            "revenue": 2400.0, "ebit": 170.0, "net_income": 110.0, "dep_amort": 180.0,
+            "total_debt": 900.0, "shares": 200.0, "price": 6.0, "market_cap": 1200.0,
+            "beta": 1.0, "country": "US", "sector": "Industrials", "currency_ok": True,
+            "industry": "Specialty Industrial Machinery", "operating_margin": 0.071,
+            "tax_rate": 0.25,
+            "revenue_history": [1800.0, 1950.0, 2100.0, 2200.0, 2300.0, 2400.0]}
+    F = {"years": [str(2025 - i) for i in range(8)], "revenue": [2400.0] * 8,
+         "ebit": [170.0] * 8, "net_income": [110.0] * 8, "equity": [800.0] * 8,
+         "cfo": [250.0] * 8, "total_liab": [2200.0] * 8, "shares": [200.0] * 8}
+
+    def v(mois):
+        r = value_stock("T", fund=dict(fund, age_des_comptes_mois=mois),
+                        forensic={"scores": {"altman_z": 6.0}}, F=F)
+        return r["equity_value"]
+
+    seuil = _MOIS_CONTINUITE_NON_ATTESTEE
+    avant, apres = v(seuil - 1e-3), v(seuil + 1e-3)
+    assert abs(apres - avant) / max(abs(avant), 1e-9) < 0.01, (
+        f"falaise au seuil de continuite : {avant:,.1f} -> {apres:,.1f}")
+
+    # Avant le premier exercice manque, rien ne doit bouger.
+    assert v(_MOIS_PREMIER_EXERCICE_MANQUE) == v(6.0) == v(1.0)
+
+    # Et l'extinction est MONOTONE : plus le silence dure, moins l'exploitation pese.
+    valeurs = [v(m) for m in (18.0, 21.0, 24.0, 27.0, 30.0)]
+    for a, b in zip(valeurs, valeurs[1:]):
+        assert b <= a + 1e-9, "la valeur remonte quand le silence s'allonge"

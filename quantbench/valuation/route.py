@@ -67,6 +67,20 @@ _NO_ALTMAN = ("financial", "real estate", "utilities")
 # DCF normal, le risque passe par le cout du capital.
 Z_DETRESSE_ROUTE = 3.20
 
+# ANCIENNETE DES COMPTES : deux bornes POSEES, ancrees sur un fait de depot et non
+# sur un jugement d'anciennete.
+# Une societe en activite depose des comptes chaque annee. Avec une cloture en
+# decembre et un delai de depot ordinaire de quatre a six mois, dix-huit mois de
+# silence signalent UN exercice manque, trente mois en signalent DEUX. Passe le
+# second, plus rien n'atteste la continuite d'exploitation et seul subsiste un droit
+# sur les derniers actifs constates.
+# ENTRE LES DEUX, LA CONTINUITE S'ETEINT AU LIEU D'ETRE COUPEE. Le basculement etait
+# binaire : une societe valait 522,0 a trente mois et 29,8 a trente et un — soit
+# -94 % pour un mois. Rien dans la realite ne change en un mois a ce point ; ce qui
+# change est notre degre de certitude, et il varie continument.
+_MOIS_PREMIER_EXERCICE_MANQUE = 18.0
+_MOIS_CONTINUITE_NON_ATTESTEE = 30.0
+
 
 def sect(fund, cle, defaut):
     """Repere MESURE, du plus fin au plus large : INDUSTRIE -> SECTEUR -> GLOBAL.
@@ -275,7 +289,7 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
     # Ce n'est pas un rejet : la societe reste valorisee et publiee. C'est le choix
     # d'une METHODE applicable, au meme titre que le secteur ou le levier.
     mois = fund.get("age_des_comptes_mois")
-    if mois is not None and mois > 30:
+    if mois is not None and mois > _MOIS_CONTINUITE_NON_ATTESTEE:
         return "actif_net"
 
     deficitaire = (ebit is not None and ebit < 0) or (ni is not None and ni < 0)
@@ -1068,6 +1082,39 @@ def _adoucir_la_frontiere_de_detresse(r, fund, forensic, cat):
     return r
 
 
+def _eteindre_la_continuite_d_exploitation(r, fund, cat):
+    """Eteindre le poids de l'exploitation avec le silence comptable, au lieu de le
+    couper net a trente mois.
+
+    Le critere ne porte pas sur l'age comme jugement de valeur mais sur un FAIT DE
+    PUBLICATION : une societe en activite depose des comptes chaque annee. Ce fait
+    est certain — il ne souffre d'aucun bruit de mesure, contrairement au Z-score.
+    Ce qui est incertain, c'est l'INFERENCE qu'on en tire : une societe silencieuse
+    depuis vingt-neuf mois n'est pas en meilleure sante qu'une autre silencieuse
+    depuis trente et un. Le basculement binaire la valorisait pourtant dix-sept fois
+    plus.
+
+    Au-dela de trente mois, `classify` route deja vers l'actif net : le poids y vaut
+    un par construction, et les deux chemins se rejoignent donc exactement.
+    """
+    if not r or r.get("equity_value") is None or cat == "actif_net":
+        return r
+    mois = fund.get("age_des_comptes_mois")
+    if mois is None or mois <= _MOIS_PREMIER_EXERCICE_MANQUE:
+        return r
+    bas, haut = _MOIS_PREMIER_EXERCICE_MANQUE, _MOIS_CONTINUITE_NON_ATTESTEE
+    poids = min(1.0, (mois - bas) / (haut - bas))
+    actif = value_assetbased(fund)
+    if not actif or actif.get("equity_value") is None:
+        return r
+    r = dict(r)
+    r["equity_value"] = ((1.0 - poids) * max(r["equity_value"], 0.0)
+                         + poids * actif["equity_value"])
+    r["method"] = f"{r.get('method', 'DCF')} — continuite non attestee ({poids:.0%})"
+    r["confidence"] = "faible" if poids > 0.5 else r.get("confidence", "moyenne")
+    return r
+
+
 def value_assetbased(fund):
     """Sociétés pré-revenu / holdings / SPAC : pas de flux à actualiser. Plancher
     = valeur d'actif net comptable (capitaux propres), à défaut la trésorerie nette.
@@ -1221,6 +1268,7 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
     # de la bande, pire que celle qu'il corrigeait. Il doit porter sur la valeur qui
     # sera reellement publiee, pas sur un intermediaire.
     r = _adoucir_la_frontiere_de_detresse(r, fund, forensic, cat)
+    r = _eteindre_la_continuite_d_exploitation(r, fund, cat)
 
     return _finalise(ticker, fund, r, cat)
 
