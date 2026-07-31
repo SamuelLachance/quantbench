@@ -126,8 +126,20 @@ def get_fundamentals(ticker: str) -> dict:
     net_income = usd_fin(_sinon(_first(info, "netIncomeToCommon"),
                             _row(inc, "Net Income")))
     total_debt = usd_fin(_sinon(_first(info, "totalDebt"), _row(bal, "Total Debt")))
-    cash = usd_fin(_sinon(_first(info, "totalCash"),
-                      _row(bal, "Cash And Cash Equivalents")))
+    # PERIMETRE CONSTANT, QUELLE QUE SOIT LA SOURCE QUI REPOND. `totalCash` de
+    # Yahoo agrege la tresorerie ET les placements a court terme ; la ligne de
+    # bilan « Cash And Cash Equivalents » ne porte que la premiere. Se replier de
+    # l'une sur l'autre faisait donc changer la DEFINITION du poste selon la source
+    # disponible, sans que rien ne le signale — et cette tresorerie entre
+    # directement dans la valeur d'entreprise, donc dans tout multiple qui en
+    # decoule. On somme explicitement les deux composantes du bilan pour retrouver
+    # le perimetre de Yahoo, plutot que de choisir la plus etroite par accident.
+    tresorerie_bilan = _row(bal, "Cash And Cash Equivalents")
+    placements_court_terme = _row(bal, "Other Short Term Investments",
+                                  "Short Term Investments")
+    if tresorerie_bilan is not None and placements_court_terme is not None:
+        tresorerie_bilan += placements_court_terme
+    cash = usd_fin(_sinon(_first(info, "totalCash"), tresorerie_bilan))
     equity_usd = usd_fin(book_equity)
     ev = None if market_cap is None else market_cap + (total_debt or 0) - (cash or 0)
 
@@ -167,6 +179,13 @@ def get_fundamentals(ticker: str) -> dict:
         "trailing_pe": _safe_ratio(market_cap, net_income),
         "price_to_book": _safe_ratio(market_cap, equity_usd),
         "ev_to_ebitda": _safe_ratio(ev, ebitda),
+        # RECOPIES BRUTS DE YAHOO, ET SANS CONSOMMATEUR. Aucune ligne du depot ne
+        # les lit — ni le routage, ni la notation, ni une page. Ils restent parce
+        # qu'ils ne coutent rien, mais leur unite n'est PAS etablie : Yahoo a livre
+        # `dividendYield` tantot en fraction (0,023) tantot en pourcentage (2,3)
+        # selon les versions de son API, et rien ici ne tranche. Quiconque les
+        # branchera un jour doit donc verifier l'unite AVANT, et non decouvrir un
+        # rendement de 230 % sur une fiche.
         "dividend_yield": _first(info, "dividendYield"),
         "payout_ratio": _first(info, "payoutRatio"),
     }

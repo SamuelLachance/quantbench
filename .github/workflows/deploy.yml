@@ -98,6 +98,7 @@ jobs:
       # couverture), le job echoue ICI et le deploiement n'a pas lieu — le site
       # conserve ses dernieres donnees valides plutot que de publier un defaut.
       - name: Controle qualite du build
+        id: barriere
         env:
           PYTHONPATH: ${{ github.workspace }}
           PYTHONUNBUFFERED: "1"
@@ -119,11 +120,18 @@ jobs:
       #     build de trente minutes que `check_build.py` venait de declarer bon.
       #     L'intention affichee plus haut est que SEUL un defaut de donnees
       #     empeche la mise en ligne ; cette position la respecte enfin.
-      # `if: always()` : l'archive doit etre conservee meme si une etape
-      # ulterieure du deploiement a echoue — la mesure, elle, est valide.
-
+      # LA CONDITION, ET POURQUOI CE N'EST PAS `always()`. Il fallait que l'archive
+      # survive a l'echec d'une etape de PUBLICATION — celle-ci n'a rien a voir avec
+      # la qualite des donnees. Mais `always()` allait bien plus loin : il faisait
+      # tourner cette etape meme quand `check_build.py` venait de REFUSER le build,
+      # et poussait alors sur `main` des notes tirees de donnees jugees mauvaises —
+      # exactement ce que le commentaire ci-dessus s'engage a ne jamais faire, et
+      # sans espoir de correction puisque l'archive du mois est ecrite une fois.
+      # La condition exacte est donc : la barriere qualite a dit oui, et le job
+      # n'a pas ete annule. Ce qui se passe apres la barriere ne regarde pas
+      # l'archive.
       - name: Conserver l'archive mensuelle des notes
-        if: always()
+        if: ${{ !cancelled() && steps.barriere.conclusion == 'success' }}
         run: |
           if git diff --quiet --exit-code app/us/_notes_risque/ &&              [ -z "$(git ls-files --others --exclude-standard app/us/_notes_risque/)" ]; then
             echo "archive du mois deja a jour"

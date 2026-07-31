@@ -2853,3 +2853,74 @@ def test_les_seuils_de_bilan_sont_declares_poses():
            / "quantbench" / "bilan.py").read_text(encoding="utf-8")
     assert "POSEE" in src, "les seuils ne sont plus declares poses"
     assert "TROIS FOIS" in doc, "l'historique de la duplication a disparu du module"
+
+
+def test_la_probabilite_de_realisation_na_pas_de_plancher_arbitraire():
+    """Le jumeau de `test_la_survie_n_a_pas_de_plancher_arbitraire`.
+
+    `probabilite_de_survie` avait perdu son plancher a 0,30, qualifie de « chiffre
+    pose a la main et sans fondement », et un test l'a verrouille. Cent lignes plus
+    bas, `probabilite_de_realisation` en portait un a 0,15 — supprime depuis, mais
+    sans test : la correction jumelle etait protegee, celle-ci ne l'etait pas.
+
+    Ce que le plancher coutait : une societe qui n'a JAMAIS atteint la marge visee
+    sur son historique conservait 15 % de la valeur de son redressement, alors que
+    la docstring de la fonction promet une probabilite MESUREE — « la part des
+    exercices ou la societe a effectivement atteint cette marge ».
+    """
+    import inspect
+
+    from quantbench.valuation import route
+
+    src = inspect.getsource(route.probabilite_de_realisation)
+    assert "max(0.15" not in src and "0.15, p" not in src, \
+        "le plancher arbitraire est revenu"
+    assert "AUCUN PLANCHER" in src, "la raison de son absence n'est plus ecrite"
+
+    # Comportement : aucun exercice au niveau vise -> probabilite NULLE.
+    F = {"years": [2021, 2022, 2023, 2024],
+         "revenue": [100.0, 100.0, 100.0, 100.0],
+         "ebit": [1.0, 1.0, 1.0, 1.0]}          # 1 % de marge, tres loin de 20 %
+    fund = {"operating_margin": 0.01}
+    p = route.probabilite_de_realisation(fund, F, 0.20)
+    assert p == 0.0, f"probabilite {p} au lieu de 0 : un plancher subsiste"
+
+    # Et la mesure reste une mesure quand elle n'est pas nulle.
+    F2 = {"years": [2021, 2022, 2023, 2024],
+          "revenue": [100.0, 100.0, 100.0, 100.0],
+          "ebit": [25.0, 25.0, 1.0, 1.0]}        # deux exercices sur quatre
+    assert route.probabilite_de_realisation({"operating_margin": 0.01}, F2, 0.20) == 0.5
+
+
+def test_larchive_mensuelle_ne_survit_pas_a_un_build_refuse():
+    """`if: always()` annulait la barriere qualite qu'il pretendait respecter.
+
+    L'archive devait survivre a l'echec d'une etape de PUBLICATION — sans rapport
+    avec la qualite des donnees. Mais `always()` la faisait aussi tourner quand
+    `check_build.py` venait de REFUSER le build, poussant alors sur `main` des notes
+    tirees de donnees jugees mauvaises, sans espoir de correction puisque l'archive
+    du mois n'est ecrite qu'une fois.
+    """
+    import yaml
+
+    racine = Path(__file__).resolve().parent.parent
+    wf = yaml.safe_load((racine / ".github" / "workflows" / "deploy.yml")
+                        .read_text(encoding="utf-8"))
+    etapes = wf["jobs"]["deploy"]["steps"]
+    barriere = next(e for e in etapes if e.get("name", "").startswith("Controle qualite"))
+    archive = next(e for e in etapes if e.get("name", "").startswith("Conserver l'archive"))
+
+    assert barriere.get("id"), "la barriere qualite n'a pas d'identifiant a referencer"
+    cond = str(archive.get("if", ""))
+    assert cond, "l'archive tourne sans condition"
+    assert "always()" not in cond, "always() annule de nouveau la barriere qualite"
+    assert barriere["id"] in cond, \
+        f"la condition de l'archive ne depend pas de la barriere : {cond}"
+    assert "success" in cond
+
+    # L'archive vient bien APRES le deploiement : une ecriture git n'est pas un
+    # defaut de donnees et ne doit pas sacrifier un build declare bon.
+    noms = [e.get("name") or e.get("uses", "") for e in etapes]
+    i_dep = max(i for i, n in enumerate(noms) if "deploy-pages" in n)
+    i_arc = next(i for i, n in enumerate(noms) if str(n).startswith("Conserver l'archive"))
+    assert i_arc > i_dep, "l'archive est repassee avant le deploiement"
