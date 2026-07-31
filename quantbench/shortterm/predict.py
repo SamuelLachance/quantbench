@@ -85,13 +85,30 @@ def features(prices) -> dict | None:
     # EXCLUT le point courant. L'ecart de 13 % sur la variance comprimait toutes
     # les valeurs de `reversal` de 6,08 %, et rendait fausse l'affirmation
     # « en unites d'ecart-type » que porte cette ligne.
-    ma20 = float(p[-20:].mean())
+    # MOYENNE DES LOGARITHMES, ET NON LOGARITHME DE LA MOYENNE. L'ecart entre les
+    # deux est celui de l'inegalite de Jensen : le second majore toujours le
+    # premier, d'autant plus que la serie est dispersee. Le numerateur en heritait
+    # un biais qui grandit avec la volatilite — exactement la grandeur par laquelle
+    # on le divise ensuite. Toute la construction se fait en logarithmes ; il n'y
+    # avait aucune raison d'en sortir pour la moyenne.
     _n = 20.0
     n_eff = (_n - 1.0) * (2.0 * _n - 1.0) / (6.0 * _n)
-    reversal = -float(logp[-1] - math.log(ma20)) / (sd * math.sqrt(n_eff))
+    reversal = -float(logp[-1] - logp[-20:].mean()) / (sd * math.sqrt(n_eff))
 
     # Momentum 6-1 : de t-126 a t-21, fenetre DISJOINTE du renversement.
-    momentum = float(logp[-21] - logp[-126]) / (sd * math.sqrt(105.0))
+    #
+    # DIVISE PAR LA VOLATILITE DE SA PROPRE FENETRE. Il l'etait par `sd`, la
+    # volatilite EWMA globale — dont la demi-vie est de 11 seances, si bien que
+    # 71 % de son poids porte sur les VINGT DERNIERES seances, c'est-a-dire
+    # entierement HORS de la fenetre du momentum, et 29 % seulement dedans. Deux
+    # titres au rendement et a la volatilite de fenetre identiques recevaient donc
+    # des scores differant d'un facteur 2,6 selon la seule agitation recente — et
+    # cette agitation recente est deja ce que le renversement mesure. Les deux
+    # signaux, annonces comme portant sur des fenetres disjointes, partageaient en
+    # fait leur denominateur.
+    ret_fenetre = ret[-125:-20]
+    sd_momentum = ewma_vol(ret_fenetre) or sd
+    momentum = float(logp[-21] - logp[-126]) / (sd_momentum * math.sqrt(105.0))
 
     vol_annual = sd * math.sqrt(252.0)
     return {"reversal": float(np.clip(reversal, -5, 5)),

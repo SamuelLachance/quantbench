@@ -3849,3 +3849,55 @@ def test_le_risque_pays_entre_aussi_dans_le_cout_de_la_dette():
     # Le spread de dette reste STRICTEMENT sous la prime actions du meme pays.
     for p in ("BR", "TR", "AR", "ZA"):
         assert B.country_erp(p, 0.0) / B._VOLATILITE_RELATIVE < B.country_erp(p, 0.0)
+
+
+def test_le_momentum_ne_depend_que_de_sa_propre_fenetre():
+    """Les deux signaux courts sont annonces sur des fenetres DISJOINTES.
+
+    Ils partageaient pourtant leur denominateur : le momentum (t-126 a t-21) etait
+    divise par la volatilite EWMA globale, dont la demi-vie est de 11 seances — si
+    bien que 71 % de son poids porte sur les VINGT DERNIERES seances, entierement
+    hors de la fenetre du momentum, et 29 % seulement dedans. Or ces vingt dernieres
+    seances sont exactement ce que le RENVERSEMENT mesure.
+
+    Consequence, verifiee sur deux series rigoureusement identiques jusqu'a vingt
+    seances de la fin : le momentum passait de -1,474 a -0,187 — un facteur 7,9 —
+    du seul fait de l'agitation recente. Apres correction, il vaut -0,858 dans les
+    deux cas.
+    """
+    import numpy as np
+
+    from quantbench.shortterm.predict import features
+
+    rng = np.random.default_rng(1)
+    n = 260
+    commun = 100 * np.exp(np.cumsum(rng.normal(0.0008, 0.012, n - 20)))
+    calme = np.concatenate([commun, commun[-1] * np.exp(np.cumsum(rng.normal(0, 0.004, 20)))])
+    agite = np.concatenate([commun, commun[-1] * np.exp(np.cumsum(rng.normal(0, 0.045, 20)))])
+
+    a, b = features(calme), features(agite)
+    assert a is not None and b is not None
+    assert a["momentum"] == pytest.approx(b["momentum"], rel=1e-9), (
+        f"momentum {a['momentum']:.4f} contre {b['momentum']:.4f} : il depend encore "
+        "de l'agitation posterieure a sa fenetre")
+
+    # Et le RENVERSEMENT doit, lui, reagir — c'est bien sa fenetre.
+    assert abs(b["reversal"]) != pytest.approx(abs(a["reversal"]), rel=0.01), \
+        "le renversement ne voit plus l'agitation recente : sa fenetre est la bonne"
+    # La volatilite publiee reste celle du titre, recente : elle doit bouger.
+    assert b["vol_annual"] > 3 * a["vol_annual"]
+
+
+def test_le_renversement_se_calcule_entierement_en_logarithmes():
+    """`log(moyenne des prix)` majore toujours `moyenne des log-prix` — inegalite de
+    Jensen — et l'ecart grandit avec la DISPERSION de la serie, c'est-a-dire avec
+    la grandeur meme par laquelle on divise ensuite. Toute la construction se fait
+    en logarithmes ; il n'y avait aucune raison d'en sortir pour la moyenne."""
+    import inspect
+
+    from quantbench.shortterm import predict as P
+
+    src = inspect.getsource(P.features)
+    code = "\n".join(l.split("#")[0] for l in src.splitlines())
+    assert "math.log(ma20)" not in code, "le logarithme de la moyenne est revenu"
+    assert "logp[-20:].mean()" in code, "la moyenne des logarithmes a disparu"
