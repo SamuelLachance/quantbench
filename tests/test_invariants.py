@@ -3015,3 +3015,80 @@ def test_lebit_et_les_flux_restent_alignes_sur_les_memes_exercices():
     H = {"years": [2025, 2024, 2023, 2022], "ebit": [10.0, 6.0, 5.0, 4.0],
          "cfo": [8.0, 0.0, 4.0, 3.0]}
     assert conversion_en_tresorerie(H) == pytest.approx(15.0 / 25.0)
+
+
+def test_une_perte_ne_peut_pas_devenir_un_encaissement():
+    """L'identite de Damodaran ne s'applique qu'a un benefice POSITIF.
+
+    `reinvestissement = EBI x croissance / ROIC` multiplie un taux positif par le
+    benefice apres impot. Quand celui-ci est NEGATIF, le reinvestissement devient
+    negatif, et `FCFF = EBI - reinvestissement` fait RENTRER de l'argent : reinvestir
+    rapportait. Mesure avant correction, a 30 % de croissance et -20 % de marge :
+    un benefice de -195 produisait un reinvestissement de -585 et un flux libre de
+    +390, d'autant plus positif que la societe croissait vite.
+
+    Damodaran traite ce cas par les ventes rapportees au capital : le
+    reinvestissement suit la croissance du CHIFFRE D'AFFAIRES et l'intensite
+    capitalistique, grandeurs qui restent definies quand le benefice ne l'est pas.
+
+    Effet mesure sur l'univers : 19 societes sur 202 changent d'upside, 89 % a la
+    baisse. Cheetah Mobile passait de +17 957 % a +6 549 %.
+    """
+    from quantbench.valuation.dcf import value_dcf
+
+    def cas(g, roic, marge):
+        return _dcf_inputs_temoin_perte(g, roic, marge)
+
+    for g in (0.05, 0.15, 0.30, 0.60):
+        r = value_dcf(cas(g, 0.10, -0.20))
+        ebi, reinv, fcff = (r["ebit_after_tax"], r["reinvestment"], r["fcff"])
+        for i in range(len(fcff)):
+            if ebi[i] < 0:
+                assert reinv[i] >= 0, (
+                    f"croissance {g} annee {i+1} : reinvestissement {reinv[i]:.2f} "
+                    "negatif — reinvestir doit SORTIR de l'argent")
+                assert fcff[i] <= ebi[i] + 1e-9, (
+                    f"croissance {g} annee {i+1} : flux {fcff[i]:.2f} superieur au "
+                    f"benefice {ebi[i]:.2f} — la perte s'est attenuee toute seule")
+
+    # TEMOIN BENEFICIAIRE : l'identite de Damodaran doit s'appliquer sans changement.
+    r = value_dcf(cas(0.10, 0.15, 0.20))
+    attendu = r["ebit_after_tax"][0] * 0.10 / 0.15
+    assert r["reinvestment"][0] == pytest.approx(attendu), \
+        "l'identite EBI x g / ROIC ne s'applique plus aux societes beneficiaires"
+
+
+def _dcf_inputs_temoin_perte(g, roic, marge):
+    from quantbench.valuation.dcf import DcfInputs
+    return DcfInputs(
+        revenue_base=1000.0, g1_begin=g, g1_end=g, g2_begin=g, g2_end=g,
+        g3_begin=g, g3_end=0.02, len1=3, len2=3, len3=3, conv1=1, conv2=1, conv3=1,
+        current_operating_margin=marge, terminal_operating_margin=marge,
+        margin_converge_start=1, current_tax_rate=0.25, marginal_tax_rate=0.25,
+        tax_converge_start=1, current_sales_to_capital=2.0,
+        terminal_sales_to_capital=2.0, s2c_converge_start=1, risk_free_rate=0.04,
+        erp=0.05, unlevered_beta=1.0, terminal_unlevered_beta=1.0,
+        beta_converge_start=1, current_pretax_kd=0.05, terminal_pretax_kd=0.05,
+        kd_converge_start=1, equity_value=1000.0, debt_value=0.0,
+        cash_and_non_operating=0.0, reinvestment_mode="roic",
+        current_roic=roic, terminal_roic=roic, roic_converge_start=1)
+
+
+def test_le_chemin_vectorise_traite_les_pertes_comme_le_chemin_de_reference():
+    """La correction doit exister dans LES DEUX moteurs, sinon le Monte Carlo
+    valoriserait des scenarios deficitaires autrement que la valorisation
+    affichee — et les deux chiffres publies sur la meme fiche divergeraient."""
+    import numpy as np
+
+    from quantbench.valuation.dcf import value_dcf
+    from quantbench.valuation.dcf_vectorise import equites_dcf
+
+    for g in (0.05, 0.30, 0.60):
+        for marge in (-0.40, -0.20, -0.05, 0.20):
+            b = _dcf_inputs_temoin_perte(g, 0.10, marge)
+            try:
+                ref = value_dcf(b)["equity_value"]
+            except (ValueError, ZeroDivisionError, FloatingPointError):
+                assert np.isnan(equites_dcf(b, {}, 1)[0])
+                continue
+            assert float(equites_dcf(b, {}, 1)[0]) == ref, (g, marge)

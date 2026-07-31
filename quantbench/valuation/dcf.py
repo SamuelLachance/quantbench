@@ -272,6 +272,25 @@ def value_dcf(x: DcfInputs) -> dict:
         # divergences numeriques sur des ROIC quasi nuls.
         reinv_rate = np.clip(reinv_rate, 0.0, 3.0)
         reinvestment = ebit_after_tax * reinv_rate
+
+        # L'IDENTITE DE DAMODARAN N'A DE SENS QUE SUR UN BENEFICE POSITIF.
+        # `reinvestissement = EBI x g / ROIC` multiplie un taux positif par le
+        # benefice apres impot : quand celui-ci est NEGATIF, le reinvestissement
+        # devient negatif, et `FCFF = EBI - reinvestissement` fait RENTRER de
+        # l'argent. Mesure : a 30 % de croissance et -20 % de marge, un benefice de
+        # -195 produisait un reinvestissement de -585 et un flux libre de +390.
+        # Reinvestir, c'est SORTIR de l'argent — quel que soit le signe du benefice.
+        #
+        # Damodaran traite precisement ce cas par l'autre voie, celle des ventes
+        # rapportees au capital : le reinvestissement suit la croissance du CHIFFRE
+        # D'AFFAIRES et l'intensite capitalistique, grandeurs qui restent definies
+        # quand le benefice ne l'est pas. On bascule donc annee par annee, avec le
+        # meme traitement de la croissance negative que dans l'autre mode.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            secours = np.where(s2c != 0, (revenues - prev_rev) / s2c, 0.0)
+        secours = np.where(secours > 0, secours,
+                           secours * x.asset_liquidation_during_negative_growth)
+        reinvestment = np.where(ebit_after_tax > 0, reinvestment, secours)
     else:
         with np.errstate(divide="ignore", invalid="ignore"):
             reinvestment = np.where(s2c != 0, (revenues - prev_rev) / s2c, 0.0)

@@ -191,6 +191,16 @@ def equites_dcf(base: DcfInputs, tirages: dict, n: int) -> np.ndarray:
             g_ebi = np.where(ebi_prev > 0, ebit_after_tax / ebi_prev - 1.0, g)
             taux = np.where(roic_path > 0, g_ebi / roic_path, 0.0)
         reinvestment = ebit_after_tax * np.clip(taux, 0.0, 3.0)
+        # MIROIR EXACT de dcf.py : l'identite de Damodaran ne vaut que sur un
+        # benefice positif ; en dessous, le reinvestissement suit la croissance du
+        # chiffre d'affaires et l'intensite capitalistique. Sans cela, une societe
+        # en perte voyait sa perte se transformer en encaissement.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            secours = np.where(s2c != 0, (revenues - prev_rev) / s2c, 0.0)
+        secours = np.where(
+            secours > 0, secours,
+            secours * col("asset_liquidation_during_negative_growth"))
+        reinvestment = np.where(ebit_after_tax > 0, reinvestment, secours)
     else:
         with np.errstate(divide="ignore", invalid="ignore"):
             reinvestment = np.where(s2c != 0, (revenues - prev_rev) / s2c, 0.0)
