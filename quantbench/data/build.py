@@ -26,6 +26,21 @@ _DEFAULT_ERP = 0.045
 
 
 def _clamp(x, lo, hi):
+    """Borne une valeur MESUREE. Une valeur indeterminee ressort indeterminee.
+
+    `max(lo, min(hi, x))` sur un NaN rend la BORNE HAUTE : toute comparaison avec
+    NaN etant fausse, `min` rend `hi`, puis `max` le laisse passer. Un rendement du
+    capital indeterminable devenait donc 40 % — le maximum — et une marge
+    indeterminable 75 %. La valeur la plus optimiste de l'echelle, produite par
+    l'absence d'information, et parfaitement finie : elle desarmait au passage la
+    garde anti-NaN du moteur DCF, qui ne voyait plus rien a rattraper.
+
+    Les INFINIS, eux, gardent leur sens : un rapport dette sur fonds propres infini
+    designe des fonds propres nuls, et la borne haute est la bonne reponse. Seul
+    NaN dit « je ne sais pas », et cela doit se propager.
+    """
+    if x != x:                                   # NaN : aucune comparaison n'est vraie
+        return float("nan")
     return max(lo, min(hi, x))
 
 

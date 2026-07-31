@@ -425,6 +425,34 @@ def lois_de_tirage(base):
     une societe a 2 % de marge n'a pas la meme incertitude absolue qu'une societe a
     40 %, mais aucune n'est connue a mieux que le plancher pres."""
     from scipy import stats as _st
+
+    def _borne(loi_normale, centre, ecart, bas, haut):
+        """Loi normale TRONQUEE au domaine que le chemin deterministe s'impose.
+
+        La simulation doit explorer le MEME domaine que la valorisation ponctuelle,
+        sinon elle mesure la dispersion d'un modele different de celui qu'elle
+        accompagne. Deux grandeurs sortaient du leur :
+
+          - le BETA DESENDETTE, positif par construction et deja borne a [0,1 ; 3,5]
+            par `_sane_beta`. Mesure sur 165 societes : 34 d'entre elles tiraient
+            un beta NEGATIF, jusqu'a -0,266 et jusqu'a 6,5 % de leurs scenarios.
+            Un beta negatif donne un cout des fonds propres inferieur au taux sans
+            risque, parfois negatif : la societe serait payee pour porter du risque.
+          - le RENDEMENT DU CAPITAL, borne a [0,02 ; 0,40] par `_clamp` dans le cas
+            de base. En dessous de zero, le moteur REJETTE le scenario — et ces
+            rejets ne sont pas neutres : mesure sur 108 societes, les scenarios
+            ecartes portaient systematiquement les plus FAIBLES rendements et les
+            plus FAIBLES marges, sans une seule exception de signe. La simulation
+            jetait donc sa propre queue basse, et le taux de validite publie
+            marquait une troncature qu'il ne nommait pas.
+
+        Tronquer a la source vaut mieux que rejeter apres coup : la masse reste
+        dans le domaine au lieu de disparaitre, et la copule continue de fonctionner
+        puisque `truncnorm` fournit une vraie fonction quantile.
+        """
+        a, b = (bas - centre) / ecart, (haut - centre) / ecart
+        return _st.truncnorm(a, b, loc=centre, scale=ecart)
+
     lois = {
         "g1_begin": _st.norm(base.g1_begin, max(0.02, abs(base.g1_begin) * 0.35)),
         "g2_end": _st.norm(base.g2_end, 0.02),
@@ -432,10 +460,10 @@ def lois_de_tirage(base):
             base.terminal_operating_margin,
             max(0.015, abs(base.terminal_operating_margin) * 0.15)),
         "erp": _st.norm(base.erp, 0.005),
-        "unlevered_beta": _st.norm(base.unlevered_beta, 0.15),
-        "current_roic": _st.norm(base.current_roic,
-                                 max(0.03, abs(base.current_roic) * 0.20)),
-        "terminal_roic": _st.norm(base.terminal_roic, 0.01),
+        "unlevered_beta": _borne(None, base.unlevered_beta, 0.15, 0.10, 3.50),
+        "current_roic": _borne(None, base.current_roic,
+                               max(0.03, abs(base.current_roic) * 0.20), 0.02, 0.40),
+        "terminal_roic": _borne(None, base.terminal_roic, 0.01, 0.02, 0.40),
         "g3_end": _st.norm(base.g3_end, 0.003),
     }
     correlations = [

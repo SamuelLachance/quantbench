@@ -3392,3 +3392,75 @@ def test_le_m_score_augmente_quand_la_marge_brute_passe_sous_zero():
     assert a_perte >= degradee, (
         f"vendre a perte ({a_perte:.2f}) doit etre au moins aussi suspect "
         f"qu'une marge a 6 % ({degradee:.2f})")
+
+
+def test_une_valeur_indeterminee_ne_ressort_pas_a_la_borne_la_plus_optimiste():
+    """`max(lo, min(hi, x))` sur un NaN rend la BORNE HAUTE.
+
+    Toute comparaison avec NaN etant fausse, `min(hi, nan)` rend `hi`, que `max`
+    laisse ensuite passer. Un rendement du capital indeterminable devenait donc
+    40 % — le maximum de l'echelle — et une marge indeterminable 75 %. La valeur la
+    plus optimiste possible, produite par l'ABSENCE d'information, et parfaitement
+    finie : elle desarmait au passage la garde anti-NaN du moteur DCF, qui ne
+    voyait plus rien a rattraper.
+
+    Les INFINIS gardent leur sens : un rapport dette sur fonds propres infini
+    designe des fonds propres nuls, et la borne haute est la bonne reponse.
+    """
+    import math
+
+    from quantbench.data.build import _clamp
+
+    assert math.isnan(_clamp(float("nan"), 0.02, 0.40)), \
+        "une valeur indeterminee ressort de nouveau a la borne haute"
+    assert _clamp(float("inf"), 0.02, 0.40) == 0.40
+    assert _clamp(float("-inf"), 0.02, 0.40) == 0.02
+    assert _clamp(0.5, 0.02, 0.40) == 0.40
+    assert _clamp(0.01, 0.02, 0.40) == 0.02
+    assert _clamp(0.2, 0.02, 0.40) == 0.2
+
+
+def test_les_lois_de_tirage_restent_dans_le_domaine_du_modele():
+    """La simulation doit explorer le MEME domaine que la valorisation ponctuelle.
+
+    Deux grandeurs en sortaient. Le BETA DESENDETTE, positif par construction et
+    deja borne a [0,1 ; 3,5] par `_sane_beta`, etait tire d'une normale de support
+    reel : 34 societes sur 165 en tiraient un NEGATIF, jusqu'a -0,266 et jusqu'a
+    6,5 % de leurs scenarios — une societe payee pour porter du risque. Et le
+    RENDEMENT DU CAPITAL, borne a [0,02 ; 0,40] dans le cas de base, descendait
+    sous zero, ou le moteur REJETTE le scenario.
+
+    Ces rejets n'etaient pas neutres : mesure sur 108 societes, les scenarios
+    ecartes portaient systematiquement les plus faibles rendements et les plus
+    faibles marges, SANS UNE SEULE exception de signe. La simulation jetait donc sa
+    propre queue basse, et le taux de validite publie marquait une troncature qu'il
+    ne nommait pas. Apres troncature a la source : taux de validite median 0,793 ->
+    1,000, et zero rejet sur 158 societes.
+    """
+    import numpy as np
+
+    from quantbench.valuation.build_universal import lois_de_tirage
+    from quantbench.valuation.montecarlo import sample_inputs
+
+    base = _dcf_inputs_temoin()
+    lois, corr = lois_de_tirage(base)
+    t = sample_inputs(lois, 20000, corr, seed=3)
+
+    assert t["unlevered_beta"].min() >= 0.10 - 1e-9, \
+        f"beta desendette tire a {t['unlevered_beta'].min()}, negatif ou quasi nul"
+    assert t["unlevered_beta"].max() <= 3.50 + 1e-9
+    for cle in ("current_roic", "terminal_roic"):
+        assert t[cle].min() >= 0.02 - 1e-9, f"{cle} tire sous sa borne : {t[cle].min()}"
+        assert t[cle].max() <= 0.40 + 1e-9
+
+    # La troncature ne doit pas tuer la DISPERSION : une loi ecrasee sur sa borne
+    # ne mesurerait plus rien.
+    assert t["unlevered_beta"].std() > 0.05, "le beta ne varie plus"
+    assert len(np.unique(t["current_roic"])) > 1000, "le rendement s'est fige"
+
+    # Et les scenarios doivent desormais SURVIVRE : plus de queue basse jetee.
+    from quantbench.valuation.dcf_vectorise import equites_dcf
+    eq = equites_dcf(base, t, 20000)
+    assert np.isfinite(eq).mean() > 0.99, (
+        f"taux de validite {np.isfinite(eq).mean():.3f} : la simulation ecarte "
+        "encore ses propres scenarios")
