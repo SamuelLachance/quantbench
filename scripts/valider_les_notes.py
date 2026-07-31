@@ -84,6 +84,12 @@ DEVISE_DE_LA_PLACE = {"NASDAQ": "USD", "NYSE": "USD", "AMEX": "USD",
 # Profondeur d'historique dont dispose la production (`fmp.statements`).
 PROFONDEUR_PRODUCTION = 6
 
+# Seances de bourse a telecharger : l'horizon etudie, plus une marge suffisante
+# pour trouver un cours a l'instantane meme si le titre ne cotait pas ce jour-la,
+# et pour calculer le volume median qui le precede. 650 seances valent environ
+# 31 mois — au-dela, chaque octet est telecharge pour rien.
+SEANCES_NECESSAIRES = 650
+
 FAMILLES = ["A", "B", "C", "D", "F"]
 ORDRE = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F"]
 
@@ -144,7 +150,12 @@ def evaluer(sym, sr, jour_t0: str, radiees: dict, plafond_capi=None):
         vieux = {b: {y: d for y, d in vieux[b].items() if y in recents}
                  for b in ("income", "balance", "cashflow")}
 
-        serie = fmp.history_ohlcv(sym, days=None)
+        # BORNE, ET NON L'HISTORIQUE COMPLET. Cette mesure mensuelle a besoin de
+        # trois choses : le cours a l'instantane, le cours d'aujourd'hui, et le
+        # plus-bas traverse entre les deux — plus les volumes des quelques mois
+        # precedant l'instantane. Soit environ 31 mois, la ou `days=None`
+        # telechargeait cinq ans pour chacune des 1 866 societes.
+        serie = fmp.history_ohlcv(sym, days=SEANCES_NECESSAIRES)
         if not serie:
             return None
         p0 = cours_a(serie, jour_t0)

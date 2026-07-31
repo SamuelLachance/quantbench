@@ -381,6 +381,24 @@ function rendVal(v){
     pourtant uniforme : réajuster des poids sur les
     ${mil(v.n)} sociétés qui ont servi à les mesurer reviendrait à apprendre par cœur cette
     fenêtre-là.</p>
+    ${(()=>{const V=v.valorisation; if(!V||!V.paquets||!V.paquets.length) return '';
+      const lignes=V.paquets.map(p=>`<tr><td>${p.paquet}</td>`
+        +`<td>${pc(p.upside_min)} à ${p.upside_max>50?'+∞':pc(p.upside_max,1)}</td>`
+        +`<td>${pc(p.rendement_median,1)}</td><td>${pc(p.taux_effondrement)}</td></tr>`).join('');
+      const q=V.paquets, meilleur=q.reduce((a,b)=>b.rendement_median>a.rendement_median?b:a,q[0]);
+      return `<p><strong>Et la valorisation elle-même ?</strong> C’est la question centrale :
+      le site annonce qu’une action est décotée de tant. Les sociétés sont rangées par upside
+      croissant en cinq paquets d’effectif égal, et l’on regarde le rendement <em>médian</em> de
+      chacun — jamais la moyenne, qu’un seul titre multiplié par vingt suffirait à emporter.</p>
+      <table class="mini-table"><tr><th>paquet</th><th>upside à l’instantané</th>
+        <th>rend. médian</th><th>perte ≥ 70 %</th></tr>${lignes}</table>
+      <p>Monotonie de rang ${nb3(V.spearman)}${V.auc_upside!=null?`, AUC ${nb3(V.auc_upside)}`:''}.
+      La lecture n’est <em>pas</em> « acheter la plus forte décote » : le meilleur rendement
+      médian revient au paquet ${meilleur.paquet}, pas au dernier. Ce que le modèle identifie
+      le mieux, c’est ce qui est <strong>cher</strong> — le premier paquet perd
+      ${pc(q[0].rendement_median,1)} et s’effondre ${pc(q[0].taux_effondrement)} du temps. Aux
+      décotes extrêmes, le cours est bas parce que le marché doute, et il a souvent raison :
+      c’est pourquoi le taux d’effondrement figure à côté du rendement.</p>`;})()}
     <p><strong>Ce que cette mesure ne prouve pas.</strong> Un seul instantané, un seul
     horizon : ce n’est pas un test multi-périodes, et rien ne garantit qu’une autre fenêtre
     donnerait le même résultat. La monotonie est la plus faible chez les

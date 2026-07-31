@@ -2221,6 +2221,25 @@ def test_le_resume_de_validation_porte_tout_ce_que_la_page_lit():
     for x in d["dimensions"]:
         assert x["auc"] is None or 0.0 <= x["auc"] <= 1.0
         assert x.get("nom") and x.get("verdict")
+        # L'INCERTITUDE ACCOMPAGNE CHAQUE AUC. Sans cette clause, la suite passait
+        # au vert sur un resume ayant deux commits de retard : la page affichait
+        # des AUC sans leur ecart-type, et des verdicts rendus par une methode a
+        # seuil fixe explicitement repudiee depuis. Un chiffre sans son
+        # incertitude ne se lit pas — 0,545 et 0,491 se distinguent si l'ecart-type
+        # vaut 0,016, pas s'il vaut 0,05.
+        if x["auc"] is not None:
+            assert x.get("ecart_type") is not None, (x["nom"], "sans ecart-type")
+            assert 0.0 < x["ecart_type"] < 0.2, (x["nom"], x["ecart_type"])
+            assert x["verdict"] in ("porte du signal", "signal faible",
+                                    "indistinguable du hasard"), x["verdict"]
+
+    # Le pouvoir de la VALORISATION, question centrale du site, doit figurer.
+    V = d.get("valorisation")
+    assert V and V.get("paquets"), "la mesure de la valorisation a disparu du resume"
+    for p_ in V["paquets"]:
+        for cle in ("paquet", "n", "upside_min", "upside_max",
+                    "rendement_median", "taux_effondrement"):
+            assert cle in p_, (p_.get("paquet"), cle)
 
     # Le fichier complet reste a cote, avec le detail par titre : sans lui, aucune
     # anomalie du tableau agrege n'est diagnosticable.
