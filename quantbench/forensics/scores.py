@@ -100,6 +100,44 @@ def _r(a, b):
     return a / b
 
 
+# Bornes de winsorisation des huit indices de Beneish. Ce sont des rapports
+# centres sur 1 ; au-dela, la valeur traduit une anomalie de DONNEE — denominateur
+# quasi nul, exercice partiel — et non une manipulation. POSEES.
+_BENEISH_MIN, _BENEISH_MAX = 0.0, 5.0
+
+
+def _rapport_oriente(numerateur, denominateur):
+    """Rapport de deux grandeurs de MEME NATURE dont le signe porte du sens.
+
+    Les indices de Beneish sont des rapports « annee de reference sur annee
+    courante » ou l'inverse, tous concus sur des grandeurs POSITIVES : Beneish a
+    estime son modele sur des industriels a marge brute positive. Des qu'un des
+    deux termes passe sous zero, le rapport change de signe et la winsorisation
+    [0, 5] l'envoie sur la borne BASSE — la plus favorable — precisement quand la
+    degradation est maximale.
+
+    Mesure : une marge brute passant de +30 % a -5 % donnait un GMI de -6,00,
+    ramene a 0,00, soit une contribution NULLE au M-Score ; la meme marge tombant
+    a +6 % donnait 5,00, soit 2,64 points. La societe qui vend A PERTE paraissait
+    donc moins suspecte que celle qui gagne seulement moins. 2,4 % de l'univers
+    calculable est concerne, Boeing 2024 compris.
+
+    Trois cas, et un seul est une mesure :
+      - les deux positifs  : le rapport a son sens habituel ;
+      - reference positive, courante negative : la degradation est TOTALE, on
+        retient la borne haute — c'est le pire cas que l'echelle sache exprimer ;
+      - reference negative : il n'y a rien a degrader, le rapport n'a pas de base.
+        On rend la valeur NEUTRE (1,0), qui n'ajoute ni ne retire de signal.
+    """
+    if numerateur is None or denominateur is None:
+        return None
+    if numerateur > 0 and denominateur > 0:
+        return numerateur / denominateur
+    if numerateur > 0 and denominateur <= 0:
+        return _BENEISH_MAX
+    return 1.0
+
+
 def beneish_m_score(F) -> float | None:
     """M-Score de Beneish (8 variables), annee t vs t-1. > -1.78 -> zone
     'manipulateur probable' (a investiguer)."""
@@ -109,10 +147,15 @@ def beneish_m_score(F) -> float | None:
         dsri = _r(_r(g("receivables", 0), rev0), _r(g("receivables", 1), rev1))
         gm1 = _r(rev1 - g("cogs", 1), rev1)
         gm0 = _r(rev0 - g("cogs", 0), rev0)
-        gmi = _r(gm1, gm0)
+        # ORIENTE : le signe de la marge brute porte du sens, et le rapport nu le
+        # perdait au profit de la borne la plus favorable.
+        gmi = _rapport_oriente(gm1, gm0)
         aqi0 = 1 - _r(g("current_assets", 0) + g("net_ppe", 0), g("total_assets", 0))
         aqi1 = 1 - _r(g("current_assets", 1) + g("net_ppe", 1), g("total_assets", 1))
-        aqi = _r(aqi0, aqi1)
+        # Meme traitement : la qualite d'actif peut devenir negative quand actifs
+        # courants et immobilisations depassent le total du bilan — anomalie de
+        # liasse, mais qui atteint le meme piege de signe.
+        aqi = _rapport_oriente(aqi0, aqi1)
         sgi = _r(rev0, rev1)
         depi1 = _r(g("dep_amort", 1), g("dep_amort", 1) + g("net_ppe", 1))
         depi0 = _r(g("dep_amort", 0), g("dep_amort", 0) + g("net_ppe", 0))
@@ -138,9 +181,10 @@ def beneish_m_score(F) -> float | None:
         # DONNEE, pas une manipulation -- sans bornes le M-Score atteignait 1,6
         # million et declenchait un faux signal. Bornes de plausibilite usuelles.
         cl = lambda v, lo, hi: max(lo, min(hi, v))
-        dsri, gmi, aqi = cl(dsri, 0, 5), cl(gmi, 0, 5), cl(aqi, 0, 5)
-        sgi, depi, sgai = cl(sgi, 0, 5), cl(depi, 0, 5), cl(sgai, 0, 5)
-        lvgi, tata = cl(lvgi, 0, 5), cl(tata, -1, 1)
+        b = lambda v: cl(v, _BENEISH_MIN, _BENEISH_MAX)
+        dsri, gmi, aqi = b(dsri), b(gmi), b(aqi)
+        sgi, depi, sgai = b(sgi), b(depi), b(sgai)
+        lvgi, tata = b(lvgi), cl(tata, -1, 1)
         return (-4.84 + 0.92 * dsri + 0.528 * gmi + 0.404 * aqi + 0.892 * sgi
                 + 0.115 * depi - 0.172 * sgai + 4.679 * tata - 0.327 * lvgi)
     except (TypeError, ZeroDivisionError, IndexError):

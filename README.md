@@ -52,8 +52,8 @@ bêta désendetté, marge, ventes sur capital, ROIC et taux de récupération pa
 (`scripts/build_risk_stats.py`). Un test refuse l'introduction d'une constante qui
 dirait ce qu'est une *bonne* couverture d'intérêts.
 
-**Toute correction se termine par un test.** La suite encode **247 invariants** —
-342 cas de test une fois les paramétrages développés — chacun correspondant à un
+**Toute correction se termine par un test.** La suite encode **249 invariants** —
+344 cas de test une fois les paramétrages développés — chacun correspondant à un
 défaut réellement observé en production : `test_invariants.py` pour le moteur,
 `test_donnees_universal.py` pour la couche de données, `test_dcf.py` et
 `test_eval.py` pour les calculs.
@@ -99,7 +99,7 @@ scripts/      build_site_fmp.py     build quotidien, 5 shards parallèles
               check_build.py        garde-fou qui BLOQUE un déploiement défectueux
               mesurer_les_notes.py  juge la note de risque contre les faits
 app/          index.html · stock.html · screener.html · shortterm.html
-tests/        247 invariants hors ligne, 342 cas (invariants, données, DCF, éval.)
+tests/        249 invariants hors ligne, 344 cas (invariants, données, DCF, éval.)
 ```
 
 ## Lancement

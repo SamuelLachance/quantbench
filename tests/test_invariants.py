@@ -3331,3 +3331,64 @@ def test_labsence_de_comptes_ne_vaut_pas_une_exploitation_qui_sautofinance():
     # Un seul poste suffit a rendre la question mesurable.
     for poste in ("cfo", "capex", "net_income"):
         assert consommation_est_mesurable({poste: 0.0}) is True, poste
+
+
+def test_lalerte_de_beneish_ne_seteint_pas_sur_une_marge_negative():
+    """Les indices de Beneish sont des rapports concus sur des grandeurs POSITIVES.
+
+    Des qu'un terme passe sous zero, le rapport change de signe et la winsorisation
+    [0, 5] l'envoie sur la borne BASSE — la plus favorable — precisement quand la
+    degradation est maximale. Une marge brute passant de +30 % a -5 % donnait un
+    GMI de -6,00 ramene a 0,00, soit une contribution NULLE ; la meme marge tombant
+    a +6 % donnait 5,00, soit 2,64 points. La societe qui vend A PERTE paraissait
+    donc moins suspecte que celle qui gagne seulement moins.
+
+    Mesure sur 350 societes : 15 changent de M-Score, 93 % a la hausse, et QUATRE
+    alertes s'allument sans qu'aucune ne s'eteigne.
+    """
+    from quantbench.forensics.scores import _BENEISH_MAX, _rapport_oriente
+
+    # Domaine ordinaire : le rapport garde son sens.
+    assert _rapport_oriente(0.30, 0.25) == pytest.approx(1.2)
+    assert _rapport_oriente(0.30, 0.60) == pytest.approx(0.5)
+
+    # DEGRADATION TOTALE : la marge courante passe sous zero.
+    for courante in (-0.01, -0.05, -0.30, -3.0):
+        assert _rapport_oriente(0.30, courante) == _BENEISH_MAX, (
+            f"marge courante {courante} : la degradation totale prend une valeur "
+            "plus favorable que la borne haute")
+
+    # La degradation totale doit etre AU MOINS aussi severe qu'une degradation
+    # partielle : c'est la monotonie que le signe cassait.
+    assert _rapport_oriente(0.30, -0.05) >= _rapport_oriente(0.30, 0.06)
+
+    # BASE NON MESURABLE : rien a degrader, valeur neutre, ni signal ni contre-signal.
+    assert _rapport_oriente(-0.10, 0.20) == 1.0
+    assert _rapport_oriente(-0.10, -0.20) == 1.0
+    assert _rapport_oriente(0.0, 0.20) == 1.0
+    assert _rapport_oriente(None, 0.2) is None and _rapport_oriente(0.2, None) is None
+
+
+def test_le_m_score_augmente_quand_la_marge_brute_passe_sous_zero():
+    """Verification de bout en bout, sur le score complet et non sur l'aide."""
+    from quantbench.forensics.scores import beneish_m_score
+
+    def liasse(marge_brute_courante):
+        ca = 100.0
+        return {"years": [2025, 2024],
+                "revenue": [ca, 100.0],
+                "cogs": [ca * (1 - marge_brute_courante), 70.0],
+                "receivables": [10.0, 10.0], "current_assets": [30.0, 30.0],
+                "net_ppe": [40.0, 40.0], "total_assets": [100.0, 100.0],
+                "dep_amort": [4.0, 4.0], "sga": [10.0, 10.0],
+                "current_liab": [20.0, 20.0], "long_term_debt": [30.0, 30.0],
+                "total_debt": [30.0, 30.0], "net_income": [5.0, 5.0],
+                "cfo": [6.0, 6.0]}
+
+    saine = beneish_m_score(liasse(0.30))       # marge stable a 30 %
+    degradee = beneish_m_score(liasse(0.06))    # marge effondree mais positive
+    a_perte = beneish_m_score(liasse(-0.05))    # vend a perte
+    assert saine < degradee, "une marge qui s'effondre doit elever le M-Score"
+    assert a_perte >= degradee, (
+        f"vendre a perte ({a_perte:.2f}) doit etre au moins aussi suspect "
+        f"qu'une marge a 6 % ({degradee:.2f})")
