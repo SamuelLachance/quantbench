@@ -381,8 +381,9 @@ def marge_normalisee(fund, F):
     return None
 
 
-def _dcf_value(fund, margin_override=None, method="DCF FCFF"):
-    x, _ = build_dcf_from_fundamentals(fund, margin_override=margin_override)
+def _dcf_value(fund, margin_override=None, method="DCF FCFF", marge_terminale=None):
+    x, _ = build_dcf_from_fundamentals(fund, margin_override=margin_override,
+                                       marge_terminale=marge_terminale)
     res = value_dcf(x)
     return {"equity_value": res["equity_value"], "method": method, "confidence": "moyenne"}
 
@@ -940,11 +941,28 @@ def value_cyclical(fund, F):
 
 
 def value_young(fund):
+    """Jeune pousse : Damodaran fait CONVERGER la marge actuelle vers celle des
+    societes mures de l'activite. On ne prete pas a une societe la rentabilite de
+    sa maturite des le premier exercice — c'est pourtant ce que faisait la marge
+    cible, imposee identique du debut a la fin de la projection.
+
+    Le choix de cette cible passait de surcroit par un SEUIL — la marge de la
+    societe si elle depassait 5 %, sinon la mediane sectorielle — qui INVERSAIT
+    l'ordre : sur un secteur a 10 % de marge mediane, une societe a 3 % recevait
+    10 % et une societe a 8 % n'en recevait que 8. La plus rentable des deux
+    valait donc moins. Un cheveu autour du seuil doublait la cible.
+
+    Il n'y a plus de seuil : la cible est la mediane du secteur, relevee a la
+    marge de la societe quand celle-ci fait DEJA mieux — une superiorite mesuree
+    ne se rabote pas.
+    """
     # Marge cible = marge MEDIANE DU SECTEUR : une biotech et un distributeur
     # n'ont aucune raison de converger vers la meme rentabilite.
     om = fund.get("operating_margin")
-    target = om if (om is not None and om > 0.05) else sect(fund, "marge", 0.10)
-    base = _dcf_value(fund, margin_override=target,
+    target = sect(fund, "marge", 0.10)
+    if om is not None and om > target:
+        target = om
+    base = _dcf_value(fund, marge_terminale=target,
                       method="DCF top-down sur revenus (jeune) × survie")
     # Probabilite de survie : DEFINITION UNIQUE, partagee avec les routes fondees sur
     # l'actif. Elle rapporte la TRESORERIE DISPONIBLE a la consommation annuelle de

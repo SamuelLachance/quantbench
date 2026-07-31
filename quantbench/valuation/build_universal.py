@@ -197,9 +197,14 @@ def beta_ascendant(fund, tx):
 
 
 def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = None,
+                                marge_terminale: float | None = None,
                                 erp: float | None = None, rf: float | None = None):
     """Retourne (DcfInputs, meta) depuis un dict de fondamentaux universal.get_fundamentals.
     margin_override : force la marge operationnelle (ex. marge normalisee pour un cyclique).
+    marge_terminale : force la seule marge D'ARRIVEE, la marge de depart restant
+    celle qui est MESUREE. Le moteur les relie par `converge_path` — c'est ainsi que
+    Damodaran valorise une jeune pousse : on ne lui prete pas la rentabilite de sa
+    maturite des le premier exercice, on l'y fait converger.
     erp : si None, ERP mature + prime de risque du pays de la societe (Damodaran)."""
     if erp is None:
         erp = country_erp(pays_exploitation(fund))
@@ -221,6 +226,13 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         mesuree = _safe_div(fund.get("ebit"), rev)
         op_margin = mesuree if mesuree is not None else 0.10
     op_margin = _clamp(op_margin, -0.20, 0.75)
+    # Une societe ne peut pas perdre de l'argent A PERPETUITE (elle serait liquidee) :
+    # la marge TERMINALE ne descend pas sous zero.
+    marge_fin = op_margin if op_margin > 0 else 0.02
+    if marge_terminale is not None:
+        marge_fin = _clamp(marge_terminale, -0.20, 0.75)
+        if marge_fin <= 0:
+            marge_fin = 0.02
     tx = tax_rate(pays_exploitation(fund))      # impot du pays d'EXPLOITATION
 
     debt = fund.get("total_debt") or 0.0
@@ -341,10 +353,7 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         g3_begin=0.45 * g_start + 0.55 * term, g3_end=term,
         len1=3, len2=4, len3=3,
         current_operating_margin=op_margin,
-        # Une societe ne peut pas perdre de l'argent A PERPETUITE (elle serait
-        # liquidee) : la marge TERMINALE ne descend pas sous zero. Les societes
-        # durablement deficitaires sont routees ailleurs (jeune / mature en perte).
-        terminal_operating_margin=op_margin if op_margin > 0 else 0.02,
+        terminal_operating_margin=marge_fin,
         margin_converge_start=3,
         current_tax_rate=tx, marginal_tax_rate=tx, tax_converge_start=5,
         current_sales_to_capital=s2c, terminal_sales_to_capital=s2c, s2c_converge_start=3,
