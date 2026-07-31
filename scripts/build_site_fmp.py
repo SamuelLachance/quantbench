@@ -173,23 +173,32 @@ def _mc_stats(eq, mcap, shares):
             "n": int(eq.size)}
 
 
-def _route_margin(fund, category, F):
-    """Marge normalisee — MIROIR STRICT de route.py, par DELEGATION et non par copie.
+def _route_forme(fund, category, F):
+    """Forme de marge du routage — MIROIR STRICT de route.py, par DELEGATION.
 
-    Cette fonction reimplementait la regle au lieu de l'appeler, et avait donc
-    silencieusement divergé : elle moyennait encore les RATIOS annuels au lieu de
-    rapporter les sommes, ne retenait pour les societes matures en perte que les
-    exercices BENEFICIAIRES, et posait 12 % de marge cible en dur la ou le routage
-    lit la mediane MESUREE du secteur. La simulation aurait donc actualise des flux
-    differents de ceux de la valorisation affichee, et sa mediane ecrase l'upside.
-    Une regle n'a le droit qu'a une seule ecriture."""
-    from quantbench.valuation.route import marge_de_cycle, sect
-    if category in ("cyclique", "mature_deficitaire"):
-        return marge_de_cycle(F)
+    Rend les kwargs a passer a `build_dcf_from_fundamentals`, car la FORME compte
+    autant que le niveau : un CYCLIQUE se valorise sur sa marge de cycle DES
+    L'ANNEE 1 (le cycle se moyenne dans les deux sens — `margin_override`), tandis
+    qu'un redressement (mature en perte, marge normalisee de la route standard) et
+    une jeune pousse CONVERGENT vers leur cible (`marge_terminale`) : les premieres
+    annees portent la marge courante, et le retard se paie dans l'actualisation.
+    Simuler une forme differente de celle de la valorisation affichee, c'est
+    ecraser l'upside avec un autre modele.
+    """
+    from quantbench.valuation.route import marge_de_cycle, marge_normalisee, sect
+    if category == "cyclique":
+        return {"margin_override": marge_de_cycle(F)}
+    if category == "mature_deficitaire":
+        return {"marge_terminale": marge_de_cycle(F)}
     if category == "jeune/deficitaire":
         om = fund.get("operating_margin")
-        return om if (om is not None and om > 0.05) else sect(fund, "marge", 0.10)
-    return None
+        cible = sect(fund, "marge", 0.10)
+        if om is not None and om > cible:
+            cible = om
+        return {"marge_terminale": cible}
+    if category == "standard":
+        return {"marge_terminale": marge_normalisee(fund, F)}
+    return {}
 
 
 _CAT_DCF = ("standard", "cyclique", "mature_deficitaire", "jeune/deficitaire", "detresse")
@@ -253,7 +262,7 @@ def _methodologie(fund, val, F):
     if cat in _CAT_DCF and not str(val.get("method") or "").startswith(_METH_NON_DCF):
         try:
             _, meta = build_dcf_from_fundamentals(
-                fund, margin_override=_route_margin(fund, cat, F))
+                fund, **_route_forme(fund, cat, F))
             h.update({"croissance_initiale_pct": round(meta["g_start"] * 100, 2),
                       "marge_operationnelle_pct": round(meta["op_margin"] * 100, 2),
                       "roic_courant_pct": round(meta["cur_roic"] * 100, 2),
@@ -305,8 +314,8 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
             mult = np.clip((roes - ke) / (ke - g), -0.6, 4.0)
             eq = np.maximum(be * (1 + mult), 0.2 * be)
         else:
-            margin = _route_margin(fund, category, F)
-            base, _ = build_dcf_from_fundamentals(fund, margin_override=margin, rf=rf)
+            base, _ = build_dcf_from_fundamentals(fund, rf=rf,
+                                                  **_route_forme(fund, category, F))
             # SOURCE UNIQUE des lois ET des correlations. La copie locale ne
             # transmettait aucune correlation : la matrice restait l'identite et la
             # copule gaussienne annoncee par la documentation ne tournait pas. Deux
@@ -318,7 +327,8 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
             eq = monte_carlo_dcf(base, lois, n=n, correlations=correlations,
                                  current_market_cap=mcap, seed=42)["equity_values"]
             eq = np.maximum(eq, 0.0)                    # responsabilité limitée : équité ≥ 0
-            # Pondération de la catégorie (miroir de route.value_young/value_distressed)
+            # Pondération de la catégorie (miroir de route.value_young et de la
+            # ponderation par le defaut commune a toutes les routes cote entreprise)
             # LES PONDERATIONS SONT CELLES DU ROUTAGE, APPELEES et non recopiees.
             # Ce bloc portait encore, le jour meme de leur correction, la survie
             # plancherisee a 0,30 et mesuree sur le RESULTAT NET, et une valeur de
@@ -337,20 +347,29 @@ def run_mc(fund, category, F=None, forensic=None, method=None, n=10000, rf=None)
                 pdef = default_probability(z)
                 liq = valeur_de_liquidation(fund)
                 eq = np.maximum(eq * (1.0 - pdef) + liq * pdef, 0.0)
-            elif category in ("mature_deficitaire", "cyclique") and margin is not None:
-                # MIROIR OBLIGATOIRE du routage : ces deux methodes valorisent un
-                # REDRESSEMENT vers une marge normalisee, pondere par la probabilite
-                # de l'atteindre. Sans ce miroir, la mediane simulee ecrase la
-                # ponderation et le redressement redevient certain — c'est le meme
-                # angle mort qui faisait repasser General Motors de -70 % a -100 %.
-                from quantbench.valuation.route import probabilite_de_realisation
-                p_real = probabilite_de_realisation(fund, F, margin)
-                if p_real < 0.999:
-                    # Derniere copie de l'erreur Wesizwe : la decote de recuperation
-                    # appliquee aux FONDS PROPRES au lieu de l'ACTIF, ce qui revient a
-                    # supposer que les dettes la subissent au benefice de l'actionnaire.
-                    liq = valeur_de_liquidation(fund)
-                    eq = np.maximum(eq * p_real + liq * (1.0 - p_real), 0.0)
+            else:
+                # MIROIR OBLIGATOIRE du routage : toutes les routes cote entreprise
+                # sont desormais ponderees par la probabilite de DEFAUT tiree du
+                # Z''-EMS (la lettre de Damodaran — il pondere Delta a BBB- et Las
+                # Vegas Sands beneficiaire ; le critere est le fardeau de dette,
+                # jamais le deficit de l'exercice). Sans ce miroir, la mediane
+                # simulee ecrase la ponderation — l'angle mort qui faisait repasser
+                # General Motors de -70 % a -100 %. L'ancienne « probabilite de
+                # realisation » (part des exercices ayant atteint la marge cible)
+                # n'existait pas chez Damodaran et a ete retiree du routage.
+                from quantbench.forensics.scores import Z_SAIN, default_probability
+                from quantbench.valuation.route import _NO_ALTMAN, _Z_POIDS_PLEIN
+                sec = (fund.get("sector") or "").lower()
+                z = (forensic or {}).get("scores", {}).get("altman_z")
+                if (z is not None and z < Z_SAIN
+                        and not any(x in sec for x in _NO_ALTMAN)):
+                    facteur = (1.0 if z <= _Z_POIDS_PLEIN
+                               else (Z_SAIN - z) / (Z_SAIN - _Z_POIDS_PLEIN))
+                    pdef = default_probability(z) * facteur
+                    if pdef > 0.0:
+                        liq = valeur_de_liquidation(fund)
+                        eq = np.where(eq > 0, eq * (1.0 - pdef) + liq * pdef, eq)
+                        eq = np.maximum(eq, 0.0)
     except Exception:
         return None
     return _mc_stats(eq, mcap, shares)
@@ -529,7 +548,7 @@ def build_one(symbol, sr, with_news=True, with_pdf=True):
             and not str(val.get("method") or "").startswith(_METH_NON_DCF)):
         try:
             proj = project(fund, years=20,
-                           margin_override=_route_margin(fund, val.get("category"), F))
+                           **_route_forme(fund, val.get("category"), F))
         except Exception:
             proj = None
     methodo = _methodologie(fund, val, F)

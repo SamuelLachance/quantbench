@@ -331,12 +331,16 @@ def test_le_monte_carlo_reflete_la_ponderation_du_routage():
     import build_site_fmp as bs
     import inspect
     src = inspect.getsource(bs.run_mc)
-    for ponderation in ("jeune/deficitaire", "detresse",
-                        "mature_deficitaire", "cyclique"):
+    for ponderation in ("jeune/deficitaire", "detresse"):
         assert ponderation in src, (
             f"la categorie '{ponderation}' est ponderee par le routage mais pas "
             f"par run_mc : la simulation annulerait la ponderation")
-    assert "probabilite_de_realisation" in src
+    # La ponderation par le DEFAUT (lettre de Damodaran) doit etre reproduite, et
+    # l'ancienne « probabilite de realisation » — retiree du routage car elle
+    # n'existe nulle part chez lui — ne doit pas y survivre.
+    assert "default_probability" in src and "_Z_POIDS_PLEIN" in src
+    assert "probabilite_de_realisation" not in src, (
+        "run_mc pondere encore par la probabilite de realisation, retiree du routage")
 
 
 
@@ -515,13 +519,24 @@ def test_la_normalisation_inclut_les_exercices_deficitaires():
 # La route standard, qui normalise pourtant dans les memes termes, tenait le retour
 # a la marge de cycle pour ACQUIS.
 # --------------------------------------------------------------------------- #
-def test_la_route_standard_pondere_aussi_le_redressement():
+def test_la_route_standard_fait_converger_vers_la_marge_normalisee():
+    """La marge normalisee est un point d'ARRIVEE : la marge courante y converge au
+    fil de la projection, et le retard du redressement se paie dans l'actualisation
+    — la correction de calendrier de Damodaran (Investment Valuation ch. 22),
+    rendue endogene. L'ancienne ponderation par la « probabilite de realisation »
+    (part des exercices ayant atteint la cible, melangee a une liquidation)
+    n'existe nulle part chez lui et a ete retiree : chez Damodaran, la liquidation
+    n'entre que sous risque de FAILLITE, mesure par la dette et la notation."""
     src = (Path(__file__).resolve().parent.parent
            / "quantbench" / "valuation" / "route.py").read_text(encoding="utf-8")
-    bloc = src.split("mn = marge_normalisee(fund, F)")[1].split("except Exception")[0]
-    assert "_pondere_par_realisation" in bloc, (
-        "la route standard valorise une marge normalisee sans ponderer le "
-        "redressement par sa probabilite")
+    code = "\n".join(l.split("#")[0] for l in src.splitlines())
+    bloc = code.split("mn = marge_normalisee(fund, F)")[1].split("except Exception")[0]
+    assert "marge_terminale=mn" in bloc, (
+        "la route standard n'applique plus la marge normalisee en point d'arrivee")
+    assert "_pondere_par_realisation" not in code, (
+        "la ponderation par realisation, retiree de la doctrine, est revenue")
+    assert not hasattr(route, "probabilite_de_realisation"), (
+        "probabilite_de_realisation existe encore dans route.py")
 
 
 def test_une_equite_negative_traverse_la_ponderation():
@@ -531,8 +546,8 @@ def test_une_equite_negative_traverse_la_ponderation():
     bascule vers le modele cote equite : General Motors ressortait a -78 % au lieu
     de -4 %."""
     r = {"equity_value": -3.0, "method": "DCF FCFF", "confidence": "moyenne"}
-    out = route._pondere_par_realisation(r, societe(operating_margin=0.01),
-                                         etats(), 0.20)
+    out = route._ponderer_par_le_defaut(r, societe(operating_margin=0.01),
+                                        {"scores": {"altman_z": 3.5}}, "standard")
     assert out["equity_value"] < 0, (
         "l'equite negative a ete masquee : la bascule cote equite ne se declenchera "
         "plus")
@@ -875,9 +890,13 @@ def test_la_simulation_ne_reimplemente_pas_la_marge_normalisee():
     valorisation affichee, et sa mediane ecrase l'upside."""
     src = (Path(__file__).resolve().parent.parent
            / "scripts" / "build_site_fmp.py").read_text(encoding="utf-8")
-    corps = src.split("def _route_margin(")[1].split("\ndef ")[0]
+    corps = src.split("def _route_forme(")[1].split("\ndef ")[0]
     assert "marge_de_cycle" in corps, "la simulation reimplemente la marge normalisee"
     assert "0.12" not in corps, "marge cible codee en dur dans la simulation"
+    # La FORME compte autant que le niveau : un cyclique se simule sur sa marge de
+    # cycle PLATE des l'annee 1, un redressement et une jeune pousse en CONVERGENCE.
+    assert '"margin_override": marge_de_cycle' in corps
+    assert "marge_terminale" in corps, "la simulation ignore la forme convergente"
 
 
 # --------------------------------------------------------------------------- #
@@ -2893,41 +2912,25 @@ def test_les_seuils_de_bilan_sont_declares_poses():
     assert "TROIS FOIS" in doc, "l'historique de la duplication a disparu du module"
 
 
-def test_la_probabilite_de_realisation_na_pas_de_plancher_arbitraire():
-    """Le jumeau de `test_la_survie_n_a_pas_de_plancher_arbitraire`.
+def test_la_ponderation_par_realisation_n_est_pas_revenue():
+    """La « probabilite de realisation » — part des exercices historiques ayant
+    atteint la marge cible, melangee a une valeur de liquidation — n'existe nulle
+    part chez Damodaran : il ne mele la liquidation que sous risque de FAILLITE,
+    mesure par la dette et la notation (Investment Valuation ch. 22, « Overlevered
+    with High Probability of Bankruptcy » ; NewDistress refute meme mot pour mot la
+    defense « le risque passe par le cout du capital »). Elle a ete retiree du
+    routage ET du miroir Monte Carlo ; ce test l'empeche de revenir sous un nom
+    connu.
 
-    `probabilite_de_survie` avait perdu son plancher a 0,30, qualifie de « chiffre
-    pose a la main et sans fondement », et un test l'a verrouille. Cent lignes plus
-    bas, `probabilite_de_realisation` en portait un a 0,15 — supprime depuis, mais
-    sans test : la correction jumelle etait protegee, celle-ci ne l'etait pas.
-
-    Ce que le plancher coutait : une societe qui n'a JAMAIS atteint la marge visee
-    sur son historique conservait 15 % de la valeur de son redressement, alors que
-    la docstring de la fonction promet une probabilite MESUREE — « la part des
-    exercices ou la societe a effectivement atteint cette marge ».
+    Ses deux gardes historiques — pas de plancher arbitraire, tolerance de marge
+    correcte sur cible negative — meurent avec elle : elles gardaient un mecanisme
+    qui n'existe plus.
     """
-    import inspect
-
     from quantbench.valuation import route
 
-    src = inspect.getsource(route.probabilite_de_realisation)
-    assert "max(0.15" not in src and "0.15, p" not in src, \
-        "le plancher arbitraire est revenu"
-    assert "AUCUN PLANCHER" in src, "la raison de son absence n'est plus ecrite"
+    for nom in ("probabilite_de_realisation", "_pondere_par_realisation"):
+        assert not hasattr(route, nom), f"{nom} est revenue dans route.py"
 
-    # Comportement : aucun exercice au niveau vise -> probabilite NULLE.
-    F = {"years": [2021, 2022, 2023, 2024],
-         "revenue": [100.0, 100.0, 100.0, 100.0],
-         "ebit": [1.0, 1.0, 1.0, 1.0]}          # 1 % de marge, tres loin de 20 %
-    fund = {"operating_margin": 0.01}
-    p = route.probabilite_de_realisation(fund, F, 0.20)
-    assert p == 0.0, f"probabilite {p} au lieu de 0 : un plancher subsiste"
-
-    # Et la mesure reste une mesure quand elle n'est pas nulle.
-    F2 = {"years": [2021, 2022, 2023, 2024],
-          "revenue": [100.0, 100.0, 100.0, 100.0],
-          "ebit": [25.0, 25.0, 1.0, 1.0]}        # deux exercices sur quatre
-    assert route.probabilite_de_realisation({"operating_margin": 0.01}, F2, 0.20) == 0.5
 
 
 def test_larchive_mensuelle_ne_survit_pas_a_un_build_refuse():
@@ -3207,32 +3210,6 @@ def test_les_minoritaires_subissent_la_meme_decote_que_nous():
     inconnu = dict(sans, book_equity=None)
     assert valeur_de_liquidation(inconnu) == pytest.approx(v_sans), \
         "des fonds propres attribuables inconnus annulent la valeur de liquidation"
-
-
-def test_la_tolerance_de_marge_relache_le_seuil_meme_sur_une_cible_negative():
-    """La bande de 10 % s'ecrivait `marge_visee * 0.9`.
-
-    Un produit ABAISSE le seuil pour une cible positive — le comportement voulu —
-    mais le RELEVE pour une cible negative : viser -10 % de marge exigeait alors
-    d'avoir fait -9 %, soit MIEUX que la cible. Un exercice ayant reellement
-    atteint l'objectif etait compte comme un echec, et la probabilite de
-    redressement sous-estimee — precisement pour les societes deficitaires, ou la
-    marge visee est le plus souvent negative.
-    """
-    from quantbench.valuation.route import probabilite_de_realisation
-
-    F = {"years": [2025, 2024, 2023, 2022],
-         "ebit": [-9.5, -30.0, -40.0, -50.0],
-         "revenue": [100.0, 100.0, 100.0, 100.0]}
-    p = probabilite_de_realisation({"operating_margin": -0.30}, F, -0.10)
-    assert p == pytest.approx(0.25), \
-        f"probabilite {p} : l'exercice a -9,5 % n'atteint pas une cible de -10 %"
-
-    # Et le sens reste correct sur une cible POSITIVE : la bande abaisse le seuil.
-    G = {"years": [2025, 2024, 2023, 2022],
-         "ebit": [9.5, 2.0, 1.0, 0.0], "revenue": [100.0, 100.0, 100.0, 100.0]}
-    assert probabilite_de_realisation({"operating_margin": 0.01}, G, 0.10) == \
-        pytest.approx(0.25)
 
 
 def test_le_resultat_normalise_des_regulees_reste_aligne():
@@ -3783,9 +3760,12 @@ def test_ne_pas_savoir_nameliore_pas_la_situation_dune_societe_en_detresse():
         "ce test n'a plus d'objet : le repli generique n'est plus le plus favorable")
 
     # L'appelant en detresse doit fournir SON propre repli, au moins aussi grave
-    # que le seuil qui l'a fait entrer.
-    src = inspect.getsource(route.value_distressed)
-    assert "si_inconnu=" in src, "value_distressed reprend le repli generique"
+    # que le seuil qui l'a fait entrer. La regle vit desormais dans la ponderation
+    # commune (`_ponderer_par_le_defaut`), qui a absorbe value_distressed pour que
+    # les deux cotes du seuil de routage partagent la meme machinerie.
+    src = inspect.getsource(route._ponderer_par_le_defaut)
+    assert "si_inconnu=default_probability(Z_DETRESSE_ROUTE)" in src, (
+        "la route detresse reprend le repli generique")
     repli = default_probability(None, si_inconnu=default_probability(route.Z_DETRESSE_ROUTE))
     assert repli >= min(zone), repli
 
@@ -4340,21 +4320,18 @@ def test_la_probabilite_de_defaut_est_continue_dans_le_score():
 
 
 def test_la_frontiere_de_detresse_ne_coupe_plus_la_valeur_en_deux():
-    """Le routage vers la detresse bascule a Z''-EMS = 3,20 : au-dessus le flux
-    d'exploitation vaut pour lui-meme, au-dessous il est pondere par une probabilite
-    de defaut et complete par une valeur de liquidation. Deux societes distantes de
-    deux dix-millemes de score recevaient des valorisations distantes de 96 %.
+    """Le routage vers la detresse bascule a Z''-EMS = 3,20, et la ponderation par
+    le defaut s'eteint a la borne haute de la zone grise d'Altman (Z_SAIN = 5,85).
+    Aux DEUX frontieres, la valeur publiee doit etre continue : le Z est une
+    estimation tiree de cinq rapports comptables, pas un fait — deux societes
+    distantes de deux dix-millemes de score recevaient 522,0 et 20,8.
 
-    Or le Z''-EMS n'est pas un fait mais une ESTIMATION tiree de cinq rapports
-    comptables. Faire dependre la moitie d'une valorisation de sa quatrieme decimale
-    n'est pas de la prudence.
-
-    LE TEST PORTE SUR LES DEUX BOUTS DE LA BANDE. Le second a ete introduit par une
-    premiere version de la correction, placee AVANT le repli sur equite negative :
-    elle melangeait alors une equite negative que la production ne publie jamais, et
-    fabriquait a 4,35 une falaise de -99 %, pire que celle qu'elle corrigeait.
+    La continuite au seuil de routage tient a ce que la route detresse et la
+    ponderation appliquent LA MEME formule avec LE MEME poids : V = GC x (1-p) +
+    liquidation x p, p = probabilite de defaut interpolee du Z.
     """
-    from quantbench.valuation.route import _BANDE_DETRESSE, value_stock
+    from quantbench.forensics.scores import Z_SAIN
+    from quantbench.valuation.route import Z_DETRESSE_ROUTE, value_stock
 
     fund = {"book_equity": 800.0, "total_equity": 820.0, "total_assets": 3000.0,
             "total_liab": 2200.0, "cash": 150.0, "cfo": -40.0, "capex": -120.0,
@@ -4373,47 +4350,62 @@ def test_la_frontiere_de_detresse_ne_coupe_plus_la_valeur_en_deux():
         r = value_stock("T", fund=dict(fund), forensic={"scores": {"altman_z": z}}, F=F)
         return r["equity_value"]
 
-    bas, haut = _BANDE_DETRESSE
-    for borne, nom in ((bas, "seuil de routage"), (haut, "sortie de bande")):
+    for borne, nom in ((Z_DETRESSE_ROUTE, "seuil de routage"),
+                       (Z_SAIN, "extinction de la ponderation")):
         a, b = v(borne + 1e-4), v(borne - 1e-4)
         ecart = abs(b - a) / max(abs(a), 1e-9)
         assert ecart < 0.02, (
             f"falaise de {ecart:.0%} au {nom} (Z={borne}) : {a:,.1f} -> {b:,.1f}")
 
+    # Et la valeur est MONOTONE en Z sur la zone ponderee : plus le score se
+    # degrade, plus le poids de la liquidation monte.
+    valeurs = [v(z) for z in (5.8, 5.0, 4.2, 3.5, 3.25)]
+    for hi, lo in zip(valeurs, valeurs[1:]):
+        assert lo <= hi + 1e-6, "la valeur remonte quand le Z se degrade"
 
-def test_l_extinction_de_detresse_ne_touche_que_ceux_qui_traversent_la_frontiere():
-    """Le lissage doit lire EXACTEMENT la meme regle que le routage — une societe
-    qui encaisse, ou beneficiaire, ou d'un secteur ou le Z ne veut rien dire, ne
-    franchira jamais cette frontiere et ne doit donc rien subir.
 
-    Ecrire la condition deux fois, c'est se donner rendez-vous avec sa divergence :
-    le depot en porte deja deux cicatrices, `bilan.py` et `series.py`.
+def test_la_ponderation_par_le_defaut_suit_le_fardeau_de_dette_pas_le_deficit():
+    """La lettre de Damodaran : il pondere par la probabilite de detresse TOUTE
+    societe dont elle est significative — Delta Airlines a BBB- (p = 13,6 %), Las
+    Vegas Sands BENEFICIAIRE (p = 28 a 77 %). Le critere est le FARDEAU DE DETTE,
+    lu par la notation ou le Z, jamais le deficit comptable de l'exercice ; et il
+    refute mot pour mot la defense « le risque de defaut passe par le cout du
+    capital » (NewDistress, « five reasons »).
+
+    L'ancienne version exigeait deficitaire ET sans encaissement : le profil Las
+    Vegas Sands 2009 — benefices positifs, tresorerie qui rentre, Z = 3,50 —
+    passait sans aucune ponderation la ou default_probability(3,50) vaut 0,50.
     """
-    import inspect
+    from quantbench.valuation.route import _ponderer_par_le_defaut, classify
 
-    from quantbench.valuation import route as R
+    lvs = {"revenue": 4390.0, "ebit": 163.0, "net_income": -80.0, "cfo": 300.0,
+           "total_debt": 10470.0, "cash": 3040.0, "book_equity": 3800.0,
+           "total_assets": 17140.0, "total_liab": 13340.0, "market_cap": 2500.0,
+           "sector": "Consumer Cyclical", "industry": "Resorts & Casinos"}
+    r = {"equity_value": 5000.0, "method": "DCF FCFF", "confidence": "moyenne"}
 
-    # Le routage et le lissage passent par la meme fonction.
-    for fn in (R.classify, R._adoucir_la_frontiere_de_detresse):
-        code = "\n".join(l.split("#")[0] for l in inspect.getsource(fn).splitlines())
-        assert "conditions_de_detresse" in code, (
-            f"{fn.__name__} n'utilise pas la regle partagee")
+    # Beneficiaire en exploitation, tresorerie POSITIVE : ponderee quand meme.
+    out = _ponderer_par_le_defaut(dict(r), lvs, {"scores": {"altman_z": 3.5}}, "standard")
+    assert out.get("p_defaut", 0) > 0.4, (
+        "une endettee beneficiaire n'est pas ponderee : c'est l'ancien perimetre")
+    assert out["equity_value"] < r["equity_value"]
 
-    base = {"ebit": -60.0, "net_income": -95.0, "cfo": -40.0, "sector": "Industrials"}
-    z_dans_la_bande = 3.60
-    _, candidat = R.conditions_de_detresse(base, {"scores": {"altman_z": z_dans_la_bande}})
-    assert candidat, "le cas de reference ne remplit plus les conditions"
+    # Hors du domaine de validite du Z (Altman et Damodaran l'excluent), jamais.
+    for secteur in ("Financial Services", "Real Estate", "Utilities"):
+        out = _ponderer_par_le_defaut(dict(r), dict(lvs, sector=secteur),
+                                      {"scores": {"altman_z": 3.5}}, "standard")
+        assert "p_defaut" not in out, f"pondere hors domaine du Z : {secteur}"
 
-    for ecart, attendu in ((dict(cfo=250.0), "la societe encaisse"),
-                           (dict(ebit=170.0, net_income=110.0), "elle est beneficiaire"),
-                           (dict(sector="Real Estate"), "le Z ne vaut rien en immobilier")):
-        _, c = R.conditions_de_detresse({**base, **ecart},
-                                        {"scores": {"altman_z": z_dans_la_bande}})
-        assert not c, f"le lissage mordrait alors que {attendu}"
+    # Sans Z mesure, ou en zone saine : rien.
+    assert "p_defaut" not in _ponderer_par_le_defaut(dict(r), lvs, {"scores": {}},
+                                                     "standard")
+    assert "p_defaut" not in _ponderer_par_le_defaut(dict(r), lvs,
+                                                     {"scores": {"altman_z": 6.5}},
+                                                     "standard")
 
-    # Sans Z mesure, aucune extinction : on ne devine pas une detresse.
-    _, c = R.conditions_de_detresse(base, {"scores": {}})
-    assert not c
+    # Le ROUTAGE, lui, garde ses conditions strictes : LVS beneficiaire et
+    # encaissante n'est pas ROUTEE en detresse, elle est seulement ponderee.
+    assert classify(lvs, {"scores": {"altman_z": 3.5}}, None) != "detresse"
 
 
 def test_la_continuite_d_exploitation_s_eteint_au_lieu_d_etre_coupee():

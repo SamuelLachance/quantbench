@@ -24,7 +24,7 @@ import numpy as np
 from ..data.universal import get_fundamentals
 from ..data import market
 from ..forensics import analyze as forensic_analyze, get_financials
-from ..forensics.scores import Z_DETRESSE, default_probability
+from ..forensics.scores import Z_DETRESSE, Z_SAIN, default_probability
 from .build_universal import (build_dcf_from_fundamentals, country_erp,
                               pays_exploitation)
 from .dcf import value_dcf
@@ -908,74 +908,6 @@ def value_reit(fund):
             "part_reinvestie": round(retenu, 4)}
 
 
-def probabilite_de_realisation(fund, F, marge_visee):
-    """Probabilite que la societe ATTEIGNE la marge sur laquelle on la valorise.
-
-    Damodaran : quand une valorisation repose sur un REDRESSEMENT — marge normalisee
-    d'une societe en perte, marge moyenne de cycle d'un cyclique deprime — la valeur
-    doit etre ponderee par la probabilite d'y parvenir, l'alternative etant la
-    liquidation. Nous n'appliquions cette ponderation qu'aux societes etiquetees
-    "detresse" : partout ailleurs le redressement etait traite comme CERTAIN.
-
-    La probabilite n'est pas supposee mais MESUREE : c'est la part des exercices ou
-    la societe a effectivement atteint cette marge. Une societe qui l'a tenue chaque
-    annee conserve toute sa valeur ; une societe qui ne l'a atteinte que deux fois
-    sur six n'en garde qu'un tiers. C'est la distinction entre difficulte passagere
-    et declin structurel, etablie sur les faits plutot que postulee."""
-    ms = _hist_margins(F)
-    if marge_visee is None or len(ms) < 3:
-        return 1.0
-    courante = fund.get("operating_margin")
-    if courante is not None and courante >= marge_visee:
-        return 1.0                       # aucun redressement suppose
-    # TOLERANCE ADDITIVE, ET NON MULTIPLICATIVE. La bande de 10 % s'ecrivait
-    # `marge_visee * 0.9`, ce qui ABAISSE le seuil pour une cible positive — le
-    # comportement voulu — mais le RELEVE pour une cible negative : viser -10 % de
-    # marge exigeait alors d'avoir fait -9 %, soit MIEUX que la cible. Un exercice
-    # ayant reellement atteint l'objectif etait compte comme un echec, et la
-    # probabilite de redressement sous-estimee — precisement pour les societes
-    # deficitaires, ou la marge visee est le plus souvent negative.
-    # `- 0,1 x |cible|` relache la contrainte dans les deux cas.
-    seuil = marge_visee - 0.1 * abs(marge_visee)
-    atteints = sum(1 for m in ms if m >= seuil)
-    p = atteints / len(ms)
-    # AUCUN PLANCHER. Cette ligne planchait la probabilite a 0,15 : une societe qui
-    # n'a JAMAIS atteint la marge visee sur son historique se voyait tout de meme
-    # crediter 15 % de la valeur de son redressement, via `_pondere_par_realisation`.
-    # C'est le jumeau exact du plancher a 0,30 supprime de `probabilite_de_survie`
-    # cent lignes plus haut, et pour la meme raison : la docstring de cette fonction
-    # promet une probabilite MESUREE — « la part des exercices ou la societe a
-    # effectivement atteint cette marge » — et un plancher est precisement ce qui
-    # empeche la mesure de dire zero quand la reponse est zero.
-    # Ce n'est pas non plus un lissage bayesien defendable : celui-ci vaudrait
-    # 1/(n+2) et decroitrait avec le nombre d'exercices, la ou 0,15 ne bougeait pas.
-    return float(min(1.0, max(0.0, p)))
-
-
-def _pondere_par_realisation(r, fund, F, marge_visee):
-    """Applique la probabilite de realisation : la valeur du redressement d'un cote,
-    la valeur de liquidation de l'autre."""
-    if not r or r.get("equity_value") is None:
-        return r
-    # Une equite NEGATIVE ne signale pas un redressement improbable mais l'ECHEC de
-    # l'approche entreprise — typiquement une dette de financement captive (GM
-    # Financial, Ford Credit) soustraite comme si elle etait operationnelle. La
-    # ponderation la ramenait a zero puis la melangeait a une valeur de liquidation,
-    # produisant un resultat positif qui masquait l'echec et empechait la bascule
-    # vers le modele cote equite : General Motors ressortait a -78 % au lieu de -4 %.
-    # On laisse donc passer le signal intact.
-    if r["equity_value"] <= 0:
-        return r
-    p = probabilite_de_realisation(fund, F, marge_visee)
-    if p >= 0.999:
-        return r
-    liq = valeur_de_liquidation(fund)
-    r["equity_value"] = max(r["equity_value"], 0.0) * p + liq * (1.0 - p)
-    r["probabilite_realisation"] = round(p, 2)
-    r["confidence"] = "faible" if p < 0.5 else r.get("confidence", "moyenne")
-    return r
-
-
 def value_mature_loss(fund, F):
     """Société MATURE en perte temporaire : Damodaran valorise sur bénéfices
     NORMALISÉS plutôt que d'extrapoler une perte conjoncturelle à l'infini.
@@ -986,10 +918,22 @@ def value_mature_loss(fund, F):
     norm = marge_de_cycle(F)
     if norm is None:
         return None
-    r = _dcf_value(fund, margin_override=norm,
+    # LE REDRESSEMENT SE PAIE DANS LES FLUX, PAS PAR UNE PONDERATION. La marge
+    # COURANTE — deficitaire — converge vers la marge de cycle au fil de la
+    # projection (« pathway to profitability ») : les premieres annees portent la
+    # perte reelle, et le retard du redressement est actualise. C'est la correction
+    # de calendrier de Damodaran (Investment Valuation ch. 22 : si le retour a la
+    # marge prend k annees, la valeur s'actualise d'autant) rendue endogene.
+    # L'ancienne ponderation par la « probabilite de realisation » — part des
+    # exercices historiques ayant atteint la cible, melangee a une valeur de
+    # liquidation — n'existe nulle part chez lui : il ne mele la liquidation que
+    # sous risque de FAILLITE, mesure par la dette et la notation, jamais par une
+    # frequence de marge. Ce melange est desormais porte par la ponderation par le
+    # defaut, qui s'applique par le Z a toutes les routes cote entreprise.
+    r = _dcf_value(fund, marge_terminale=norm,
                    method="DCF sur bénéfices normalisés (perte temporaire)")
     r["norm_margin"] = round(norm, 4)
-    return _pondere_par_realisation(r, fund, F, norm)
+    return r
 
 
 def value_cyclical(fund, F):
@@ -1001,10 +945,15 @@ def value_cyclical(fund, F):
     sur son cycle la ou la mediane de son secteur declare en affiche 15 %."""
     navg = marge_de_cycle(F)
     if navg is not None:
+        # La marge de cycle s'applique DES L'ANNEE 1 : chez Damodaran un cyclique
+        # se valorise sur ses benefices NORMALISES MAINTENANT — le cycle se moyenne
+        # dans les deux sens, un creux comme un pic. (La convergence progressive
+        # est la voie des redressements, pas des cycles.) La ponderation par la
+        # « probabilite de realisation » est retiree : voir value_mature_loss.
         r = _dcf_value(fund, margin_override=navg,
                        method="DCF sur bénéfices normalisés (cyclique)")
         r["norm_margin"] = round(navg, 4)
-        return _pondere_par_realisation(r, fund, F, navg)
+        return r
     return _dcf_value(fund, method="DCF FCFF")
 
 
@@ -1046,74 +995,74 @@ def value_young(fund):
             "method": base["method"], "confidence": "faible", "survival": round(surv, 2)}
 
 
-def value_distressed(fund, forensic):
-    z = (forensic or {}).get("scores", {}).get("altman_z")
-    # UN Z INCALCULABLE NE REND PAS LA SITUATION MEILLEURE. Le repli generique de
-    # 0,5 est INFERIEUR a toutes les valeurs que la table attribue dans la zone de
-    # detresse (0,55 a 0,90) : une societe deja routee ici — fonds propres absorbes
-    # par les pertes, ou Z sous le seuil, et sans generation de tresorerie — se
-    # voyait donc mieux traitee parce qu'on ne savait pas la mesurer.
-    # On retient la probabilite du SEUIL qui l'a fait entrer en detresse : au moins
-    # aussi grave que la frontiere, sans inventer pire.
-    pdef = default_probability(z, si_inconnu=default_probability(Z_DETRESSE_ROUTE))
-    gc = _dcf_value(fund, method="DCF going-concern")
-    # Recuperation en liquidation selon l'intensite d'ACTIFS CORPORELS du
-    # secteur : une centrale ou un gisement se revend, un logiciel beaucoup moins.
-    liq = valeur_de_liquidation(fund)
-    return {"equity_value": max(gc["equity_value"], 0) * (1 - pdef) + liq * pdef,
-            "method": f"DCF pondéré défaut (p={pdef:.0%}) + liquidation",
-            "confidence": "faible", "p_default": round(pdef, 2)}
+# Bornes de la ponderation par le defaut. Toutes deux viennent de tables DEJA
+# posees : 4,15 est le point de la table Z''-EMS -> probabilite ou la notation
+# equivalente passe sous B (poids plein en zone de detresse et basse zone
+# speculative), 5,85 est la borne haute de la zone grise d'Altman (Z_SAIN), ou le
+# poids s'est completement eteint. Aucune constante nouvelle.
+_Z_POIDS_PLEIN = 4.15
 
 
-# Bande sur laquelle la ponderation par le defaut s'eteint. Ses deux bornes sont
-# DEJA POSEES et documentees ailleurs : Z_DETRESSE_ROUTE (3,20) est le seuil de
-# routage, Z_DETRESSE (4,35) la borne basse de la zone de detresse d'Altman. La
-# bande n'introduit donc aucune constante nouvelle.
-_BANDE_DETRESSE = (Z_DETRESSE_ROUTE, Z_DETRESSE)
+def _ponderer_par_le_defaut(r, fund, forensic, cat):
+    """V = going concern x (1 - p) + liquidation x p, pour TOUTE societe dont la
+    probabilite de detresse est significative — la lettre de Damodaran.
 
+    Il pondere Delta Airlines a BBB- (p = 13,6 %) et Las Vegas Sands BENEFICIAIRE
+    (p = 28 a 77 %) : le critere est le FARDEAU DE DETTE, lu par la notation ou le
+    Z, jamais le deficit comptable de l'exercice. Et il refute mot pour mot la
+    defense « le risque de defaut passe par le cout du capital » : le cout du
+    capital d'une societe en continuite ne porte pas le scenario ou elle s'arrete
+    (NewDistress, « five reasons »). L'ancienne version n'appliquait la ponderation
+    qu'aux societes deficitaires ET sans encaissement : le profil Las Vegas Sands
+    2009 — benefices positifs, tresorerie qui rentre, Z = 3,50 — passait sans
+    aucune ponderation la ou son propre `default_probability(3,50)` vaut 0,50.
 
-def _adoucir_la_frontiere_de_detresse(r, fund, forensic, cat):
-    """Eteindre la ponderation par le defaut au lieu de la couper net.
+    Le poids est la probabilite de defaut INTERPOLEE du Z, eteinte lineairement
+    entre 4,15 (pleine) et 5,85 (nulle) : au-dela de la zone grise d'Altman, le
+    defaut redevient l'affaire du cout du capital, et le compter deux fois serait
+    la faute symetrique. La route DETRESSE passe par la meme formule avec le meme
+    poids — les deux cotes du seuil de routage partagent la machinerie, la
+    frontiere est donc continue par construction.
 
-    LE DEFAUT. Le routage vers la detresse bascule a Z''-EMS = 3,20. Au-dessus, le
-    flux d'exploitation vaut pour lui-meme ; au-dessous, il est pondere par une
-    probabilite de defaut de 55 % et complete par une valeur de liquidation. Deux
-    societes distantes de deux dix-millemes de score recevaient donc des
-    valorisations distantes de 96 % — mesure sur un industriel deficitaire et
-    consommateur de tresorerie : 522,0 a Z = 3,2001, 20,8 a Z = 3,1999.
-
-    Or le Z''-EMS n'est pas un fait mais une ESTIMATION, tiree de cinq rapports
-    comptables eux-memes approches. Faire dependre la moitie de la valeur d'une
-    societe de sa quatrieme decimale n'est pas de la prudence, c'est du bruit.
-
-    On eteint donc la ponderation LINEAIREMENT entre le seuil de routage et la
-    borne basse de la zone de detresse d'Altman : poids plein a 3,20, nul a 4,35.
-    Au-dela, rien ne change — le risque de defaut d'une societe saine passe par son
-    cout du capital, et l'appliquer deux fois le compterait deux fois.
-
-    LA POPULATION EST EXACTEMENT CELLE QUI TRAVERSE LA FRONTIERE : les memes
-    conditions que le routage, lues par la meme fonction. Une societe qui encaisse,
-    ou beneficiaire, ou d'un secteur ou le Z ne veut rien dire, n'est pas touchee.
+    Les secteurs hors du domaine de validite du Z (financieres, foncieres,
+    services publics — Altman et Damodaran les excluent) ne sont jamais ponderes
+    hors routage explicite, et sont d'ailleurs valorises COTE EQUITE.
     """
-    if not r or r.get("equity_value") is None or cat == "detresse":
+    if not r or r.get("equity_value") is None:
         return r
-    z, candidat = conditions_de_detresse(fund, forensic)
-    if not candidat:
+    # Une equite NEGATIVE ne traverse pas la ponderation : c'est le signal d'un
+    # ECHEC de l'approche entreprise (dette de financement captive soustraite comme
+    # si elle etait operationnelle — GM Financial, Ford Credit), et le plancher a
+    # zero suivi du melange avec la liquidation le MASQUERAIT en produisant un
+    # nombre positif. General Motors ressortait ainsi a -78 % au lieu de -4 %.
+    if r["equity_value"] <= 0:
         return r
-    bas, haut = _BANDE_DETRESSE
-    if z < bas or z >= haut:
-        return r                                   # sous le seuil : deja route ailleurs
-    poids = (haut - z) / (haut - bas)              # 1 au seuil, 0 en sortant de la bande
-    detresse = value_distressed(fund, forensic)
-    if not detresse or detresse.get("equity_value") is None:
+    sec = (fund.get("sector") or "").lower()
+    z = (forensic or {}).get("scores", {}).get("altman_z")
+    if cat == "detresse":
+        # Routee par le routage lui-meme (fonds propres absorbes, ou Z sous le
+        # seuil) : la ponderation s'applique TOUJOURS. Un Z incalculable ne rend
+        # pas la situation meilleure — on retient la probabilite du SEUIL qui l'a
+        # fait entrer, au moins aussi grave que la frontiere, sans inventer pire.
+        p = default_probability(z, si_inconnu=default_probability(Z_DETRESSE_ROUTE))
+    else:
+        if z is None or any(x in sec for x in _NO_ALTMAN):
+            return r
+        if z >= Z_SAIN:
+            return r
+        facteur = (1.0 if z <= _Z_POIDS_PLEIN
+                   else (Z_SAIN - z) / (Z_SAIN - _Z_POIDS_PLEIN))
+        p = default_probability(z) * facteur
+    if p <= 0.0:
         return r
+    liq = valeur_de_liquidation(fund)
     gc = max(r["equity_value"], 0.0)
-    melange = (1.0 - poids) * gc + poids * detresse["equity_value"]
     r = dict(r)
-    r["equity_value"] = melange
-    r["poids_detresse"] = round(poids, 3)
-    r["method"] = f"{r.get('method', 'DCF')} — extinction de detresse ({poids:.0%})"
-    r["confidence"] = "faible" if poids > 0.5 else r.get("confidence", "moyenne")
+    r["equity_value"] = gc * (1.0 - p) + liq * p
+    r["p_defaut"] = round(p, 3)
+    r["method"] = f"{r.get('method', 'DCF')} — pondere defaut (p={p:.0%})"
+    if p > 0.35:
+        r["confidence"] = "faible"
     return r
 
 
@@ -1223,23 +1172,26 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
         elif cat == "jeune/deficitaire":
             r = value_young(fund)
         elif cat == "detresse":
-            r = value_distressed(fund, forensic)
+            # MEME MACHINERIE que les autres routes cote entreprise : le going
+            # concern passe par la cascade (bascule residual income sur equite
+            # negative comprise), puis la ponderation par le defaut applique
+            # V = GC x (1-p) + liquidation x p. L'ancien value_distressed calculait
+            # son going concern SANS les replis : de part et d'autre du seuil de
+            # routage, la meme societe avait deux GC differents — 522 contre 0 — et
+            # la frontiere coupait la valeur de 94 %.
+            r = _dcf_value(fund, method="DCF going-concern")
         else:
             mn = marge_normalisee(fund, F)
-            r = _dcf_value(fund, margin_override=mn,
+            # La marge normalisee est un point d'ARRIVEE : la marge courante y
+            # converge au fil de la projection, et le retard du redressement se
+            # paie dans l'actualisation — la correction de calendrier de
+            # Damodaran, endogene. L'ancienne ponderation par la « probabilite de
+            # realisation » est retiree (voir value_mature_loss) ; le risque de
+            # defaut passe par la ponderation par le Z, commune a toutes les
+            # routes cote entreprise.
+            r = _dcf_value(fund, marge_terminale=mn,
                            method="DCF FCFF sur marge normalisee" if mn is not None
                            else "DCF FCFF (standard)")
-            # Des lors qu'on valorise sur une marge que la societe N'ATTEINT PAS,
-            # on suppose un redressement — et un redressement se pondere par sa
-            # probabilite. La ponderation n'etait appliquee qu'aux cycliques et aux
-            # societes matures en perte ; la route standard, qui normalise pourtant
-            # dans les memes termes, tenait le retour a la marge de cycle pour
-            # ACQUIS. Yiren Digital, dont le resultat a chute de 96,5 % en 2025
-            # apres l'interdiction du pret entre particuliers en Chine, etait ainsi
-            # valorisee sur les 16,7 % de marge de la decennie ecoulee comme s'ils
-            # devaient revenir a coup sur.
-            if mn is not None:
-                r = _pondere_par_realisation(r, fund, F, mn)
     except Exception:                              # noqa: BLE001
         r = None
 
@@ -1302,7 +1254,7 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
     # modele cote equite — et fabriquait ainsi une falaise de -99 % a l'autre bout
     # de la bande, pire que celle qu'il corrigeait. Il doit porter sur la valeur qui
     # sera reellement publiee, pas sur un intermediaire.
-    r = _adoucir_la_frontiere_de_detresse(r, fund, forensic, cat)
+    r = _ponderer_par_le_defaut(r, fund, forensic, cat)
     r = _eteindre_la_continuite_d_exploitation(r, fund, cat)
 
     return _finalise(ticker, fund, r, cat)

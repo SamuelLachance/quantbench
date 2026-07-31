@@ -437,14 +437,15 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     return x, meta
 
 
-def project(fund, years=20, margin_override=None):
+def project(fund, years=20, margin_override=None, marge_terminale=None):
     """Projection COMPLETE année par année (toutes les colonnes du DCF Damodaran)
     via le moteur value_dcf. Chaque enregistrement contient : CA, croissance, marge,
     EBIT, taux d'impôt, EBI (EBIT après impôt), réinvestissement, FCFF, ROIC, capital
     investi, WACC, coût des FP, facteur d'actualisation, valeur actualisée."""
     import numpy as np
     from .dcf import value_dcf
-    x, _ = build_dcf_from_fundamentals(fund, margin_override=margin_override)
+    x, _ = build_dcf_from_fundamentals(fund, margin_override=margin_override,
+                                       marge_terminale=marge_terminale)
     l1 = max(1, years // 4)
     l3 = max(1, years // 4)
     l2 = max(1, years - l1 - l3)
