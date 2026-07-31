@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import functools
+import threading
 import io
 import os
 import re
@@ -184,11 +185,43 @@ def _get(path, retries=3):
         raise _sans_la_cle(exc, cle) from None
 
 
+# ------------------------------------------------------------------------- #
+# REGULATEUR DE CADENCE. Cinq shards de 24 workers demandaient ensemble
+# ~4 000 appels par minute — au-dessus de la limite du plan (3 000/min chez le
+# fournisseur). Le build ETAIT la rafale : les 429 n'etaient pas un accident
+# mais un regime permanent, que les reessais ne faisaient qu'etaler. Des grands
+# noms (NVDA, puis AAPL, GOOG, JPM) tombaient au hasard des files.
+# On ne depasse plus la cadence : chaque processus espace ses DEPARTS de
+# requetes pour tenir sa part de la limite — 3 000/min repartis sur 5 shards,
+# soit 600/min par defaut, reglable par QUANTBENCH_CADENCE_PAR_MINUTE.
+# Mieux vaut un build de trente-cinq minutes complet qu'un de vingt-cinq qui
+# perd trois mille societes.
+# ------------------------------------------------------------------------- #
+_CADENCE_VERROU = threading.Lock()
+_PROCHAIN_DEPART = [0.0]
+_INTERVALLE = 60.0 / float(os.environ.get("QUANTBENCH_CADENCE_PAR_MINUTE", "600"))
+
+
+def _attendre_son_tour():
+    """Espace les departs de requetes a l'intervalle de cadence, tous threads
+    confondus. Un reessai repasse par ici : il consomme aussi un creneau."""
+    import time
+    if _INTERVALLE <= 0:
+        return
+    with _CADENCE_VERROU:
+        t = time.monotonic()
+        depart = max(t, _PROCHAIN_DEPART[0])
+        _PROCHAIN_DEPART[0] = depart + _INTERVALLE
+    if depart > t:
+        time.sleep(depart - t)
+
+
 def _get_brut(url, path, retries=5):
     import random
     import time
     derniere = None
     for attempt in range(retries):
+        _attendre_son_tour()
         try:
             r = requests.get(url, timeout=_TIMEOUT)
         except requests.RequestException as exc:

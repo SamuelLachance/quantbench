@@ -4850,6 +4850,7 @@ def test_le_transport_reessaie_les_pannes_reseau_comme_les_429(monkeypatch):
 
     dodos, essais = [], []
     monkeypatch.setattr("time.sleep", lambda s: dodos.append(s))
+    monkeypatch.setattr(fmp, "_INTERVALLE", 0.0)   # la cadence ne compte pas ici
 
     def toujours_timeout(url, timeout=None):
         essais.append(1)
@@ -4882,3 +4883,40 @@ def test_le_rejet_dit_transport_et_jamais_comptes_indisponibles(monkeypatch):
     _, row = bs.build_one("NVDA", {"name": "NVIDIA"}, with_news=False, with_pdf=False)
     assert row["__rejet__"] == ["fournisseur injoignable (transitoire)"]
     assert len(appels) == 2, "le build ne retente pas avant de rejeter"
+
+
+def test_la_cadence_espace_les_departs_de_requetes(monkeypatch):
+    """Cinq shards de 24 workers demandaient ~4 000 appels/min — au-dessus de la
+    limite du plan. Le build ETAIT la rafale : les 429 n'etaient pas un accident
+    mais un regime permanent, et des grands noms tombaient au hasard des files.
+    Le regulateur espace les DEPARTS a l'intervalle de cadence, tous threads
+    confondus, reessais compris.
+    """
+    from quantbench.data import fmp
+
+    dodos = []
+    monkeypatch.setattr("time.sleep", lambda s: dodos.append(s))
+    monkeypatch.setattr(fmp, "_INTERVALLE", 0.1)
+    monkeypatch.setattr(fmp, "_PROCHAIN_DEPART", [0.0])
+
+    for _ in range(5):
+        fmp._attendre_son_tour()
+    # Le premier depart est immediat ; les suivants attendent leur creneau.
+    assert len(dodos) >= 3, f"la cadence n'espace pas : {dodos}"
+    assert all(d > 0 for d in dodos)
+
+    # Cadence coupee (tests, scripts ponctuels) : aucun delai.
+    monkeypatch.setattr(fmp, "_INTERVALLE", 0.0)
+    avant = len(dodos)
+    for _ in range(10):
+        fmp._attendre_son_tour()
+    assert len(dodos) == avant, "la cadence dort meme desactivee"
+
+    # Et chaque tentative de _get_brut consomme un creneau : le regulateur est
+    # DANS la boucle de reessai, pas devant.
+    import inspect
+    code = "\n".join(l.split("#")[0]
+                     for l in inspect.getsource(fmp._get_brut).splitlines())
+    i_boucle = code.index("for attempt in range(retries):")
+    assert "_attendre_son_tour()" in code[i_boucle:], (
+        "le regulateur n'est plus dans la boucle de reessai")
