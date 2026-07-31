@@ -153,12 +153,17 @@ def main(limite):
         liquidite["global"] = r
 
     # --- Passe 1 : grilles de centiles, mesurees sur la reference ---------------
-    par_dim = {cle: {"global": [], "secteurs": {}, "industries": {}}
+    # Une table par REGIME en plus des tables globale, sectorielle et
+    # industrielle : plusieurs dimensions changent de NATURE selon le regime — la
+    # solvabilite d'une banque est un coussin de fonds propres, celle d'un
+    # industriel une couverture d'interets — et les ranger ensemble revient a
+    # classer des metres contre des kilogrammes.
+    par_dim = {cle: {"global": [], "secteurs": {}, "industries": {}, "regimes": {}}
                for cle, _n, _f, _niv in DIMENSIONS}
     for l in reference:
         s = mesurer(l["fund"], l["F"], l["motifs"], l["reparations"],
                     {"liquidite": liquidite})
-        s.pop("__regime__", None)
+        reg = s.pop("__regime__", None)
         sec = l["fund"].get("sector") or "?"
         ind = l["fund"].get("industry") or "?"
         for cle, (signal, _lib) in s.items():
@@ -167,6 +172,8 @@ def main(limite):
             par_dim[cle]["global"].append(signal)
             par_dim[cle]["secteurs"].setdefault(sec, []).append(signal)
             par_dim[cle]["industries"].setdefault(ind, []).append(signal)
+            if reg:
+                par_dim[cle]["regimes"].setdefault(reg, []).append(signal)
 
     quantiles = {}
     for cle, paquets in par_dim.items():
@@ -175,9 +182,12 @@ def main(limite):
                          if (g := grille(v))}
         q["industries"] = {k: g for k, v in paquets["industries"].items()
                            if (g := grille(v))}
+        q["regimes"] = {k: g for k, v in paquets["regimes"].items()
+                        if (g := grille(v))}
         quantiles[cle] = q
         print(f"  {cle} : global n={len(paquets['global'])}, "
-              f"{len(q['secteurs'])} secteurs, {len(q['industries'])} industries")
+              f"{len(q['secteurs'])} secteurs, {len(q['industries'])} industries, "
+              f"{len(q['regimes'])} regimes")
 
     cal = {
         "version": "1",

@@ -474,9 +474,20 @@ def value_holding(fund, F=None):
     diag, confiance = {}, "moyenne"
 
     # 1. Identite comptable actif - passif = capitaux propres
+    #
+    # LES CAPITAUX PROPRES TOTAUX, minoritaires COMPRIS. L'identite comptable ne
+    # connait pas la repartition entre actionnaires : actif moins passif rend
+    # l'integralite des fonds propres. La comparer a la seule part ATTRIBUABLE
+    # declarait « bilan non verifiable » toute holding dont le bilan boucle
+    # pourtant parfaitement mais qui detient des filiales non integralement
+    # possedees — c'est-a-dire le cas ordinaire d'une holding, et l'ecart mesure
+    # y vaut exactement la part des minoritaires.
     ta, tl = fund.get("total_assets"), fund.get("total_liab")   # en USD tous deux
+    fp_totaux = fund.get("total_equity")
+    if fp_totaux is None:
+        fp_totaux = be
     if ta and tl:
-        ecart = abs((ta - tl) - be) / max(ta, 1e-9)
+        ecart = abs((ta - tl) - fp_totaux) / max(ta, 1e-9)
         diag["identite_bilan_ok"] = bool(ecart < 0.05)
         if ecart >= 0.05:
             confiance = "faible"

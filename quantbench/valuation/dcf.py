@@ -336,9 +336,20 @@ def value_dcf(x: DcfInputs) -> dict:
     equity_value = firm_value - x.debt_value
 
     # --- Capital investi & ROIC (diagnostic) ---
-    ic0 = (x.revenue_base / x.current_sales_to_capital
-           if np.isnan(x.current_invested_capital) or x.current_sales_to_capital == 0
-           else x.current_invested_capital)
+    # LE REPLI NE SERT QUE SI LA VALEUR EXPLICITE MANQUE. Ecrit avec un `or`, il
+    # se declenchait AUSSI quand un capital investi explicite etait fourni mais que
+    # le rapport ventes sur capital valait zero : le code ignorait alors la valeur
+    # donnee pour diviser par ce meme zero, levant une ZeroDivisionError nue. Les
+    # deux conditions doivent etre lues dans l'autre sens — on ne se replie que
+    # faute de mieux, et le repli lui-meme doit etre possible.
+    if not np.isnan(x.current_invested_capital):
+        ic0 = x.current_invested_capital
+    elif x.current_sales_to_capital:
+        ic0 = x.revenue_base / x.current_sales_to_capital
+    else:
+        # Ni capital explicite, ni intensite capitalistique : le ROIC de
+        # diagnostic n'est pas calculable, et l'affirmer serait pire que se taire.
+        ic0 = float("nan")
     invested_capital = ic0 + np.cumsum(reinvestment)
     with np.errstate(divide="ignore", invalid="ignore"):
         roic = np.where(invested_capital != 0, ebit_after_tax / invested_capital, np.nan)

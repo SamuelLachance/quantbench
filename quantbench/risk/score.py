@@ -45,7 +45,8 @@ def _charger():
 _CAL = _charger()
 
 
-def rang(cle, signal, cal, secteur=None, industrie=None, niveau="univers"):
+def rang(cle, signal, cal, secteur=None, industrie=None, niveau="univers",
+         regime=None):
     """Rang percentile du signal dans la table GELEE — la part de la population de
     reference qui fait STRICTEMENT mieux.
 
@@ -66,7 +67,24 @@ def rang(cle, signal, cal, secteur=None, industrie=None, niveau="univers"):
         return 0.0
     tables = (cal or {}).get("quantiles", {}).get(cle) or {}
     grille = None
-    if niveau == "secteur" and secteur:
+    # TABLE PROPRE AU REGIME, quand le signal CHANGE DE NATURE avec lui.
+    #
+    # La solvabilite d'un industriel est une couverture d'interets, celle d'une
+    # banque un coussin de fonds propres tangibles : deux grandeurs sans commune
+    # mesure, rangees dans la meme table de centiles. Consequence mesuree : toute
+    # l'etendue plausible d'un bilan bancaire — de 20 % a 1 % de fonds propres —
+    # se comprimait sur 0,101 d'echelle, ENTIEREMENT au-dessus de la mediane de
+    # risque. La dimension ne separait plus rien la ou la solvabilite est
+    # precisement la question, et penalisait toutes les banques sans distinction.
+    #
+    # La table du regime prime donc sur celle du secteur et sur la globale. Son
+    # absence fait retomber sur le comportement d'avant, si bien qu'un calibrage
+    # ancien reste lisible.
+    if regime:
+        grille = (tables.get("regimes") or {}).get(regime)
+    if grille:
+        pass
+    elif niveau == "secteur" and secteur:
         grille = tables.get("secteurs", {}).get(secteur)
     elif niveau == "industrie" and industrie:
         grille = (tables.get("industries", {}).get(industrie)
@@ -179,7 +197,7 @@ def noter(fund, F=None, motifs=None, reparations=None, cal=None):
     detail, total, somme_poids, rangs = [], 0.0, 0.0, []
     for cle, nom, _f, niveau in DIMENSIONS:
         signal, libelle = signaux.get(cle, (None, None))
-        r = rang(cle, signal, cal, secteur, industrie, niveau)
+        r = rang(cle, signal, cal, secteur, industrie, niveau, regime=reg)
         w = float(poids.get(cle, 1.0))
         # LES INFINIS NE DOIVENT JAMAIS SORTIR DU MODULE. `json.dumps` de Python les
         # ecrit `Infinity` et `-Infinity`, qui ne sont PAS du JSON valide : le

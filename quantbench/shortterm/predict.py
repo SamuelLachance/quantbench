@@ -76,9 +76,18 @@ def features(prices) -> dict | None:
         return None
 
     # Renversement : ecart a la moyenne 20 j, en unites d'ecart-type de l'ecart.
-    # n_eff = (n+1)/3 pour une moyenne mobile simple. Signe : positif = SURVENDU.
+    # Signe : positif = SURVENDU.
+    #
+    # VARIANCE EXACTE, ET NON (n+1)/3. Pour une marche aleatoire, la variance de
+    # l'ecart entre le dernier point et la moyenne des n derniers — CE POINT
+    # COMPRIS — vaut (n-1)(2n-1) / (6n) fois la variance journaliere, soit 6,175
+    # pour n = 20. La formule (n+1)/3 = 7,000 vaut pour une moyenne mobile qui
+    # EXCLUT le point courant. L'ecart de 13 % sur la variance comprimait toutes
+    # les valeurs de `reversal` de 6,08 %, et rendait fausse l'affirmation
+    # « en unites d'ecart-type » que porte cette ligne.
     ma20 = float(p[-20:].mean())
-    n_eff = (20.0 + 1.0) / 3.0
+    _n = 20.0
+    n_eff = (_n - 1.0) * (2.0 * _n - 1.0) / (6.0 * _n)
     reversal = -float(logp[-1] - math.log(ma20)) / (sd * math.sqrt(n_eff))
 
     # Momentum 6-1 : de t-126 a t-21, fenetre DISJOINTE du renversement.

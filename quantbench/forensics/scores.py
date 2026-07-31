@@ -169,8 +169,16 @@ def beneish_m_score(F) -> float | None:
                                       and g("long_term_debt", 1) is not None)
                  else "total_debt")
         ltd0, ltd1 = g(champ, 0), g(champ, 1)
-        lev0 = _r((ltd0 or 0) + g("current_liab", 0), g("total_assets", 0))
-        lev1 = _r((ltd1 or 0) + g("current_liab", 1), g("total_assets", 1))
+        # UNE DETTE ABSENTE N'EST PAS UNE DETTE NULLE, et `(ltd or 0)` rouvrait
+        # par une autre porte la comparaison de grandeurs differentes que le choix
+        # unique du champ, juste au-dessus, venait de fermer : un exercice se
+        # mesurait sur (dette + passif courant) / actif et l'autre sur le seul
+        # passif courant / actif. Le levier n'est comparable que si les deux
+        # exercices portent les MEMES postes.
+        if ltd0 is None or ltd1 is None:
+            return None
+        lev0 = _r(ltd0 + g("current_liab", 0), g("total_assets", 0))
+        lev1 = _r(ltd1 + g("current_liab", 1), g("total_assets", 1))
         lvgi = _r(lev0, lev1)
         tata = _r(g("net_income", 0) - g("cfo", 0), g("total_assets", 0))
         parts = [dsri, gmi, aqi, sgi, depi, sgai, lvgi, tata]

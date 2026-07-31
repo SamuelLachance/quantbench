@@ -3464,3 +3464,82 @@ def test_les_lois_de_tirage_restent_dans_le_domaine_du_modele():
     assert np.isfinite(eq).mean() > 0.99, (
         f"taux de validite {np.isfinite(eq).mean():.3f} : la simulation ecarte "
         "encore ses propres scenarios")
+
+
+def test_la_variance_du_renversement_est_celle_dune_moyenne_incluant_le_point():
+    """`reversal` s'annonce « en unites d'ecart-type » : encore faut-il la bonne.
+
+    Pour une marche aleatoire, la variance de l'ecart entre le dernier point et la
+    moyenne des n derniers — CE POINT COMPRIS — vaut (n-1)(2n-1)/(6n) fois la
+    variance journaliere, soit 6,175 pour n = 20. La formule (n+1)/3 = 7,000 vaut
+    pour une moyenne mobile qui EXCLUT le point courant. L'ecart de 13 % sur la
+    variance comprimait toutes les valeurs de 6,08 %.
+
+    Verifie par simulation directe plutot que par lecture : 200 000 marches
+    aleatoires de 20 pas donnent une variance de 6,18.
+    """
+    import numpy as np
+
+    n = 20.0
+    exacte = (n - 1.0) * (2.0 * n - 1.0) / (6.0 * n)
+    rng = np.random.default_rng(0)
+    X = np.cumsum(rng.standard_normal((200000, int(n))), axis=1)
+    simulee = float((X[:, -1] - X.mean(axis=1)).var())
+    assert abs(simulee - exacte) / exacte < 0.01, (simulee, exacte)
+    assert abs(simulee - (n + 1.0) / 3.0) / simulee > 0.10, \
+        "l'ancienne formule serait acceptable, ce test ne prouve rien"
+
+    src = (Path(__file__).resolve().parent.parent / "quantbench" / "shortterm"
+           / "predict.py").read_text(encoding="utf-8")
+    code = "\n".join(l.split("#")[0] for l in src.splitlines())
+    assert "(20.0 + 1.0) / 3.0" not in code, "la formule approchee est revenue"
+    assert "(6.0 * _n)" in code
+
+
+def test_le_capital_investi_explicite_prime_sur_le_repli():
+    """Le repli ne sert que si la valeur explicite manque.
+
+    Ecrit avec un `or`, il se declenchait AUSSI quand un capital investi explicite
+    etait fourni mais que le rapport ventes sur capital valait zero : le code
+    ignorait la valeur donnee pour diviser par ce meme zero, levant une
+    ZeroDivisionError nue.
+    """
+    from dataclasses import replace
+
+    import numpy as np
+
+    from quantbench.valuation.dcf import value_dcf
+
+    base = _dcf_inputs_temoin()
+    # Capital explicite ET intensite capitalistique nulle : l'explicite doit primer.
+    x = replace(base, current_invested_capital=500.0, current_sales_to_capital=0.0,
+                terminal_sales_to_capital=0.0)
+    r = value_dcf(x)                                   # ne doit pas lever
+    assert float(r["invested_capital"][0]) == pytest.approx(
+        500.0 + float(r["reinvestment"][0]))
+
+    # Ni l'un ni l'autre : le ROIC de diagnostic n'est pas calculable, et on le dit.
+    y = replace(base, current_invested_capital=float("nan"),
+                current_sales_to_capital=0.0, terminal_sales_to_capital=0.0)
+    r2 = value_dcf(y)
+    assert np.isnan(r2["invested_capital"]).all(), \
+        "un capital investi incalculable ressort chiffre"
+
+
+def test_lidentite_du_bilan_porte_sur_les_fonds_propres_totaux():
+    """L'identite comptable ne connait pas la repartition entre actionnaires.
+
+    Actif moins passif rend l'INTEGRALITE des fonds propres. La comparer a la seule
+    part attribuable declarait « bilan non verifiable » toute holding dont le bilan
+    boucle pourtant parfaitement mais qui detient des filiales non integralement
+    possedees — le cas ordinaire d'une holding, et l'ecart y vaut exactement la
+    part des minoritaires.
+    """
+    import inspect
+
+    from quantbench.valuation import route
+
+    src = inspect.getsource(route.value_holding)
+    code = "\n".join(l.split("#")[0] for l in src.splitlines())
+    assert "fp_totaux" in code, "l'identite compare de nouveau la part attribuable"
+    assert "- fp_totaux)" in code or "- fp_totaux" in code
