@@ -142,14 +142,36 @@ TAGS = {
 }
 
 
-def total_debt(facts: dict) -> float:
-    """Dette totale : prend LongTermDebt s'il existe, sinon somme les composantes."""
+def total_debt(facts: dict):
+    """Dette totale, ou None quand AUCUN poste de dette n'est balise.
+
+    L'ABSENCE N'EST PAS UN ZERO — c'est l'image en miroir du piege du zero que ce
+    depot a deja rencontre cinq fois, et elle est plus dangereuse encore. La
+    fonction rendait 0.0 quand aucun des trois tags de repli n'existait, valeur
+    strictement indiscernable d'une societe reellement sans dette. `latest(...,
+    0.0) or 0.0` ecrasait l'ignorance en certitude.
+
+    Ce que cela coutait : la valeur d'entreprise devient egale a la valeur des
+    fonds propres, et l'upside se trouve gonfle de la TOTALITE de l'endettement non
+    balise, sans qu'aucun controle ne bronche — `validate.py` ne teste que la borne
+    haute (dette superieure a l'actif), jamais l'absence. Les emetteurs touches
+    sont ceux qui balisent leur dette sous des libelles hors des trois tags du
+    repli : financieres, foncieres, petites capitalisations.
+
+    La fonction savait pourtant deja faire la difference dix lignes plus haut, ou
+    le poste global passe par `default=None` puis un test `is not None`.
+
+    Renvoie None si rien n'est balise, 0.0 si au moins un poste existe et vaut zero.
+    """
     ltd = latest(facts, TAGS["long_term_debt"], "instant")
     if ltd is not None:
         return float(ltd)
-    parts = [latest(facts, TAGS[k], "instant", 0.0) or 0.0
+    parts = [latest(facts, TAGS[k], "instant", None)
              for k in ("lt_debt_noncurrent", "lt_debt_current", "short_term_borrowings")]
-    return float(sum(parts))
+    connus = [p for p in parts if p is not None]
+    if not connus:
+        return None                      # rien de balise : on ne sait pas, on le dit
+    return float(sum(connus))
 
 
 __all__ = ["get_cik", "get_facts", "annual_series", "latest", "total_debt", "TAGS"]

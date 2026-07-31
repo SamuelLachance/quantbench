@@ -76,11 +76,41 @@ def annual_report_docs(cik: str) -> dict:
 
 
 def sic_to_sector(sic) -> str:
-    """Mappe un code SIC vers un secteur (chaine reconnue par route.classify)."""
+    """Mappe un code SIC vers un secteur (chaine reconnue par route.classify).
+
+    DEUX SECTEURS ETAIENT INATTEIGNABLES, et ce sont precisement les deux qui
+    changent de METHODE de valorisation :
+
+      - « Utilities » n'existait pas. Un service public reglemente (SIC 4911,
+        4931) tombait en « Other », donc en DCF FCFF standard — alors qu'il doit
+        etre valorise par capitalisation des benefices cote equite. Son activite
+        est tres capitalistique et financee par dette a dessein : le DCF
+        d'entreprise lui sort une equite negative sur une societe parfaitement
+        solvable.
+      - « Real Estate » n'existait pas non plus. Une fonciere (SIC 6798, 6500-6599)
+        tombait dans la tranche 6000-6799 et ressortait « Financial Services »,
+        donc valorisee en rendement excedentaire sur ses fonds propres comptables
+        — alors qu'une fonciere se capitalise sur son FFO, les amortissements
+        immobiliers etant purement comptables.
+
+    Les deux perdaient au passage leur exemption d'Altman (`_NO_ALTMAN` dans
+    route.py), qui existe justement parce que ce score n'a pas de sens sur un
+    bilan de service public ou de fonciere.
+
+    L'ORDRE DES TESTS COMPTE : l'immobilier doit etre reconnu AVANT la tranche
+    financiere, qui l'englobe.
+    """
     try:
         s = int(sic)
     except (TypeError, ValueError):
         return "Unknown"
+    # Services publics : electricite, gaz, eau, assainissement (4900-4999).
+    if 4900 <= s <= 4999:
+        return "Utilities"
+    # Immobilier, AVANT la tranche financiere qui le contient : 6500-6599
+    # (exploitants et agents) et 6798 (fonds de placement immobilier).
+    if 6500 <= s <= 6599 or s == 6798:
+        return "Real Estate"
     if 6000 <= s <= 6799:
         return "Financial Services"
     if s in range(1300, 1400) or s in range(2900, 3000) or s == 1311:

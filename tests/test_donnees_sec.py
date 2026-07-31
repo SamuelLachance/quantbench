@@ -412,7 +412,23 @@ def test_la_dette_totale_somme_les_composantes_a_defaut_du_poste_global():
         "ShortTermBorrowings": [ligne_instant(2024, 5.0)]})
     assert edgar.total_debt(composantes) == 95.0
 
-    assert edgar.total_debt(faits({})) == 0.0
+    # UNE COMPOSANTE CONNUE SUFFIT : les autres absentes ne valent pas zero, mais
+    # la somme des postes reellement balises reste la meilleure reponse.
+    partiel = faits({"LongTermDebtCurrent": [ligne_instant(2024, 10.0)]})
+    assert edgar.total_debt(partiel) == 10.0
+
+    # UN POSTE BALISE A ZERO est une donnee : la societe declare n'avoir pas de
+    # dette a court terme.
+    zero = faits({"ShortTermBorrowings": [ligne_instant(2024, 0.0)]})
+    assert edgar.total_debt(zero) == 0.0
+
+    # AUCUN POSTE BALISE : on ne sait pas, et la fonction doit le DIRE. Elle
+    # rendait 0.0, valeur indiscernable d'une societe reellement sans dette —
+    # l'image en miroir du piege du zero, en plus dangereux : la valeur
+    # d'entreprise devenait egale a la valeur des fonds propres et l'upside se
+    # trouvait gonfle de la totalite de l'endettement non balise, sans qu'aucun
+    # controle ne bronche (`validate.py` ne teste que la borne haute).
+    assert edgar.total_debt(faits({})) is None
 
 
 # --------------------------------------------------------------------------- #
@@ -602,13 +618,55 @@ def test_un_refus_http_sur_les_metadonnees_ne_passe_pas_inapercu(monkeypatch):
     (1400, "Basic Materials"), (1499, "Basic Materials"),
     (3310, "Basic Materials"), (3399, "Basic Materials"),
     (7372, "Other"), (3571, "Other"),
+    # SERVICES PUBLICS : la tranche n'existait pas et ces codes tombaient en
+    # « Other », donc en DCF FCFF standard — alors qu'un service public reglemente
+    # se valorise par capitalisation des benefices COTE EQUITE. Son activite est
+    # tres capitalistique et financee par dette a dessein : le DCF d'entreprise
+    # lui sort une equite negative sur une societe parfaitement solvable.
+    (4900, "Utilities"), (4911, "Utilities"), (4931, "Utilities"),
+    (4924, "Utilities"), (4941, "Utilities"), (4999, "Utilities"),
+    (4899, "Other"), (5000, "Other"),                  # bornes
+    # IMMOBILIER : ces codes tombaient dans la tranche 6000-6799 et ressortaient
+    # « Financial Services », donc valorisees en rendement excedentaire sur les
+    # fonds propres comptables — alors qu'une fonciere se capitalise sur son FFO,
+    # les amortissements immobiliers etant purement comptables.
+    (6500, "Real Estate"), (6512, "Real Estate"), (6531, "Real Estate"),
+    (6599, "Real Estate"), (6798, "Real Estate"),
+    (6499, "Financial Services"), (6600, "Financial Services"),   # bornes
+    (6797, "Financial Services"), (6799, "Financial Services"),
 ])
 def test_le_code_sic_decide_du_secteur(sic, attendu):
     """Le secteur commande la METHODE (route.classify) : une banque au DCF FCFF ou
     un petrolier valorise comme un logiciel donnent des upsides a trois chiffres.
     Les bornes comptent autant que le centre — 6799 est une financiere, 6800 ne
-    l'est plus."""
+    l'est plus, et 6798 est une fonciere au beau milieu de la tranche financiere.
+
+    Les deux secteurs qui CHANGENT DE METHODE etaient inatteignables : la table ne
+    portait ni « Utilities » ni « Real Estate ». Ils perdaient au passage leur
+    exemption d'Altman, qui existe justement parce que ce score n'a aucun sens sur
+    un bilan de service public ou de fonciere.
+    """
     assert sf.sic_to_sector(sic) == attendu
+
+
+def test_les_secteurs_produits_sont_ceux_que_le_routage_reconnait():
+    """Le contrat entre la table SIC et `route.classify`.
+
+    La docstring promet « une chaine reconnue par route.classify » — encore
+    faut-il que le routage la reconnaisse vraiment. Ce test relie les deux bouts :
+    tout secteur qui declenche une methode PARTICULIERE doit etre atteignable
+    depuis un code SIC, sans quoi la promesse est vide.
+    """
+    import inspect
+
+    from quantbench.valuation import route
+
+    src = inspect.getsource(route.classify)
+    produits = {sf.sic_to_sector(s) for s in range(1000, 9000)}
+    for cle, exemple in (("real estate", 6798), ("utilities", 4911)):
+        assert cle in src.lower(), f"le routage ne branche plus sur {cle!r}"
+        assert cle in sf.sic_to_sector(exemple).lower(),             f"aucun code SIC ne mene au secteur {cle!r}"
+    assert {"Utilities", "Real Estate", "Financial Services"} <= produits
 
 
 @pytest.mark.parametrize("sic", [None, "", "N/A", "abc", [], {}])

@@ -180,7 +180,12 @@ def extract_fundamentals(entry, ticker, quote) -> dict:
     ebit = latest("ebit")
     ni = latest("net_income")
     equity = latest("equity")
-    debt = latest("long_term_debt") or 0.0
+    # L'ABSENCE N'EST PAS UN ZERO. Meme defaut qu'`edgar.total_debt` corrige a
+    # cote : `or 0.0` rendait une dette non balisee indiscernable d'une societe
+    # reellement sans dette, gonflant l'upside de la totalite de l'endettement
+    # ignore. `bb()` transmet None tel quel ; la validation en aval saura dire
+    # qu'elle ne sait pas, au lieu d'affirmer zero.
+    debt = latest("long_term_debt")
     cash_m = {}
     for lab in edgar.TAGS["cash"]:
         d = entry["inst"].get(lab)
