@@ -3901,3 +3901,66 @@ def test_le_renversement_se_calcule_entierement_en_logarithmes():
     code = "\n".join(l.split("#")[0] for l in src.splitlines())
     assert "math.log(ma20)" not in code, "le logarithme de la moyenne est revenu"
     assert "logp[-20:].mean()" in code, "la moyenne des logarithmes a disparu"
+
+
+def test_le_calibrage_des_plafonds_appelle_modalites_comme_la_notation():
+    """Le NIVEAU d'un plafond est la mediane du score des societes qui le portent.
+    Cette mesure n'a de sens que si la population mesuree est celle qui portera
+    reellement le plafond — donc si le calibrage determine les modalites avec
+    exactement les memes arguments que la notation.
+
+    Il n'en recevait que quatre sur six : le REGIME valait None. Or le regime decide
+    de la GRANDEUR mesuree (flux libre brut contre consommation corrigee du capex de
+    croissance), si bien que les capitalistiques regulees entraient dans la mediane
+    d'un plafond qu'elles ne portent jamais a la notation.
+
+    L'exigence est deduite de la signature de `_modalites`, non figee sur un nombre :
+    ajouter un parametre a la fonction fera echouer ce test tant que le calibrage ne
+    l'aura pas transmis lui aussi.
+    """
+    import ast
+    import inspect
+    import os
+
+    from quantbench.risk.score import _modalites
+
+    attendu = len(inspect.signature(_modalites).parameters)
+    chemin = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "scripts", "build_risk_stats.py")
+    with open(chemin, encoding="utf-8") as fh:
+        arbre = ast.parse(fh.read())
+    appels = [n for n in ast.walk(arbre)
+              if isinstance(n, ast.Call)
+              and getattr(n.func, "id", None) == "_modalites"]
+    assert appels, "le calibrage n'appelle plus _modalites"
+    for a in appels:
+        recus = len(a.args) + len(a.keywords)
+        assert recus == attendu, (
+            f"le calibrage passe {recus} arguments a _modalites, la notation en "
+            f"attend {attendu} : la population mesuree n'est pas celle qui sera "
+            f"plafonnee")
+
+
+def test_le_regime_change_les_modalites_donc_l_argument_n_est_pas_decoratif():
+    """Garde-fou du test precedent, qui serait vide si `reg` n'avait aucun effet.
+
+    Un service public regule aux ordres de grandeur de Duke Energy : 10,5 Md$ de
+    flux d'exploitation pour 12,0 Md$ d'investissement, dont 4,6 Md$ de simple
+    remplacement de l'outil. Son flux libre BRUT est negatif de 1,5 Md$ pour 0,4 Md$
+    de tresorerie — moins d'un an d'autonomie. Corrige du capex de CROISSANCE, il ne
+    consomme rien. C'est la meme societe, lue par deux grandeurs differentes.
+    """
+    from quantbench.risk.score import _modalites
+
+    regule = {"book_equity": 51000.0, "total_equity": 51000.0,
+              "total_assets": 186000.0, "total_liabilities": 135000.0,
+              "cash": 400.0, "cfo": 10500.0, "capex": -12000.0,
+              "dep_amort": 4600.0, "revenue": 30000.0,
+              "industry": "Utilities - Regulated Electric"}
+    F = {"years": [2020, 2021, 2022, 2023, 2024, 2025]}
+
+    sans = _modalites(regule, F, [], {}, 1.0, None)
+    avec = _modalites(regule, F, [], {}, 1.0, "amortissement_lourd")
+    assert "moins_d_un_an_d_autonomie" in sans
+    assert "moins_d_un_an_d_autonomie" not in avec, (
+        "corrige du capex de croissance, un regule ne consomme pas sa tresorerie")

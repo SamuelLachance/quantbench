@@ -225,12 +225,26 @@ def main(limite):
     # typiquement une societe dans cette situation", ce qui est une mesure et non un
     # choix. Le score est celui d'AVANT plafonnement, sans quoi la mesure se
     # mordrait la queue.
+    # LES MEMES ARGUMENTS QU'A LA NOTATION, sans quoi la mesure porte sur autre
+    # chose que ce qu'elle calibre. `_modalites` prend six parametres ; il n'en
+    # recevait que quatre ici, si bien que le REGIME et le seuil de base
+    # actionnaire valaient None. Or le regime decide de la grandeur mesuree : pour
+    # une societe a amortissement lourd, la consommation se corrige du capex de
+    # CROISSANCE, alors que sans regime elle se lit sur le flux libre BRUT. Les
+    # capitalistiques regulees entraient donc dans la population d'un plafond
+    # qu'elles ne portent jamais a la notation. Le plafond etant un PLANCHER de
+    # risque — `score = max(score, niveau)` — et ces societes notant tres bas
+    # (0,22 pour un profil Duke Energy contre un niveau publie de 0,64), elles
+    # tiraient la mediane vers le bas et AFFAIBLISSAIENT le plancher pour celles
+    # qui manquent reellement de tresorerie.
     from quantbench.risk.score import _modalites
     par_modalite = {}
     for l in lignes:
         r = noter(l["fund"], l["F"], l["motifs"], l["reparations"], cal=cal)
         sig = mesurer(l["fund"], l["F"], l["motifs"], l["reparations"], cal)
-        for m in _modalites(l["fund"], l["F"], l["motifs"], sig):
+        reg = sig.pop("__regime__", None)
+        for m in _modalites(l["fund"], l["F"], l["motifs"], sig,
+                            cal.get("seuil_base_actionnaire"), reg):
             par_modalite.setdefault(m, []).append(r["score"])
     plafonds = {}
     for m, v in par_modalite.items():
