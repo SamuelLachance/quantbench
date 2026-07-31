@@ -225,10 +225,28 @@ def default_probability(z, si_inconnu: float = 0.5) -> float:
     """
     if z is None:
         return si_inconnu
-    for seuil, p in _Z_PDEF:
-        if z >= seuil:
-            return p
-    return 0.90
+    # INTERPOLATION LINEAIRE ENTRE LES POINTS DE LA TABLE, et non lecture par
+    # paliers. La table associe une probabilite a une NOTATION, qui est discrete ;
+    # le Z''-EMS, lui, est CONTINU. La lire par paliers faisait sauter la
+    # probabilite de 0,550 a 0,700 pour deux dix-millemes de score — et ce saut se
+    # propageait a la valorisation, qui ponderE le flux d'exploitation par
+    # (1 - pdef). Deux societes que rien ne distingue se retrouvaient ainsi a
+    # quinze points de probabilite de defaut l'une de l'autre.
+    # Aux extremites la table s'aplatit : au-dela du meilleur point on garde sa
+    # probabilite, en deca du pire on garde 0,90. On n'extrapole pas une courbe
+    # calee sur des notations observees.
+    if z >= _Z_PDEF[0][0]:
+        return _Z_PDEF[0][1]
+    for (z_haut, p_haut), (z_bas, p_bas) in zip(_Z_PDEF, _Z_PDEF[1:]):
+        if z >= z_bas:
+            part = (z_haut - z) / (z_haut - z_bas)
+            return p_haut + part * (p_bas - p_haut)
+    # Sous le dernier point de la table, la probabilite rejoint 0,90 sur le meme
+    # ecart de score que le dernier intervalle, puis s'y arrete.
+    z_bas, p_bas = _Z_PDEF[-1]
+    largeur = _Z_PDEF[-2][0] - z_bas
+    part = min(1.0, max(0.0, (z_bas - z) / largeur)) if largeur > 0 else 1.0
+    return p_bas + part * (0.90 - p_bas)
 
 
 def altman_z_score(F, i=0) -> float | None:

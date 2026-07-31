@@ -24,7 +24,7 @@ import numpy as np
 from ..data.universal import get_fundamentals
 from ..data import market
 from ..forensics import analyze as forensic_analyze, get_financials
-from ..forensics.scores import default_probability
+from ..forensics.scores import Z_DETRESSE, default_probability
 from .build_universal import (build_dcf_from_fundamentals, country_erp,
                               pays_exploitation)
 from .dcf import value_dcf
@@ -232,6 +232,24 @@ def conversion_en_tresorerie(F):
     return sum(c for _, c in paires) / somme_ebit
 
 
+def conditions_de_detresse(fund, forensic):
+    """`(z, vrai si la societe remplit TOUTES les conditions de la route detresse
+    sauf le franchissement du seuil)`.
+
+    Extraite pour que le routage et le lissage de sa frontiere lisent exactement la
+    meme regle. Ecrire deux fois la meme condition, c'est se donner rendez-vous avec
+    leur divergence — le depot en porte deja deux cicatrices, `bilan.py` et
+    `series.py`.
+    """
+    sec = (fund.get("sector") or "").lower()
+    ebit, ni = fund.get("ebit"), fund.get("net_income")
+    z = (forensic or {}).get("scores", {}).get("altman_z")
+    deficitaire = (ebit is not None and ebit < 0) or (ni is not None and ni < 0)
+    z_ok = z is not None and not any(s in sec for s in _NO_ALTMAN)
+    encaisse = (fund.get("cfo") or 0) > 0
+    return z, bool(deficitaire and not encaisse and z_ok)
+
+
 def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
     sec = (fund.get("sector") or "").lower()
     ebit, ni = fund.get("ebit"), fund.get("net_income")
@@ -290,7 +308,8 @@ def classify(fund: dict, forensic: dict | None, F: dict | None = None) -> str:
     # les financieres.
     if deficitaire and not encaisse and be is not None and be <= 0:
         return "detresse"                      # fonds propres absorbes par les pertes
-    if deficitaire and not encaisse and z_ok and z < Z_DETRESSE_ROUTE:
+    _z, candidat = conditions_de_detresse(fund, forensic)
+    if candidat and _z < Z_DETRESSE_ROUTE:
         return "detresse"
 
     # --- Routage sectoriel : societes en continuite d'exploitation -----------
@@ -997,6 +1016,58 @@ def value_distressed(fund, forensic):
             "confidence": "faible", "p_default": round(pdef, 2)}
 
 
+# Bande sur laquelle la ponderation par le defaut s'eteint. Ses deux bornes sont
+# DEJA POSEES et documentees ailleurs : Z_DETRESSE_ROUTE (3,20) est le seuil de
+# routage, Z_DETRESSE (4,35) la borne basse de la zone de detresse d'Altman. La
+# bande n'introduit donc aucune constante nouvelle.
+_BANDE_DETRESSE = (Z_DETRESSE_ROUTE, Z_DETRESSE)
+
+
+def _adoucir_la_frontiere_de_detresse(r, fund, forensic, cat):
+    """Eteindre la ponderation par le defaut au lieu de la couper net.
+
+    LE DEFAUT. Le routage vers la detresse bascule a Z''-EMS = 3,20. Au-dessus, le
+    flux d'exploitation vaut pour lui-meme ; au-dessous, il est pondere par une
+    probabilite de defaut de 55 % et complete par une valeur de liquidation. Deux
+    societes distantes de deux dix-millemes de score recevaient donc des
+    valorisations distantes de 96 % — mesure sur un industriel deficitaire et
+    consommateur de tresorerie : 522,0 a Z = 3,2001, 20,8 a Z = 3,1999.
+
+    Or le Z''-EMS n'est pas un fait mais une ESTIMATION, tiree de cinq rapports
+    comptables eux-memes approches. Faire dependre la moitie de la valeur d'une
+    societe de sa quatrieme decimale n'est pas de la prudence, c'est du bruit.
+
+    On eteint donc la ponderation LINEAIREMENT entre le seuil de routage et la
+    borne basse de la zone de detresse d'Altman : poids plein a 3,20, nul a 4,35.
+    Au-dela, rien ne change — le risque de defaut d'une societe saine passe par son
+    cout du capital, et l'appliquer deux fois le compterait deux fois.
+
+    LA POPULATION EST EXACTEMENT CELLE QUI TRAVERSE LA FRONTIERE : les memes
+    conditions que le routage, lues par la meme fonction. Une societe qui encaisse,
+    ou beneficiaire, ou d'un secteur ou le Z ne veut rien dire, n'est pas touchee.
+    """
+    if not r or r.get("equity_value") is None or cat == "detresse":
+        return r
+    z, candidat = conditions_de_detresse(fund, forensic)
+    if not candidat:
+        return r
+    bas, haut = _BANDE_DETRESSE
+    if z < bas or z >= haut:
+        return r                                   # sous le seuil : deja route ailleurs
+    poids = (haut - z) / (haut - bas)              # 1 au seuil, 0 en sortant de la bande
+    detresse = value_distressed(fund, forensic)
+    if not detresse or detresse.get("equity_value") is None:
+        return r
+    gc = max(r["equity_value"], 0.0)
+    melange = (1.0 - poids) * gc + poids * detresse["equity_value"]
+    r = dict(r)
+    r["equity_value"] = melange
+    r["poids_detresse"] = round(poids, 3)
+    r["method"] = f"{r.get('method', 'DCF')} — extinction de detresse ({poids:.0%})"
+    r["confidence"] = "faible" if poids > 0.5 else r.get("confidence", "moyenne")
+    return r
+
+
 def value_assetbased(fund):
     """Sociétés pré-revenu / holdings / SPAC : pas de flux à actualiser. Plancher
     = valeur d'actif net comptable (capitaux propres), à défaut la trésorerie nette.
@@ -1143,6 +1214,13 @@ def value_stock(ticker: str, fund=None, forensic=None, F=None) -> dict:
         else:
             return {"ticker": ticker.upper(), "ok": False,
                     "reason": "valorisation impossible", "category": cat}
+
+    # APRES TOUTE LA CASCADE, et c'est essentiel. Place avant, ce lissage melangeait
+    # une equite NEGATIVE que la production ne publie jamais — elle bascule sur un
+    # modele cote equite — et fabriquait ainsi une falaise de -99 % a l'autre bout
+    # de la bande, pire que celle qu'il corrigeait. Il doit porter sur la valeur qui
+    # sera reellement publiee, pas sur un intermediaire.
+    r = _adoucir_la_frontiere_de_detresse(r, fund, forensic, cat)
 
     return _finalise(ticker, fund, r, cat)
 

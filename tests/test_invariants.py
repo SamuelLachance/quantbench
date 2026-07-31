@@ -4306,3 +4306,109 @@ def test_les_grandeurs_d_un_meme_etat_viennent_du_meme_exercice():
     dense.loc["Total Revenue", cols[0]] = 20.0
     assert exercice_commun(dense, "Total Revenue", "Operating Income") == cols[0]
     assert _row(dense, "Total Revenue", col=cols[0]) == _row(dense, "Total Revenue")
+
+
+def test_la_probabilite_de_defaut_est_continue_dans_le_score():
+    """La table associe une probabilite a une NOTATION, qui est discrete ; le
+    Z''-EMS, lui, est CONTINU. La lire par paliers faisait sauter la probabilite de
+    0,550 a 0,700 pour deux dix-millemes de score, et ce saut se propageait a la
+    valorisation, qui pondere le flux d'exploitation par (1 - pdef).
+
+    Interpoler ne doit rien changer AUX POINTS DE LA TABLE : ce sont eux les
+    observations, le reste n'est qu'une lecture entre elles.
+    """
+    from quantbench.forensics.scores import _Z_PDEF, default_probability
+
+    for z, attendu in _Z_PDEF:
+        assert default_probability(z) == pytest.approx(attendu, abs=1e-12), \
+            f"le point de table Z={z} n'est plus rendu exactement"
+
+    # Continuite : aucun saut sur un pas infinitesimal, nulle part sur la plage.
+    pas = 0.001
+    z = 10.0
+    while z > -1.0:
+        a, b = default_probability(z), default_probability(z - pas)
+        assert abs(b - a) < 0.01, f"saut de {b-a:+.3f} entre Z={z:.3f} et Z={z-pas:.3f}"
+        z -= pas
+
+    # Monotone decroissante en Z, et bornee par la table aux deux extremites.
+    assert default_probability(50.0) == _Z_PDEF[0][1]
+    assert default_probability(-50.0) == 0.90
+    assert default_probability(None, si_inconnu=0.42) == 0.42
+
+
+def test_la_frontiere_de_detresse_ne_coupe_plus_la_valeur_en_deux():
+    """Le routage vers la detresse bascule a Z''-EMS = 3,20 : au-dessus le flux
+    d'exploitation vaut pour lui-meme, au-dessous il est pondere par une probabilite
+    de defaut et complete par une valeur de liquidation. Deux societes distantes de
+    deux dix-millemes de score recevaient des valorisations distantes de 96 %.
+
+    Or le Z''-EMS n'est pas un fait mais une ESTIMATION tiree de cinq rapports
+    comptables. Faire dependre la moitie d'une valorisation de sa quatrieme decimale
+    n'est pas de la prudence.
+
+    LE TEST PORTE SUR LES DEUX BOUTS DE LA BANDE. Le second a ete introduit par une
+    premiere version de la correction, placee AVANT le repli sur equite negative :
+    elle melangeait alors une equite negative que la production ne publie jamais, et
+    fabriquait a 4,35 une falaise de -99 %, pire que celle qu'elle corrigeait.
+    """
+    from quantbench.valuation.route import _BANDE_DETRESSE, value_stock
+
+    fund = {"book_equity": 800.0, "total_equity": 820.0, "total_assets": 3000.0,
+            "total_liab": 2200.0, "cash": 150.0, "cfo": -40.0, "capex": -120.0,
+            "revenue": 2400.0, "ebit": -60.0, "net_income": -95.0, "dep_amort": 180.0,
+            "total_debt": 900.0, "shares": 200.0, "price": 6.0, "market_cap": 1200.0,
+            "beta": 1.0, "country": "US", "sector": "Industrials", "currency_ok": True,
+            "industry": "Specialty Industrial Machinery", "operating_margin": -0.025,
+            "tax_rate": 0.25, "age_des_comptes_mois": 9,
+            "revenue_history": [1800.0, 1950.0, 2100.0, 2200.0, 2300.0, 2400.0]}
+    F = {"years": [str(2025 - i) for i in range(8)], "revenue": [2400.0] * 8,
+         "ebit": [-60.0] + [70.0] * 7, "net_income": [-95.0] + [40.0] * 7,
+         "equity": [800.0] * 8, "cfo": [-40.0] + [150.0] * 7,
+         "total_liab": [2200.0] * 8, "shares": [200.0] * 8}
+
+    def v(z):
+        r = value_stock("T", fund=dict(fund), forensic={"scores": {"altman_z": z}}, F=F)
+        return r["equity_value"]
+
+    bas, haut = _BANDE_DETRESSE
+    for borne, nom in ((bas, "seuil de routage"), (haut, "sortie de bande")):
+        a, b = v(borne + 1e-4), v(borne - 1e-4)
+        ecart = abs(b - a) / max(abs(a), 1e-9)
+        assert ecart < 0.02, (
+            f"falaise de {ecart:.0%} au {nom} (Z={borne}) : {a:,.1f} -> {b:,.1f}")
+
+
+def test_l_extinction_de_detresse_ne_touche_que_ceux_qui_traversent_la_frontiere():
+    """Le lissage doit lire EXACTEMENT la meme regle que le routage — une societe
+    qui encaisse, ou beneficiaire, ou d'un secteur ou le Z ne veut rien dire, ne
+    franchira jamais cette frontiere et ne doit donc rien subir.
+
+    Ecrire la condition deux fois, c'est se donner rendez-vous avec sa divergence :
+    le depot en porte deja deux cicatrices, `bilan.py` et `series.py`.
+    """
+    import inspect
+
+    from quantbench.valuation import route as R
+
+    # Le routage et le lissage passent par la meme fonction.
+    for fn in (R.classify, R._adoucir_la_frontiere_de_detresse):
+        code = "\n".join(l.split("#")[0] for l in inspect.getsource(fn).splitlines())
+        assert "conditions_de_detresse" in code, (
+            f"{fn.__name__} n'utilise pas la regle partagee")
+
+    base = {"ebit": -60.0, "net_income": -95.0, "cfo": -40.0, "sector": "Industrials"}
+    z_dans_la_bande = 3.60
+    _, candidat = R.conditions_de_detresse(base, {"scores": {"altman_z": z_dans_la_bande}})
+    assert candidat, "le cas de reference ne remplit plus les conditions"
+
+    for ecart, attendu in ((dict(cfo=250.0), "la societe encaisse"),
+                           (dict(ebit=170.0, net_income=110.0), "elle est beneficiaire"),
+                           (dict(sector="Real Estate"), "le Z ne vaut rien en immobilier")):
+        _, c = R.conditions_de_detresse({**base, **ecart},
+                                        {"scores": {"altman_z": z_dans_la_bande}})
+        assert not c, f"le lissage mordrait alors que {attendu}"
+
+    # Sans Z mesure, aucune extinction : on ne devine pas une detresse.
+    _, c = R.conditions_de_detresse(base, {"scores": {}})
+    assert not c
