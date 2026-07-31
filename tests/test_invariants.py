@@ -28,6 +28,12 @@ from quantbench.data import market                                    # noqa: E4
 from quantbench.valuation import route                                # noqa: E402
 
 
+# La VRAIE fonction, capturee a l'import — c'est-a-dire AVANT que la fixture
+# ci-dessous ne la remplace. Les invariants qui portent sur elle ne peuvent pas
+# passer par `market.risk_free_rate`, qui est une lambda pendant tous les tests.
+_RISK_FREE_REEL = market.risk_free_rate
+
+
 @pytest.fixture(autouse=True)
 def _rf_fixe(monkeypatch):
     """Taux sans risque fige : les tests ne doivent dependre d'aucun reseau."""
@@ -4061,3 +4067,84 @@ def test_la_volatilite_des_capitaux_propres_ne_compare_que_des_annees_voisines()
         "une progression de 4 % l'an est un cout historique, pas une juste valeur")
     assert regulier["confidence"] == "faible", (
         "au cout historique l'actif net est un plancher : la confiance doit baisser")
+
+
+def test_le_taux_sans_risque_a_deux_sources_independantes():
+    """Le taux sans risque entre dans le cout des fonds propres ET dans le cout de la
+    dette de CHAQUE societe. Il n'avait qu'une source, sans repli : le jour ou
+    fredgraph.csv ne repond pas — ce qui est arrive — l'exception remontait jusqu'au
+    moteur DCF et toutes les valorisations du build echouaient une a une.
+
+    La source PRIMAIRE est desormais le Tresor americain, qui est l'ORIGINE de la
+    donnee ; FRED, qui la republie, sert de secours.
+    """
+    import inspect
+
+    from quantbench.data import market
+
+    assert callable(market._taux_tresor) and callable(market._taux_fred)
+    code = "\n".join(l.split("#")[0]
+                     for l in inspect.getsource(_RISK_FREE_REEL).splitlines())
+    assert "_taux_tresor" in code and "_taux_fred" in code, (
+        "risk_free_rate n'interroge plus ses deux sources")
+    assert code.index("_taux_tresor") < code.index("_taux_fred"), (
+        "le Tresor doit etre interroge en premier : il est la source d'origine")
+
+
+def test_l_echec_du_taux_sans_risque_est_fatal_et_ne_se_repaie_pas():
+    """Deux exigences opposees, et toutes deux necessaires.
+
+    FATAL : substituer une constante en silence deplacerait d'un coup toutes les
+    valorisations du site sans que rien ne le signale. On ne publie pas plutot que
+    de publier faux.
+
+    MEMORISE : `lru_cache` ne retient que les retours, jamais les exceptions. Chaque
+    societe repayait donc le delai d'attente complet des deux sources — soit, a
+    20 secondes par source, plus de deux cents heures d'attente sur l'univers.
+    """
+    import time
+
+    from quantbench.data import market
+
+    lent = []
+
+    def source_en_panne(*a, **k):
+        lent.append(1)
+        time.sleep(0.05)
+        raise RuntimeError("source injoignable")
+
+    vrai_t, vrai_f = market._taux_tresor, market._taux_fred
+    _RISK_FREE_REEL.cache_clear()
+    market._ECHEC_MEMORISE.clear()
+    market._taux_tresor = market._taux_fred = source_en_panne
+    try:
+        with pytest.raises(market.TauxSansRisqueIndisponible):
+            _RISK_FREE_REEL()
+        sollicitations = len(lent)
+        assert sollicitations == 2, "les deux sources doivent avoir ete essayees"
+
+        for _ in range(50):
+            with pytest.raises(market.TauxSansRisqueIndisponible):
+                _RISK_FREE_REEL()
+        assert len(lent) == sollicitations, (
+            "l'echec n'est pas memorise : chaque societe repaierait l'attente")
+    finally:
+        market._taux_tresor, market._taux_fred = vrai_t, vrai_f
+        market._ECHEC_MEMORISE.clear()
+        _RISK_FREE_REEL.cache_clear()
+
+
+def test_un_taux_hors_bande_est_un_defaut_de_lecture_et_non_un_fait_de_marche():
+    """Le CSV du Tresor porte quatorze echeances cote a cote. Un decalage de colonne
+    rendrait le 1 mois ou le 30 ans ; un facteur d'echelle manquant rendrait 4,68 au
+    lieu de 0,0468 — soit un cout du capital de 468 %, qui annulerait toute valeur
+    terminale. La bande ne juge pas du NIVEAU des taux, elle detecte le mauvais
+    parsage.
+    """
+    from quantbench.data import market
+
+    assert market._borne(0.0468) == 0.0468
+    assert market._borne(0.0) == 0.0            # un taux nul est une valeur, pas un trou
+    assert market._borne(4.68) is None, "le facteur d'echelle manquant doit etre rejete"
+    assert market._borne(-0.01) is None
+    assert market._borne(None) is None

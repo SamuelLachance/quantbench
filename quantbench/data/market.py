@@ -8,7 +8,9 @@ des rendements contre l'indice.
 
 from __future__ import annotations
 
+import csv
 import functools
+import io as _io
 from datetime import date, datetime, timezone
 
 import numpy as np
@@ -38,17 +40,109 @@ def latest_price(symbol: str) -> float:
     return float(_chart(symbol, "5d", "1d")[-1])
 
 
+class TauxSansRisqueIndisponible(RuntimeError):
+    """Aucune source n'a su fournir le rendement du 10 ans americain.
+
+    Volontairement FATALE. Le taux sans risque entre dans le cout des fonds propres
+    ET dans le cout de la dette de CHAQUE societe : lui substituer une constante en
+    silence deplacerait toutes les valorisations du site d'un coup, sans que rien ne
+    le signale. Mieux vaut ne rien publier que publier faux.
+    """
+
+
+# Bande de vraisemblance du rendement 10 ans, en fraction. Elle ne sert pas a juger
+# du niveau des taux mais a detecter une ERREUR DE LECTURE : un decalage de colonne
+# dans le CSV du Tresor rendrait le 1 mois ou le 30 ans, un facteur d'echelle
+# manque rendrait 4,68 au lieu de 0,0468. Toute valeur hors bande est un defaut de
+# parsage, jamais un fait de marche.
+_BANDE_TAUX = (0.0, 0.25)
+
+
+def _borne(v):
+    return v if v is not None and _BANDE_TAUX[0] <= v <= _BANDE_TAUX[1] else None
+
+
+def _taux_tresor() -> float | None:
+    """Source PRIMAIRE : le Tresor americain publie lui-meme sa courbe des taux.
+
+    C'est l'ORIGINE de la donnee — FRED n'en est que le republicateur. Le flux est
+    plus rapide et n'a pas connu les indisponibilites de fredgraph.csv.
+    Le CSV est trie PLUS RECENT EN TETE et couvre l'annee civile demandee ; le
+    1er janvier, cette annee-la est vide, d'ou le repli sur la precedente.
+    """
+    for an in (date.today().year, date.today().year - 1):
+        url = ("https://home.treasury.gov/resource-center/data-chart-center/"
+               f"interest-rates/daily-treasury-rates.csv/{an}/all"
+               f"?type=daily_treasury_yield_curve&field_tdr_date_value={an}"
+               "&page&_format=csv")
+        try:
+            r = requests.get(url, timeout=_TIMEOUT, headers=_YUA)
+            r.raise_for_status()
+            lignes = list(csv.reader(_io.StringIO(r.text)))
+            if len(lignes) < 2:
+                continue
+            col = lignes[0].index("10 Yr")
+            for ligne in lignes[1:]:
+                brut = (ligne[col] or "").strip()
+                if brut:
+                    t = _borne(float(brut) / 100.0)
+                    if t is not None:
+                        return t
+        except Exception:
+            continue
+    return None
+
+
+def _taux_fred() -> float | None:
+    """Source de SECOURS. Conservee telle quelle : elle a servi jusqu'ici."""
+    try:
+        r = requests.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10",
+                         timeout=_TIMEOUT)
+        r.raise_for_status()
+        for line in reversed(r.text.strip().splitlines()[1:]):
+            val = line.split(",")[-1].strip()
+            if val not in (".", ""):
+                return _borne(float(val) / 100.0)
+    except Exception:
+        return None
+    return None
+
+
 @functools.lru_cache(maxsize=1)
 def risk_free_rate() -> float:
-    """Rendement du Treasury 10 ans (DGS10), en fraction decimale."""
-    r = requests.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10",
-                     timeout=_TIMEOUT)
-    r.raise_for_status()
-    for line in reversed(r.text.strip().splitlines()[1:]):
-        val = line.split(",")[-1].strip()
-        if val not in (".", ""):
-            return float(val) / 100.0
-    raise RuntimeError("Aucune valeur DGS10 valide dans le flux FRED.")
+    """Rendement du Treasury 10 ans, en fraction decimale.
+
+    DEUX SOURCES INDEPENDANTES. Il n'y en avait qu'une, sans repli : le jour ou
+    fredgraph.csv ne repond pas — ce qui arrive — l'exception remontait jusqu'au
+    moteur DCF et TOUTES les valorisations du build echouaient une a une. Pire,
+    `lru_cache` ne memorise pas une exception : chaque societe repayait le delai
+    d'attente complet, seize mille fois.
+
+    L'echec est donc memorise ici, explicitement, pour qu'il coute une fois et non
+    par titre.
+    """
+    if _ECHEC_MEMORISE:
+        raise TauxSansRisqueIndisponible(_ECHEC_MEMORISE[0])
+    # Chaque source attrape deja ses propres pannes et rend None. Le filet ci-dessous
+    # ne protege pas d'un reseau indisponible mais d'un DEFAUT de la source elle-meme
+    # — un format change, une colonne disparue — qui ne doit pas empecher d'essayer
+    # la suivante ni, surtout, de MEMORISER l'echec.
+    for source in (_taux_tresor, _taux_fred):
+        try:
+            t = source()
+        except Exception:
+            t = None
+        if t is not None:
+            return t
+    _ECHEC_MEMORISE.append(
+        "Ni le Tresor americain ni FRED n'ont fourni le rendement 10 ans. "
+        "Aucune valorisation ne peut etre calculee sans taux sans risque.")
+    raise TauxSansRisqueIndisponible(_ECHEC_MEMORISE[0])
+
+
+# Porte l'echec entre les appels : une liste, parce que `lru_cache` ne memorise
+# que les retours et jamais les exceptions.
+_ECHEC_MEMORISE: list[str] = []
 
 
 @functools.lru_cache(maxsize=128)
@@ -154,4 +248,5 @@ def levered_beta(symbol: str, market: str = "%5EGSPC") -> float:
     return float(np.cov(ra, rm)[0, 1] / var)
 
 
-__all__ = ["latest_price", "risk_free_rate", "levered_beta"]
+__all__ = ["latest_price", "risk_free_rate", "levered_beta",
+           "TauxSansRisqueIndisponible"]
