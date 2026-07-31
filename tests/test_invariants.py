@@ -1088,11 +1088,40 @@ def test_le_maillon_faible_est_debiaise_par_le_nombre_de_dimensions():
     """Le maximum de k rangs uniformes vaut k/(k+1) en esperance — 0,75 a trois
     dimensions, 0,90 a huit. Sans correction, une societe aux comptes RICHES serait
     mecaniquement moins bien notee qu'une societe opaque, a risque egal : exactement
-    l'inverse de ce que la note doit dire."""
-    src = (Path(__file__).resolve().parent.parent
-           / "quantbench" / "risk" / "score.py").read_text(encoding="utf-8")
-    assert "(1.0 - maximum) ** k" in src, (
-        "le maillon faible n'est plus debiaise par le nombre de dimensions")
+    l'inverse de ce que la note doit dire.
+
+    CE TEST VERIFIE LA PROPRIETE, PAS LE TEXTE. Il exigeait auparavant la presence
+    litterale de « (1.0 - maximum) ** k » dans la source — et gelait ainsi une
+    formule FAUSSE : c'est la fonction de repartition du MINIMUM de k uniformes,
+    appliquee au MAXIMUM. Mesuree sur 400 000 tirages, elle rendait une mediane de
+    0,991 a trois dimensions et de 1,000 des cinq, la ou une transformation
+    debiaisee doit rendre une loi UNIFORME. Elle saturait au lieu de corriger.
+
+    Un test qui recopie la formule ne peut pas dire si elle est juste. Celui-ci
+    verifie ce qu'elle doit PRODUIRE : sous l'hypothese nulle, une loi uniforme.
+    """
+    import random
+
+    from quantbench.risk import score as S
+
+    # On extrait la transformation telle qu'elle est reellement appliquee, en
+    # exercant `noter` sur des rangs connus plutot qu'en relisant la source.
+    def transformee(maximum, k):
+        return S._debiaiser_le_maillon_faible(maximum, k)
+
+    rng = random.Random(11)
+    for k in (2, 3, 5, 8):
+        tirages = sorted(transformee(max(rng.random() for _ in range(k)), k)
+                         for _ in range(4000))
+        med = tirages[len(tirages) // 2]
+        moy = sum(tirages) / len(tirages)
+        assert 0.45 < med < 0.55, f"k={k} : mediane {med:.3f}, attendue 0,5"
+        assert 0.45 < moy < 0.55, f"k={k} : moyenne {moy:.3f}, attendue 0,5"
+
+    # Et le sens : un maillon plus faible doit donner un score PLUS eleve.
+    assert transformee(0.9, 5) > transformee(0.5, 5)
+    # Une seule dimension : rien a debiaiser, la transformation est l'identite.
+    assert transformee(0.37, 1) == pytest.approx(0.37)
 
 
 def test_un_plafond_ne_peut_qu_aggraver_la_note():

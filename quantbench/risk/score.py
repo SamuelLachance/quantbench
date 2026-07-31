@@ -153,6 +153,19 @@ def _modalites(fund, F, motifs, mesures, seuil_base=None, reg=None):
     return out
 
 
+def _debiaiser_le_maillon_faible(maximum: float, k: int) -> float:
+    """Transformation integrale de probabilite du MAXIMUM de k rangs uniformes.
+
+    P(max <= m) = m**k. Sous l'hypothese nulle — des rangs independants et
+    uniformes — cette quantite suit donc une loi uniforme, ce qui est exactement
+    la propriete recherchee : une societe aux comptes riches ne doit pas etre
+    penalisee d'avoir plus de dimensions mesurables.
+
+    Expose a part pour etre TESTABLE sur sa propriete, et non sur son texte.
+    """
+    return float(maximum) ** int(k)
+
+
 def noter(fund, F=None, motifs=None, reparations=None, cal=None):
     """Note de risque complete. Retourne toujours un resultat : une note doit exister
     pour TOUS les titres, y compris ceux dont les donnees sont pauvres — l'incertitude
@@ -196,10 +209,26 @@ def noter(fund, F=None, motifs=None, reparations=None, cal=None):
     # defaut par son point le plus faible. Mais le maximum de k rangs uniformes vaut
     # k/(k+1) en esperance — 0,75 a trois dimensions, 0,90 a huit : une societe aux
     # comptes riches serait mecaniquement moins bien notee qu'une societe opaque, a
-    # risque egal. On corrige par la p-valeur du maximum sous uniformite.
+    # risque egal. On corrige par la transformation integrale de probabilite.
+    #
+    # LA TRANSFORMATION EST m**k, ET NON 1-(1-m)**k. Cette derniere est la fonction
+    # de repartition du MINIMUM de k uniformes, appliquee au MAXIMUM : au lieu de
+    # debiaiser, elle sature. Mesure sur 400 000 tirages, la mediane obtenue valait
+    # 0,991 a trois dimensions et 1,000 a partir de cinq, la ou une transformation
+    # debiaisee doit rendre une loi UNIFORME, donc une mediane de 0,5. Une societe
+    # aux comptes riches se voyait donc attribuer un maillon faible pratiquement
+    # maximal quels que soient ses rangs — l'exact contraire du but annonce.
+    #
+    # La bonne transformation est celle du maximum : P(max <= m) = m**k, uniforme
+    # sous l'hypothese nulle. Verifie : mediane 0,500 pour k de 2 a 8.
+    #
+    # Sans consequence sur les notes PUBLIEES a ce jour, `lambda_maillon_faible`
+    # valant zero dans le calibrage : le terme etait calcule puis jete. C'etait une
+    # mine, pas un incendie — et elle aurait explose le jour ou quelqu'un aurait
+    # donne du poids a ce terme.
     k = len(rangs)
     maximum = max(rangs)
-    debiaise = 1.0 - (1.0 - maximum) ** k
+    debiaise = _debiaiser_le_maillon_faible(maximum, k)
     lam = float((cal or {}).get("lambda_maillon_faible", 0.0))
     score = (1.0 - lam) * moyenne + lam * debiaise
     return _finaliser(score, _modalites(fund, F, motifs, signaux,
