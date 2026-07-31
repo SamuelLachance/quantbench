@@ -771,9 +771,28 @@ def value_reit(fund):
     ke, rf = _coe(fund)
     g = min(rf, 0.028)
     ke = max(ke, g + 0.02)                      # écart minimal pour un multiple fini
-    return {"equity_value": ffo * (1 + g) / (ke - g),
+    # LA CROISSANCE DOIT ETRE FINANCEE. Le FFO est un flux AVANT investissements :
+    # le capitaliser avec une croissance perpetuelle revient a faire grandir la
+    # fonciere pour toujours sans jamais entretenir ni agrandir ses immeubles.
+    # A 8 % de cout des fonds propres et 2,8 % de croissance, l'ancienne formule
+    # payait 19,8 fois le FFO ; le haut de la fourchette du marche.
+    #
+    # On applique l'identite que le moteur DCF s'impose deja en perpetuite : aucune
+    # rente excessive, donc un rendement du capital reinvesti egal au cout des
+    # fonds propres. La part a retenir vaut alors g / ke, et l'algebre se simplifie
+    # remarquablement — le multiple devient (1 + g) / ke, et la croissance
+    # n'apporte plus de valeur par elle-meme, exactement comme la valeur terminale
+    # du DCF vaut le benefice divise par le WACC quand ROIC = WACC.
+    #
+    # C'est aussi la regle deja retenue pour les services publics regules, ou la
+    # croissance suit g = rendement des fonds propres x taux de retention. Trois
+    # methodes du site partagent desormais la meme discipline.
+    retenu = g / ke                              # part du FFO reinvestie
+    return {"equity_value": ffo * (1 - retenu) * (1 + g) / (ke - g),
             "method": "FFO capitalisé (foncière — Damodaran REIT)",
-            "confidence": "moyenne", "ffo": round(ffo, 3)}
+            "confidence": "moyenne", "ffo": round(ffo, 3),
+            "multiple_ffo": round((1 - retenu) * (1 + g) / (ke - g), 2),
+            "part_reinvestie": round(retenu, 4)}
 
 
 def probabilite_de_realisation(fund, F, marge_visee):

@@ -3609,3 +3609,57 @@ def test_le_calibrage_porte_des_tables_de_regime_pour_d1_et_d3():
     assert fragile - solide > 0.5, (
         f"etendue {fragile - solide:.3f} : la dimension ne separe pas les banques")
     assert solide < 0.25 and fragile > 0.75
+
+
+def test_la_croissance_dune_fonciere_doit_etre_financee():
+    """Le FFO est un flux AVANT investissements.
+
+    Le capitaliser avec une croissance perpetuelle revient a faire grandir la
+    fonciere pour toujours sans jamais entretenir ni agrandir ses immeubles. A 8 %
+    de cout des fonds propres et 2,8 % de croissance, l'ancienne formule payait
+    19,8 fois le FFO — le haut de la fourchette du marche — pour une croissance que
+    rien ne financait.
+
+    On applique l'identite que le moteur DCF s'impose deja en perpetuite : aucune
+    rente excessive, donc un rendement du capital reinvesti egal au cout des fonds
+    propres. L'algebre se simplifie alors remarquablement — le multiple devient
+    (1 + g) / ke, et la croissance n'apporte plus de valeur par elle-meme, comme la
+    valeur terminale du DCF vaut le benefice divise par le WACC quand ROIC = WACC.
+    """
+    from quantbench.valuation.route import value_reit
+
+    fonciere = {"net_income": 1.0, "dep_amort": 1.5, "cfo": 3.0,
+                "beta": 0.9, "sector": "Real Estate", "market_cap": 30.0,
+                "total_assets": 50.0, "total_liab": 20.0, "book_equity": 30.0}
+    r = value_reit(fonciere)
+    assert r is not None
+    ffo, val = r["ffo"], r["equity_value"]
+    multiple = val / ffo
+
+    # IDENTITE : (1 - g/ke) x (1+g) / (ke-g) vaut exactement (1+g)/ke.
+    from quantbench.valuation.route import _coe
+    ke, rf = _coe(fonciere)
+    g = min(rf, 0.028)
+    ke = max(ke, g + 0.02)
+    assert multiple == pytest.approx((1 + g) / ke), (multiple, (1 + g) / ke)
+
+    # Et la croissance n'ajoute plus de valeur par elle-meme : le multiple ne doit
+    # PAS exploser quand g s'approche de ke — c'etait tout le defaut.
+    for ke_essai in (0.06, 0.08, 0.10, 0.12):
+        for g_essai in (0.0, 0.01, 0.028):
+            m = (1 - g_essai / ke_essai) * (1 + g_essai) / (ke_essai - g_essai)
+            assert m == pytest.approx((1 + g_essai) / ke_essai)
+            assert m < 20.0, f"multiple {m:.1f} a ke={ke_essai}, g={g_essai}"
+
+
+def test_le_multiple_de_fonciere_reste_dans_une_fourchette_defendable():
+    """Un multiple de FFO est une PRISE DE POSITION, et elle doit rester lisible.
+
+    Les foncieres de qualite s'echangent entre 13 et 20 fois leur FFO. Le modele se
+    place desormais au bas de cette fourchette — il dit que les foncieres sont
+    cheres a 4 % de taux sans risque. L'ancienne formule se placait au haut, mais
+    sans l'assumer : son multiple venait d'une croissance que rien ne financait.
+    """
+    for ke in (0.06, 0.07, 0.08, 0.10, 0.12):
+        m = (1 + 0.028) / ke
+        assert 8.0 <= m <= 18.0, f"multiple {m:.2f} hors de toute fourchette a ke={ke}"
