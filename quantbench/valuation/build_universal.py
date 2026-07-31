@@ -49,6 +49,14 @@ _CRP = {
 }
 _CRP_DEFAUT = 0.030           # pays non liste : prime emergente prudente
 
+# Volatilite des actions rapportee a celle des obligations souveraines. Damodaran
+# construit la prime de risque PAYS en multipliant le spread de defaut souverain
+# par ce rapport ; on le divise donc pour faire le chemin inverse et retrouver le
+# spread qu'un PRETEUR exige. Historiquement autour de 1,3. CONSTANTE POSEE, et
+# c'est la seule facon d'eviter d'appliquer a la dette une prime calibree pour les
+# actions — ce qui la surestimerait d'un tiers.
+_VOLATILITE_RELATIVE = 1.3
+
 # Taux d'impot sur les societes par PAYS (taux marginal legal). Appliquer 21 %
 # (taux federal americain) a une societe canadienne, allemande ou japonaise
 # faussait mecaniquement tous ses flux apres impot.
@@ -308,7 +316,20 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     # le WACC sans borne quand la dette augmentait -- pathologie Modigliani-Miller
     # sans couts de detresse : plus une societe s'endettait, plus elle "valait".
     lev = debt / (debt + market_cap) if (debt + market_cap) > 0 else 0.0
-    kd = rf + 0.010 + 0.10 * _clamp(lev, 0.0, 1.0) ** 2
+    # LE RISQUE PAYS ENTRE AUSSI DANS LE COUT DE LA DETTE. Il n'entrait que dans
+    # celui des fonds propres, si bien que la correction pays se DILUAIT a
+    # proportion de l'endettement : une societe argentine financee a moitie par
+    # dette ne voyait sa prime de 11,5 points s'appliquer qu'a la moitie de son
+    # capital, et empruntait pour le reste au taux americain. Or un preteur exige
+    # d'un emetteur argentin le spread souverain, exactement comme l'actionnaire.
+    #
+    # Damodaran construit la prime ACTIONS a partir du spread de defaut SOUVERAIN,
+    # multiplie par la volatilite relative des actions face aux obligations —
+    # historiquement autour de 1,3. On remonte donc au spread obligataire en
+    # divisant par ce meme facteur, plutot que d'appliquer a la dette une prime
+    # calibree pour les actions, ce qui la surestimerait d'un tiers.
+    spread_pays = country_erp(pays_exploitation(fund), 0.0) / _VOLATILITE_RELATIVE
+    kd = rf + spread_pays + 0.010 + 0.10 * _clamp(lev, 0.0, 1.0) ** 2
 
     term = min(rf, 0.028)
     if g_start < 0:

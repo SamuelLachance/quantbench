@@ -3753,3 +3753,99 @@ def test_classify_recoit_lhistorique_a_la_bonne_place():
     assert route.classify(fund, None, F) == "mature_deficitaire"
     assert route.classify(fund, None, None) == "jeune/deficitaire", \
         "sans historique, la route jeune est la bonne — c'est bien l'appel qui compte"
+
+
+def test_ne_pas_savoir_nameliore_pas_la_situation_dune_societe_en_detresse():
+    """Le repli generique de 0,5 est INFERIEUR a toute la zone de detresse.
+
+    La table attribue 0,55 a 0,90 aux societes dont le Z a pu etre mesure sous le
+    seuil. Une societe deja routee en detresse — fonds propres absorbes par les
+    pertes, ou Z sous le seuil, et sans generation de tresorerie — mais dont le Z
+    n'est pas calculable se voyait donc MIEUX traitee, faute de mesure.
+    """
+    import inspect
+
+    from quantbench.forensics.scores import default_probability
+    from quantbench.valuation import route
+
+    zone = [default_probability(z) for z in (3.20, 2.50, 1.75, 0.0, -5.0)]
+    assert min(zone) == 0.55 and max(zone) == 0.90
+    assert default_probability(None) == 0.5, "le repli generique a change"
+    assert default_probability(None) < min(zone), (
+        "ce test n'a plus d'objet : le repli generique n'est plus le plus favorable")
+
+    # L'appelant en detresse doit fournir SON propre repli, au moins aussi grave
+    # que le seuil qui l'a fait entrer.
+    src = inspect.getsource(route.value_distressed)
+    assert "si_inconnu=" in src, "value_distressed reprend le repli generique"
+    repli = default_probability(None, si_inconnu=default_probability(route.Z_DETRESSE_ROUTE))
+    assert repli >= min(zone), repli
+
+
+def test_la_volatilite_exige_les_deux_composantes_de_sa_table():
+    """La moyenne etait divisee par le NOMBRE de composantes disponibles.
+
+    Un ou deux selon la profondeur des comptes — alors que la table de centiles
+    gelee est mesuree sur une population d'au moins six exercices, donc presque
+    entierement a DEUX composantes. Une societe aux comptes courts etait classee
+    contre une loi qui n'est pas la sienne, et ressortait plus favorablement : rang
+    median 0,419 contre 0,510, mesure sur 281 societes.
+
+    Effet sur les notes publiees : AUCUN sur 286 societes — la correction est juste
+    en principe et sans consequence en pratique, ce qui merite d'etre dit aussi.
+    """
+    from quantbench.risk.dimensions import d4_volatilite
+
+    # Trois exercices : la marge est mesurable, la croissance non (elle en exige
+    # quatre). Une seule composante -> non definissable.
+    court = {"years": [2025, 2024, 2023], "ebit": [1.0, 2.0, 1.5],
+             "revenue": [10.0, 11.0, 9.0]}
+    assert d4_volatilite({}, court, "exploitante") == (None, None), \
+        "une seule composante est de nouveau classee contre une table de deux"
+
+    # Quatre exercices : les deux composantes existent.
+    long_ = {"years": [2025, 2024, 2023, 2022], "ebit": [1.0, 2.0, 1.5, 1.2],
+             "revenue": [10.0, 11.0, 9.0, 8.0]}
+    sig, lib = d4_volatilite({}, long_, "exploitante")
+    assert sig is not None and lib
+
+
+def test_le_risque_pays_entre_aussi_dans_le_cout_de_la_dette():
+    """Il n'entrait que dans le cout des FONDS PROPRES.
+
+    La correction pays se diluait donc a proportion de l'endettement : une societe
+    argentine financee a moitie par dette ne voyait sa prime de 11,5 points
+    s'appliquer qu'a la moitie de son capital, et empruntait pour le reste au taux
+    americain. Or un preteur exige d'un emetteur argentin le spread souverain,
+    exactement comme l'actionnaire.
+
+    Damodaran construit la prime ACTIONS a partir du spread de defaut SOUVERAIN,
+    multiplie par la volatilite relative des actions face aux obligations. On
+    divise donc par ce meme facteur pour retrouver le spread qu'un PRETEUR exige,
+    plutot que d'appliquer a la dette une prime calibree pour les actions.
+
+    Mesure : 0 societe a prime nulle ne bouge ; les etrangeres endettees baissent
+    a proportion de leur levier — Mahindra -34 %, TGS -24 %.
+    """
+    import inspect
+
+    from quantbench.valuation import build_universal as B
+
+    src = inspect.getsource(B.build_dcf_from_fundamentals)
+    code = "\n".join(l.split("#")[0] for l in src.splitlines())
+    assert "spread_pays" in code, "le cout de la dette ignore de nouveau le pays"
+    assert "_VOLATILITE_RELATIVE" in code, \
+        "la prime actions est appliquee telle quelle a la dette"
+    assert B._VOLATILITE_RELATIVE > 1.0, (
+        "le spread de dette doit etre INFERIEUR a la prime actions, pas superieur")
+
+    # Un pays de reference ne doit rien porter.
+    assert B.country_erp("US", 0.0) == 0.0
+    assert B.country_erp("DE", 0.0) == 0.0
+    # Et l'ordre doit tenir : plus le pays est risque, plus le preteur exige.
+    spreads = [B.country_erp(p, 0.0) / B._VOLATILITE_RELATIVE
+               for p in ("US", "GB", "CN", "BR", "TR", "AR")]
+    assert spreads == sorted(spreads), spreads
+    # Le spread de dette reste STRICTEMENT sous la prime actions du meme pays.
+    for p in ("BR", "TR", "AR", "ZA"):
+        assert B.country_erp(p, 0.0) / B._VOLATILITE_RELATIVE < B.country_erp(p, 0.0)

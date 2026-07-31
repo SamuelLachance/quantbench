@@ -296,7 +296,19 @@ def d4_volatilite(fund, F, reg):
         iqr_croissance = _quartiles(croissances)
         if iqr_croissance is not None:
             composantes.append(iqr_croissance)
-    if not composantes:
+    # LES DEUX COMPOSANTES, OU AUCUNE. La moyenne etait divisee par le NOMBRE de
+    # composantes disponibles — un ou deux selon la profondeur des comptes — alors
+    # que la table de centiles gelee est mesuree sur une population d'au moins six
+    # exercices, donc presque entierement a DEUX composantes. Une societe aux
+    # comptes courts etait ainsi classee contre une loi qui n'est pas la sienne, et
+    # ressortait plus favorablement : rang median 0,419 contre 0,510, mesure sur
+    # 281 societes.
+    #
+    # Une dimension non comparable doit se declarer non definissable — son poids se
+    # redistribue alors sur les autres, ce que le module sait faire — plutot que de
+    # produire un rang qui n'a pas de sens. C'est la meme discipline que pour
+    # l'autonomie de tresorerie : on ne note pas ce qu'on ne peut pas comparer.
+    if len(composantes) < 2:
         return None, None
     return sum(composantes) / len(composantes), "dispersion des marges et de la croissance"
 

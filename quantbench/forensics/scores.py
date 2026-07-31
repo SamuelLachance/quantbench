@@ -213,10 +213,18 @@ _Z_PDEF = ((8.15, 0.005), (7.30, 0.010), (6.65, 0.025), (5.85, 0.075),
            (2.50, 0.700), (1.75, 0.800))
 
 
-def default_probability(z) -> float:
-    """Probabilite de defaut deduite du Z''-EMS via la table de notation."""
+def default_probability(z, si_inconnu: float = 0.5) -> float:
+    """Probabilite de defaut deduite du Z''-EMS via la table de notation.
+
+    `si_inconnu` sert quand le Z n'est pas calculable. Sa valeur par defaut de 0,5
+    convient a un appelant qui ne sait rien de la societe — mais PAS a celui qui
+    vient de la router en detresse : elle lui accorderait alors une probabilite
+    INFERIEURE a celle de toutes les societes dont le Z a pu etre mesure dans cette
+    zone (0,55 a 0,90). Ne pas savoir rendrait la situation meilleure.
+    L'appelant qui en sait plus doit donc le dire.
+    """
     if z is None:
-        return 0.5
+        return si_inconnu
     for seuil, p in _Z_PDEF:
         if z >= seuil:
             return p

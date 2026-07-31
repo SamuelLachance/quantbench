@@ -937,7 +937,14 @@ def value_young(fund):
 
 def value_distressed(fund, forensic):
     z = (forensic or {}).get("scores", {}).get("altman_z")
-    pdef = default_probability(z)      # table de notation Altman/Damodaran
+    # UN Z INCALCULABLE NE REND PAS LA SITUATION MEILLEURE. Le repli generique de
+    # 0,5 est INFERIEUR a toutes les valeurs que la table attribue dans la zone de
+    # detresse (0,55 a 0,90) : une societe deja routee ici — fonds propres absorbes
+    # par les pertes, ou Z sous le seuil, et sans generation de tresorerie — se
+    # voyait donc mieux traitee parce qu'on ne savait pas la mesurer.
+    # On retient la probabilite du SEUIL qui l'a fait entrer en detresse : au moins
+    # aussi grave que la frontiere, sans inventer pire.
+    pdef = default_probability(z, si_inconnu=default_probability(Z_DETRESSE_ROUTE))
     gc = _dcf_value(fund, method="DCF going-concern")
     # Recuperation en liquidation selon l'intensite d'ACTIFS CORPORELS du
     # secteur : une centrale ou un gisement se revend, un logiciel beaucoup moins.
