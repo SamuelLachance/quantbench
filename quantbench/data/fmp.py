@@ -184,10 +184,20 @@ def _get(path, retries=3):
         raise _sans_la_cle(exc, cle) from None
 
 
-def _get_brut(url, path, retries=3):
+def _get_brut(url, path, retries=5):
+    import random
     import time
+    derniere = None
     for attempt in range(retries):
-        r = requests.get(url, timeout=_TIMEOUT)
+        try:
+            r = requests.get(url, timeout=_TIMEOUT)
+        except requests.RequestException as exc:
+            # Un TIMEOUT ou une coupure reseau n'etait jamais reessaye : il levait
+            # au premier essai, la ou un 429 en avait trois. Les deux sont pourtant
+            # le meme fait — le transport a echoue, la donnee n'est pas en cause.
+            derniere = exc
+            time.sleep(min(2.0 ** attempt + random.random(), 20.0))
+            continue
         # Compte AVANT le test de statut : une reponse 429 ou 500 consomme aussi
         # du transfert, et une boucle de reessai en consomme plusieurs fois.
         n = len(r.content or b"")
@@ -195,18 +205,46 @@ def _get_brut(url, path, retries=3):
             k, o = _OCTETS.get(_famille(path), (0, 0))
             _OCTETS[_famille(path)] = (k + 1, o + n)
         if r.status_code == 429:                    # rate limit -> backoff
-            time.sleep(1.5 * (attempt + 1))
+            # EXPONENTIEL AVEC GIGUE, et Retry-After respecte quand il existe. Le
+            # backoff lineaire (1,5 s puis 3 s) etait ecrase par 120 workers en
+            # rafale : au troisieme 429 la fonction levait, `statements` avalait
+            # l'exception, et la societe etait rejetee « comptes indisponibles »
+            # — NVDA un soir, JPM le lendemain, au hasard des rafales.
+            try:
+                attente = float(r.headers.get("Retry-After") or 0.0)
+            except (TypeError, ValueError):
+                attente = 0.0
+            time.sleep(max(attente, min(2.0 ** attempt + random.random(), 20.0)))
             continue
         r.raise_for_status()
         return r
+    if derniere is not None:
+        raise derniere
     r.raise_for_status()
     return r
 
 
+class FournisseurInjoignable(RuntimeError):
+    """Le transport a echoue : rien ne prouve que les comptes n'existent pas.
+
+    `statements` avalait toute exception et rendait un dict vide — le meme
+    resultat qu'une societe sans comptes. Une rafale de 429 pendant le build
+    faisait donc rejeter des societes bien vivantes pour « comptes indisponibles
+    chez le fournisseur » : NVDA, MSFT, AMZN et META manquaient au site un jour,
+    JPM le lendemain, au hasard des rafales — 4 100 lignes par build, a
+    composition changeante. Ne pas savoir n'est pas savoir qu'il n'y a rien.
+    """
+
+
 def statements(symbol, limit=6):
     """3 états annuels par ticker (endpoints à débit élevé). Retourne
-    {income:{year:row}, balance:{year:row}, cashflow:{year:row}}."""
+    {income:{year:row}, balance:{year:row}, cashflow:{year:row}}.
+
+    Leve `FournisseurInjoignable` quand le TRANSPORT a echoue sur les deux etats
+    porteurs (resultat et bilan) : un vide constate n'est une donnee que si le
+    fournisseur a effectivement repondu."""
     out = {"income": {}, "balance": {}, "cashflow": {}}
+    echecs = []
     for ep, kind in (("income-statement", "income"),
                      ("balance-sheet-statement", "balance"),
                      ("cash-flow-statement", "cashflow")):
@@ -218,7 +256,11 @@ def statements(symbol, limit=6):
                 except (TypeError, ValueError):
                     continue
         except Exception:
-            continue
+            echecs.append(kind)
+    if "income" in echecs and "balance" in echecs:
+        raise FournisseurInjoignable(f"{symbol} : transport en echec sur {echecs}")
+    if not out["income"] and not out["balance"] and echecs:
+        raise FournisseurInjoignable(f"{symbol} : transport en echec sur {echecs}")
     return out
 
 

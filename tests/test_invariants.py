@@ -4801,3 +4801,84 @@ def test_les_options_des_employes_diluent_la_valeur_par_action():
     # Le facteur vient de la donnee, borne par la source.
     from quantbench.data import fmp as _f
     assert True  # la borne [1 ; 1,5] est testee par construction dans fmp
+
+
+def test_un_echec_de_transport_n_est_pas_une_absence_de_comptes(monkeypatch):
+    """`statements` avalait toute exception et rendait un dict vide — le meme
+    resultat qu'une societe sans comptes. Une rafale de 429 pendant le build
+    faisait rejeter des societes bien vivantes pour « comptes indisponibles » :
+    NVDA, MSFT, AMZN et META manquaient au site un jour, JPM le lendemain, au
+    hasard des rafales — ~4 100 lignes par build, a composition changeante.
+
+    Ne pas savoir n'est pas savoir qu'il n'y a rien : l'echec de TRANSPORT leve
+    desormais `FournisseurInjoignable`, et seul un VIDE effectivement repondu par
+    le fournisseur vaut absence de comptes.
+    """
+    from quantbench.data import fmp
+
+    # Transport en echec sur tout : exception dediee, jamais un dict vide.
+    monkeypatch.setattr(fmp, "_json", lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("429 simule")))
+    with pytest.raises(fmp.FournisseurInjoignable):
+        fmp.statements("NVDA")
+
+    # Le fournisseur REPOND vide : c'est une donnee, pas un echec.
+    monkeypatch.setattr(fmp, "_json", lambda *a, **k: [])
+    vide = fmp.statements("COQUILLE")
+    assert vide == {"income": {}, "balance": {}, "cashflow": {}}
+
+    # Echec PARTIEL (le tableau de flux seulement) avec resultat et bilan servis :
+    # la donnee suffit, on ne rejette pas.
+    def partiel(path, *a, **k):
+        if "cash-flow" in path:
+            raise RuntimeError("429 simule")
+        return [{"fiscalYear": "2024", "date": "2024-12-31", "revenue": 1.0}]
+    monkeypatch.setattr(fmp, "_json", partiel)
+    ok = fmp.statements("AAPL")
+    assert ok["income"] and ok["balance"] and not ok["cashflow"]
+
+
+def test_le_transport_reessaie_les_pannes_reseau_comme_les_429(monkeypatch):
+    """Un timeout n'etait JAMAIS reessaye : il levait au premier essai, la ou un
+    429 en avait trois. Les deux sont le meme fait — le transport a echoue, la
+    donnee n'est pas en cause — et recoivent desormais le meme backoff exponentiel
+    avec gigue, Retry-After respecte quand il existe.
+    """
+    import requests as _rq
+
+    from quantbench.data import fmp
+
+    dodos, essais = [], []
+    monkeypatch.setattr("time.sleep", lambda s: dodos.append(s))
+
+    def toujours_timeout(url, timeout=None):
+        essais.append(1)
+        raise _rq.ConnectTimeout("simule")
+    monkeypatch.setattr(fmp.requests, "get", toujours_timeout)
+    with pytest.raises(_rq.ConnectTimeout):
+        fmp._get_brut("http://x", "income-statement?symbol=T", retries=5)
+    assert len(essais) == 5, "la panne reseau n'est pas reessayee jusqu'au bout"
+    assert len(dodos) == 5 and all(d > 0 for d in dodos)
+    # Backoff CROISSANT : la gigue ne doit pas masquer l'exponentielle.
+    assert dodos[-1] > dodos[0], f"backoff plat : {dodos}"
+
+
+def test_le_rejet_dit_transport_et_jamais_comptes_indisponibles(monkeypatch):
+    """Le motif de rejet est un FAIT AFFICHE sur le site : « comptes indisponibles
+    chez le fournisseur » affirme quelque chose sur la SOCIETE. Quand c'est le
+    transport qui a echoue, le motif doit le dire — et le build reessaie d'abord,
+    l'echec etant transitoire par definition.
+    """
+    import build_site_fmp as bs
+    from quantbench.data import fmp
+
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    appels = []
+
+    def injoignable(symbol, limit=6):
+        appels.append(symbol)
+        raise fmp.FournisseurInjoignable(symbol)
+    monkeypatch.setattr(bs.fmp, "statements", injoignable)
+    _, row = bs.build_one("NVDA", {"name": "NVIDIA"}, with_news=False, with_pdf=False)
+    assert row["__rejet__"] == ["fournisseur injoignable (transitoire)"]
+    assert len(appels) == 2, "le build ne retente pas avant de rejeter"

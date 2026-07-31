@@ -435,7 +435,20 @@ def _results_summary(F):
 
 def build_one(symbol, sr, with_news=True, with_pdf=True):
     with _etape("etats financiers"):
-        entry = fmp.statements(symbol)             # 3 appels par-ticker
+        # UNE SECONDE CHANCE apres une pause : l'echec de transport est transitoire
+        # par definition (rafale de 429, coupure). Si elle echoue aussi, le motif
+        # de rejet DIT que c'est le transport — jamais « comptes indisponibles »,
+        # qui affirme un fait sur la societe que rien ne prouve.
+        try:
+            entry = fmp.statements(symbol)         # 3 appels par-ticker
+        except fmp.FournisseurInjoignable:
+            import time as _t
+            _t.sleep(10.0)
+            try:
+                entry = fmp.statements(symbol)
+            except fmp.FournisseurInjoignable:
+                return None, {"__rejet__": ["fournisseur injoignable (transitoire)"],
+                              "ticker": symbol}
     if len(set(entry["income"]) & set(entry["balance"])) < 1:   # ≥1 an suffit (actif net)
         # Abandon SILENCIEUX auparavant : environ six cents lignes disparaissaient
         # sans laisser de trace, dont les certificats canadiens (Eli Lilly, Micron,
