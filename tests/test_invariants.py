@@ -4027,3 +4027,37 @@ def test_le_rendement_excedentaire_egale_sa_somme_annee_par_annee():
                          "beta": 1.0, "country": "US", "roe": 0.12}, None)
     assert m and "erosion" not in m["method"], (
         "le libelle annonce une erosion que le calcul ne fait pas")
+
+
+def test_la_volatilite_des_capitaux_propres_ne_compare_que_des_annees_voisines():
+    """La base d'evaluation d'une holding se deduit de la variation ANNUELLE de ses
+    capitaux propres : forte, les participations sont a la juste valeur ; reguliere,
+    elles sont au cout historique et l'actif net n'est qu'un PLANCHER.
+
+    La serie etait purgee de ses trous avant qu'on en prenne des rapports d'indices
+    voisins : un exercice manquant faisait comparer 2024 a 2022 comme s'il
+    s'agissait d'une variation d'un an. Sur quatre exercices dont un trou, ce seul
+    rapport fabrique portait la mediane a 10,5 % et declarait « juste valeur » une
+    holding qui progresse de 4 % l'an.
+
+    Un rapport unique ne doit pas davantage decider : la mesure se tait.
+    """
+    from quantbench.valuation.route import value_holding
+
+    base = {"book_equity": 1462.0, "total_equity": 1462.0,
+            "total_assets": 1600.0, "total_liab": 138.0,
+            "shares": 100.0, "price": 12.0, "market_cap": 1200.0}
+
+    troue = value_holding(dict(base), {"equity": [1462.0, None, 1250.0, 1202.0]})
+    assert "base_juste_valeur" not in troue, (
+        "un seul rapport survivant a decide de la base d'evaluation")
+    assert "variation_annuelle_capitaux_propres" not in troue, (
+        "une variation a ete publiee alors qu'aucune paire voisine n'existe")
+
+    regulier = value_holding(dict(base),
+                             {"equity": [1462.0, 1406.0, 1352.0, 1300.0, 1250.0]})
+    assert regulier["variation_annuelle_capitaux_propres"] == pytest.approx(0.04, abs=1e-3)
+    assert regulier["base_juste_valeur"] is False, (
+        "une progression de 4 % l'an est un cout historique, pas une juste valeur")
+    assert regulier["confidence"] == "faible", (
+        "au cout historique l'actif net est un plancher : la confiance doit baisser")

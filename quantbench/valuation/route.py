@@ -528,11 +528,20 @@ def value_holding(fund, F=None):
             confiance = "faible"
 
     # 2. Base d'evaluation deduite de la volatilite des capitaux propres
-    eqs = [e for e in (F or {}).get("equity", []) if e]
+    # LA SERIE NE SE PURGE PAS AVANT D'EN PRENDRE DES RAPPORTS D'ANNEES VOISINES.
+    # Le filtre `if e` retirait les exercices manquants ET les fonds propres NULS,
+    # puis les rapports etaient pris sur des indices DEVENUS adjacents : un trou au
+    # milieu faisait comparer 2024 a 2022 comme s'il s'agissait d'une variation
+    # annuelle, gonflant la volatilite mesuree. Or c'est elle qui decide si les
+    # participations sont inscrites a la juste valeur — une holding au cout
+    # historique, dont l'actif net est un PLANCHER, ressortait alors en confiance
+    # moyenne au lieu de faible.
+    # On apparie donc les exercices VOISINS, en exigeant les deux.
+    eqs = (F or {}).get("equity") or []
     if len(eqs) >= 3:
         var = [abs(eqs[i] / eqs[i + 1] - 1.0) for i in range(len(eqs) - 1)
-               if eqs[i + 1]]
-        if var:
+               if eqs[i] is not None and eqs[i + 1] is not None and eqs[i + 1] > 0]
+        if len(var) >= 2:
             v = float(np.median(var))
             diag["variation_annuelle_capitaux_propres"] = round(v, 4)
             # Sous juste valeur les capitaux propres suivent les marches (>8 %/an) ;
