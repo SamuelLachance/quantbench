@@ -345,9 +345,18 @@ def test_l_historique_de_chiffre_d_affaires_va_du_plus_ancien_au_plus_recent(yah
 
 
 def test_seule_la_valeur_annuelle_la_plus_recente_est_retenue(yahoo):
-    """`_row` doit lire la colonne la plus recente, et ignorer les exercices vides
-    plutot que de renvoyer NaN — un NaN se propage silencieusement jusqu'a la marge
-    operationnelle affichee.
+    """Un exercice vide doit etre ignore plutot que rendu en NaN — un NaN se propage
+    silencieusement jusqu'a la marge operationnelle affichee.
+
+    MAIS TOUTES LES LIGNES D'UN ETAT DOIVENT VENIR DU MEME EXERCICE. Ce test exigeait
+    l'inverse : un resultat d'exploitation de 2024, faute de 2025, et un resultat
+    avant impot de 2025. Chaque ligne remontait a sa propre annee la plus recente, et
+    tout rapport forme en aval — marge, taux d'impot, rendement des fonds propres —
+    melangeait alors deux exercices sans que rien ne le signale.
+
+    L'exercice de reference est donc la colonne la plus recente ou les lignes
+    essentielles sont TOUTES renseignees : ici 2024, puisque 2025 n'a pas de
+    resultat d'exploitation. Les trois grandeurs en decoulent ensemble.
     """
     inc = etat({"Operating Income": [np.nan, 1.2e9, 1.0e9],
                 "Pretax Income": [1.5e9, 1.4e9, 1.3e9],
@@ -355,10 +364,13 @@ def test_seule_la_valeur_annuelle_la_plus_recente_est_retenue(yahoo):
     yahoo(info_us(), inc=inc)
     f = universal.get_fundamentals("test")
 
-    assert f["ebit"] == pytest.approx(1.2)          # 2025 est vide -> on prend 2024
-    assert f["pretax_income"] == pytest.approx(1.5)
-    assert f["tax"] == pytest.approx(0.3)
+    assert f["ebit"] == pytest.approx(1.2)          # 2025 est vide -> exercice 2024
+    assert f["pretax_income"] == pytest.approx(1.4), "resultat avant impot pris en 2025"
+    assert f["tax"] == pytest.approx(0.28), "impot pris en 2025"
     assert f["ebit"] == f["ebit"]                   # non-NaN
+    # Le taux d'impot effectif est le meme des deux cotes — c'est justement ce qui
+    # rendait le melange indetectable a l'oeil.
+    assert f["tax"] / f["pretax_income"] == pytest.approx(0.2)
 
 
 def test_les_libelles_alternatifs_sont_essayes_dans_l_ordre(yahoo):

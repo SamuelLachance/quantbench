@@ -4267,3 +4267,42 @@ def test_les_producteurs_de_series_ne_referment_plus_leurs_trous():
                       r"\[\s*x\s+for\s+x\s+in\s*\(?\s*fund\.get\(\"revenue_history\"\)"):
             assert not re.search(motif, code), (
                 f"{chemin} referme encore la serie de chiffre d'affaires")
+
+
+def test_les_grandeurs_d_un_meme_etat_viennent_du_meme_exercice():
+    """`_row` rendait la valeur la plus recente DE CHAQUE LIGNE prise isolement.
+    Deux lignes dont les trous ne tombent pas aux memes annees rendaient donc des
+    grandeurs d'EXERCICES DIFFERENTS, que l'appelant mettait ensuite en rapport.
+
+    Le cas est indetectable a l'oeil : la marge formee du resultat de 2025 et du
+    chiffre d'affaires de 2024 est un nombre parfaitement plausible. Mesure sur un
+    compte de resultat ou le chiffre d'affaires manque au dernier exercice : marge
+    de 20,00 % au lieu de 17,78 %, soit 12,5 % de trop.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from quantbench.data.universal import _row, exercice_commun
+
+    cols = pd.to_datetime(["2025-12-31", "2024-12-31", "2023-12-31"])
+    inc = pd.DataFrame({cols[0]: [np.nan, 3.6], cols[1]: [18.0, 3.2],
+                        cols[2]: [16.0, 2.9]},
+                       index=["Total Revenue", "Operating Income"])
+
+    ex = exercice_commun(inc, "Total Revenue", "Operating Income")
+    assert ex == cols[1], "l'exercice de reference n'est pas le plus recent COMPLET"
+    assert _row(inc, "Total Revenue", col=ex) == 18.0
+    assert _row(inc, "Operating Income", col=ex) == 3.2
+    # La forme d'hier, reproduite : deux annees differentes.
+    assert _row(inc, "Operating Income") == 3.6 and _row(inc, "Total Revenue") == 18.0
+
+    # UNE LIGNE ABSENTE A L'EXERCICE DE REFERENCE VAUT None, jamais la valeur d'une
+    # autre annee : aller la chercher ailleurs reintroduirait exactement le melange.
+    assert _row(inc, "Total Revenue", col=cols[0]) is None
+
+    # Sur un etat dense, l'exercice de reference EST le plus recent : la correction
+    # ne doit rien deplacer.
+    dense = inc.copy()
+    dense.loc["Total Revenue", cols[0]] = 20.0
+    assert exercice_commun(dense, "Total Revenue", "Operating Income") == cols[0]
+    assert _row(dense, "Total Revenue", col=cols[0]) == _row(dense, "Total Revenue")

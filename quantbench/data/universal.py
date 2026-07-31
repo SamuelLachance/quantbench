@@ -53,12 +53,47 @@ def _first(d: dict, *keys):
     return None
 
 
-def _row(df, *labels):
-    """Valeur annuelle la plus recente d'une ligne d'un etat financier yfinance."""
+def exercice_commun(df, *lignes):
+    """Colonne la plus recente ou TOUTES les lignes citees sont renseignees.
+
+    Sans elle, `_row` rendait la valeur la plus recente DE CHAQUE LIGNE prise
+    isolement. Deux lignes dont les trous ne tombent pas aux memes exercices
+    rendaient donc des grandeurs d'ANNEES DIFFERENTES, que l'appelant mettait
+    ensuite en rapport : une marge d'exploitation formee du resultat de 2025 et du
+    chiffre d'affaires de 2024, un rendement des fonds propres formee du benefice
+    d'une annee et du capital d'une autre. Le rapport n'a alors aucun sens, et rien
+    ne le signale.
+
+    Les colonnes yfinance sont des dates de cloture, PLUS RECENTE EN TETE.
+    Rend `None` si aucune colonne ne porte toutes les lignes.
+    """
+    if df is None:
+        return None
+    presentes = [l for l in lignes if l in df.index]
+    if not presentes:
+        return None
+    for col in df.columns:
+        if all(df.loc[l, col] == df.loc[l, col] for l in presentes):   # aucun NaN
+            return col
+    return None
+
+
+def _row(df, *labels, col=None):
+    """Valeur d'une ligne d'un etat financier yfinance.
+
+    Avec `col`, lit CET exercice et rend `None` si la ligne n'y est pas renseignee :
+    on ne va pas chercher ailleurs une valeur qui manque ici, sans quoi le rapport
+    forme en aval melangerait deux annees. Sans `col`, comportement d'origine — la
+    valeur la plus recente de la ligne — reserve aux grandeurs qui ne servent a
+    aucun rapport.
+    """
     if df is None:
         return None
     for lab in labels:
         if lab in df.index:
+            if col is not None:
+                v = df.loc[lab, col]
+                return float(v) if v == v else None
             s = df.loc[lab].dropna()
             if len(s):
                 return float(s.iloc[0])
@@ -111,21 +146,27 @@ def get_fundamentals(ticker: str) -> dict:
         return x * fx_fin / _B
 
     price = _first(info, "currentPrice", "regularMarketPrice", "previousClose")
-    ebit = _row(inc, "Operating Income", "EBIT", "Total Operating Income As Reported")
+    # UN SEUL EXERCICE DE REFERENCE PAR ETAT, pour que les rapports formes en aval
+    # — marge d'exploitation, taux d'impot, rendement des fonds propres — portent
+    # sur la meme annee des deux cotes.
+    ex_inc = exercice_commun(inc, "Total Revenue", "Operating Income")
+    ex_bal = exercice_commun(bal, "Stockholders Equity")
+    ebit = _row(inc, "Operating Income", "EBIT", "Total Operating Income As Reported",
+                col=ex_inc)
     book_equity = _row(bal, "Stockholders Equity", "Common Stock Equity",
-                       "Total Equity Gross Minority Interest")
-    pretax = _row(inc, "Pretax Income", "Income Before Tax")
-    tax = _row(inc, "Tax Provision", "Income Tax Expense")
+                       "Total Equity Gross Minority Interest", col=ex_bal)
+    pretax = _row(inc, "Pretax Income", "Income Before Tax", col=ex_inc)
+    tax = _row(inc, "Tax Provision", "Income Tax Expense", col=ex_inc)
 
     # Tout converti en USD (deux groupes de devises distincts) :
     price_usd = (price * fx_price) if (price is not None and fx_price) else None
     market_cap = usd_price(_first(info, "marketCap"))
-    revenue = usd_fin(_sinon(_first(info, "totalRevenue"), _row(inc, "Total Revenue")))
+    revenue = usd_fin(_sinon(_first(info, "totalRevenue"), _row(inc, "Total Revenue", col=ex_inc)))
     ebit_usd = usd_fin(ebit)
     ebitda = usd_fin(_first(info, "ebitda"))
     net_income = usd_fin(_sinon(_first(info, "netIncomeToCommon"),
-                            _row(inc, "Net Income")))
-    total_debt = usd_fin(_sinon(_first(info, "totalDebt"), _row(bal, "Total Debt")))
+                            _row(inc, "Net Income", col=ex_inc)))
+    total_debt = usd_fin(_sinon(_first(info, "totalDebt"), _row(bal, "Total Debt", col=ex_bal)))
     # PERIMETRE CONSTANT, QUELLE QUE SOIT LA SOURCE QUI REPOND. `totalCash` de
     # Yahoo agrege la tresorerie ET les placements a court terme ; la ligne de
     # bilan « Cash And Cash Equivalents » ne porte que la premiere. Se replier de
@@ -134,9 +175,9 @@ def get_fundamentals(ticker: str) -> dict:
     # directement dans la valeur d'entreprise, donc dans tout multiple qui en
     # decoule. On somme explicitement les deux composantes du bilan pour retrouver
     # le perimetre de Yahoo, plutot que de choisir la plus etroite par accident.
-    tresorerie_bilan = _row(bal, "Cash And Cash Equivalents")
+    tresorerie_bilan = _row(bal, "Cash And Cash Equivalents", col=ex_bal)
     placements_court_terme = _row(bal, "Other Short Term Investments",
-                                  "Short Term Investments")
+                                  "Short Term Investments", col=ex_bal)
     if tresorerie_bilan is not None and placements_court_terme is not None:
         tresorerie_bilan += placements_court_terme
     cash = usd_fin(_sinon(_first(info, "totalCash"), tresorerie_bilan))
