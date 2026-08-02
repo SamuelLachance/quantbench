@@ -1,223 +1,223 @@
 {
- "instantane": "2024-07-31",
+ "instantane": "2024-08-02",
  "horizon_mois": 24,
  "seuil_effondrement": -0.7,
- "n": 1508,
- "radiees": 332,
+ "n": 1596,
+ "radiees": 339,
  "par_famille": [
   {
    "grade": "A",
-   "n": 244,
-   "taux": 0.1557377049180328,
-   "ic_bas": 0.11561510194283656,
-   "ic_haut": 0.2065325923909638,
-   "rendement_median": 0.09368603997121672,
-   "creux_median": -0.19958639210541756,
-   "cap_mediane": 3.5305899
+   "n": 286,
+   "taux": 0.13286713286713286,
+   "ic_bas": 0.09835381339673727,
+   "ic_haut": 0.17711251027798713,
+   "rendement_median": 0.10872495972590668,
+   "creux_median": -0.16301602894245465,
+   "cap_mediane": 3.441754065
   },
   {
    "grade": "B",
-   "n": 372,
-   "taux": 0.20967741935483872,
-   "ic_bas": 0.17138219790648485,
-   "ic_haut": 0.2539076050317743,
-   "rendement_median": 0.13659384126279994,
-   "creux_median": -0.17841537468438312,
-   "cap_mediane": 1.1771208559600002
+   "n": 376,
+   "taux": 0.19946808510638298,
+   "ic_bas": 0.16220622963186795,
+   "ic_haut": 0.24280891352254166,
+   "rendement_median": 0.18457388145043097,
+   "creux_median": -0.17592796295822566,
+   "cap_mediane": 1.03358221
   },
   {
    "grade": "C",
-   "n": 270,
-   "taux": 0.3333333333333333,
-   "ic_bas": 0.2797883166660654,
-   "ic_haut": 0.39155453263075435,
-   "rendement_median": -0.1262506959357353,
-   "creux_median": -0.2814992025518341,
-   "cap_mediane": 0.12076353973307999
+   "n": 293,
+   "taux": 0.33447098976109213,
+   "ic_bas": 0.28289739702945277,
+   "ic_haut": 0.39032899711476426,
+   "rendement_median": -0.06964358869315856,
+   "creux_median": -0.28404099560761353,
+   "cap_mediane": 0.17080850625
   },
   {
    "grade": "D",
    "n": 538,
-   "taux": 0.44609665427509293,
-   "ic_bas": 0.4046216902587704,
-   "ic_haut": 0.4883359564040183,
-   "rendement_median": -0.5625000075,
-   "creux_median": -0.6000000000000001,
-   "cap_mediane": 0.01392840340485
+   "taux": 0.4275092936802974,
+   "ic_bas": 0.38636413852691287,
+   "ic_haut": 0.46968235181269935,
+   "rendement_median": -0.4812051282051282,
+   "creux_median": -0.5817886178861789,
+   "cap_mediane": 0.01298882513125
   },
   {
    "grade": "F",
-   "n": 84,
-   "taux": 0.4166666666666667,
-   "ic_bas": 0.3171466976499569,
-   "ic_haut": 0.5234755132387336,
-   "rendement_median": -0.14263401060534464,
-   "creux_median": -0.9607142857142856,
-   "cap_mediane": 9.20468885e-05
+   "n": 103,
+   "taux": 0.5145631067961165,
+   "ic_bas": 0.41926787342306515,
+   "ic_haut": 0.6088110770980802,
+   "rendement_median": -0.8,
+   "creux_median": -0.9,
+   "cap_mediane": 6.0042e-05
   }
  ],
  "dimensions": [
   {
-   "dimension": "d1",
-   "nom": "Solvabilité",
-   "auc": 0.649178752402586,
-   "ecart_type": 0.017923567440463466,
-   "ecarts_types_au_hasard": 8.323050246448515,
-   "couverture": 0.8136604774535809,
+   "dimension": "d2",
+   "nom": "Autonomie de trésorerie",
+   "auc": 0.642193103659029,
+   "ecart_type": 0.015947178803918303,
+   "ecarts_types_au_hasard": 8.916505258227334,
+   "couverture": 0.9072681704260651,
    "verdict": "porte du signal"
   },
   {
-   "dimension": "d2",
-   "nom": "Autonomie de trésorerie",
-   "auc": 0.6314765694076039,
-   "ecart_type": 0.016647329277257258,
-   "ecarts_types_au_hasard": 7.897757485173345,
-   "couverture": 0.883289124668435,
+   "dimension": "d1",
+   "nom": "Solvabilité",
+   "auc": 0.6399480625583567,
+   "ecart_type": 0.01772189565280108,
+   "ecarts_types_au_hasard": 7.896901398143423,
+   "couverture": 0.8220551378446115,
    "verdict": "porte du signal"
   },
   {
    "dimension": "d3",
    "nom": "Rentabilité de cycle",
-   "auc": 0.6298095188263102,
-   "ecart_type": 0.01628447784407564,
-   "ecarts_types_au_hasard": 7.971365128758822,
-   "couverture": 0.946949602122016,
+   "auc": 0.6246397194640564,
+   "ecart_type": 0.015610736466206398,
+   "ecarts_types_au_hasard": 7.984230579631672,
+   "couverture": 0.9912280701754386,
    "verdict": "porte du signal"
   },
   {
    "dimension": "d4",
    "nom": "Volatilité d'exploitation",
-   "auc": 0.6145607336052532,
-   "ecart_type": 0.018703827013283294,
-   "ecarts_types_au_hasard": 6.124988940706796,
-   "couverture": 0.7705570291777188,
-   "verdict": "porte du signal"
-  },
-  {
-   "dimension": "d5",
-   "nom": "Dilution",
-   "auc": 0.5762547538157294,
-   "ecart_type": 0.016020727468046447,
-   "ecarts_types_au_hasard": 4.759756007823025,
-   "couverture": 0.9986737400530504,
+   "auc": 0.6118345009300726,
+   "ecart_type": 0.019961523682990673,
+   "ecarts_types_au_hasard": 5.60250323102176,
+   "couverture": 0.7142857142857143,
    "verdict": "porte du signal"
   },
   {
    "dimension": "d6",
    "nom": "Liquidité de sortie",
-   "auc": 0.5600104666181689,
-   "ecart_type": 0.018366223860248398,
-   "ecarts_types_au_hasard": 3.2674363045337107,
-   "couverture": 0.7188328912466844,
-   "verdict": "signal faible"
+   "auc": 0.590233576454049,
+   "ecart_type": 0.017694088731011044,
+   "ecarts_types_au_hasard": 5.099645301083159,
+   "couverture": 0.7324561403508771,
+   "verdict": "porte du signal"
+  },
+  {
+   "dimension": "d5",
+   "nom": "Dilution",
+   "auc": 0.5875111890336374,
+   "ecart_type": 0.015711051958651374,
+   "ecarts_types_au_hasard": 5.570040075225448,
+   "couverture": 0.9968671679197995,
+   "verdict": "porte du signal"
   },
   {
    "dimension": "d8",
    "nom": "Mur de refinancement",
-   "auc": 0.5563739531607107,
-   "ecart_type": 0.016045583309902217,
-   "ecarts_types_au_hasard": 3.513362653878754,
+   "auc": 0.5618850893113,
+   "ecart_type": 0.01573132825050288,
+   "ecarts_types_au_hasard": 3.9338756604561804,
    "couverture": 1.0,
    "verdict": "signal faible"
   },
   {
    "dimension": "d7",
    "nom": "Confiance dans la donnée",
-   "auc": 0.5013421405826469,
-   "ecart_type": 0.015960073352624185,
-   "ecarts_types_au_hasard": 0.08409363497231327,
+   "auc": 0.5006916023130561,
+   "ecart_type": 0.01563807444618671,
+   "ecarts_types_au_hasard": 0.04422554166985304,
    "couverture": 1.0,
    "verdict": "indistinguable du hasard"
   }
  ],
- "auc_note": 0.6575658873614083,
+ "auc_note": 0.6728151612452883,
  "valorisation": {
   "paquets": [
    {
     "paquet": 1,
-    "n": 230,
-    "upside_min": -0.9999528409090909,
-    "upside_max": -0.844325897187197,
-    "rendement_median": -0.5427572371381431,
-    "creux_median": -0.4587670970886365,
-    "taux_effondrement": 0.4608695652173913,
-    "ic_bas": 0.3976194339984351,
-    "ic_haut": 0.525405382800629
+    "n": 223,
+    "upside_min": -0.9999771980676329,
+    "upside_max": -0.819952873853404,
+    "rendement_median": -0.33920704845814975,
+    "creux_median": -0.2730496453900709,
+    "taux_effondrement": 0.3901345291479821,
+    "ic_bas": 0.32849048505085654,
+    "ic_haut": 0.45549975307125157
    },
    {
     "paquet": 2,
-    "n": 230,
-    "upside_min": -0.8416666666666667,
-    "upside_max": -0.6147584733362408,
-    "rendement_median": -0.18048331013558166,
-    "creux_median": -0.24609709253151457,
-    "taux_effondrement": 0.3130434782608696,
-    "ic_bas": 0.2565978190769944,
-    "ic_haut": 0.3756318611852003
+    "n": 223,
+    "upside_min": -0.8152734778121775,
+    "upside_max": -0.5553618134263296,
+    "rendement_median": -0.08612975391498878,
+    "creux_median": -0.23548387096774193,
+    "taux_effondrement": 0.3273542600896861,
+    "ic_bas": 0.26914244929775366,
+    "ic_haut": 0.39141363917984484
    },
    {
     "paquet": 3,
-    "n": 230,
-    "upside_min": -0.6136904761904762,
-    "upside_max": -0.2892711544198071,
-    "rendement_median": 0.07209796818396597,
-    "creux_median": -0.2259288433398554,
-    "taux_effondrement": 0.22608695652173913,
-    "ic_bas": 0.17678424866798406,
-    "ic_haut": 0.28438946892546385
+    "n": 223,
+    "upside_min": -0.5550281553398059,
+    "upside_max": -0.2258455733728607,
+    "rendement_median": 0.09732777641578805,
+    "creux_median": -0.18546365914786966,
+    "taux_effondrement": 0.18834080717488788,
+    "ic_bas": 0.14246500561308062,
+    "ic_haut": 0.24477260865167505
    },
    {
     "paquet": 4,
-    "n": 230,
-    "upside_min": -0.2889318979704091,
-    "upside_max": 0.32692307692307687,
-    "rendement_median": 0.22758882519779466,
-    "creux_median": -0.16966634560166266,
-    "taux_effondrement": 0.1565217391304348,
-    "ic_bas": 0.1152524555367842,
-    "ic_haut": 0.20907649192166633
+    "n": 223,
+    "upside_min": -0.22543352601156064,
+    "upside_max": 0.44677661169415295,
+    "rendement_median": 0.3127147766323022,
+    "creux_median": -0.11840796019900512,
+    "taux_effondrement": 0.13004484304932734,
+    "ic_bas": 0.09209264893643115,
+    "ic_haut": 0.1805275406584227
    },
    {
     "paquet": 5,
-    "n": 231,
-    "upside_min": 0.3451204379562043,
-    "upside_max": 2819999.0,
-    "rendement_median": -0.05070422535211261,
-    "creux_median": -0.33333333333333326,
-    "taux_effondrement": 0.3333333333333333,
-    "ic_bas": 0.2757057369705146,
-    "ic_haut": 0.3964136830981614
+    "n": 226,
+    "upside_min": 0.4499707431246345,
+    "upside_max": 17399.0,
+    "rendement_median": 0.19819413092550786,
+    "creux_median": -0.23757777415452375,
+    "taux_effondrement": 0.2168141592920354,
+    "ic_bas": 0.16806318311936697,
+    "ic_haut": 0.27503153950699827
    }
   ],
-  "spearman": 0.6999999999999998,
-  "auc_upside": 0.5898641304347826
+  "spearman": 0.8999999999999998,
+  "auc_upside": 0.6136181079809653
  },
- "spearman_familles": 0.8999999999999998,
- "spearman_creux": 0.8999999999999998,
- "p_F_contre_A": 7.09897723716324e-07,
- "ecart_F_moins_A": 0.2609289617486339,
+ "spearman_familles": 0.9999999999999998,
+ "spearman_creux": 0.9999999999999998,
+ "p_F_contre_A": 4.440892098500626e-15,
+ "ecart_F_moins_A": 0.38169597392898363,
  "par_taille": [
   {
    "paquet": 1,
-   "cap_min": 4.105316e-09,
-   "cap_max": 0.02603925,
-   "n": 502,
-   "spearman": -0.4999999999999999
+   "cap_min": 2.68593e-11,
+   "cap_max": 0.0277652017053,
+   "n": 532,
+   "spearman": 0.5999999999999999
   },
   {
    "paquet": 2,
-   "cap_min": 0.0268557784,
-   "cap_max": 0.86890401,
-   "n": 502,
+   "cap_min": 0.0277652017053,
+   "cap_max": 1.0687797993600001,
+   "n": 532,
    "spearman": 0.9999999999999998
   },
   {
    "paquet": 3,
-   "cap_min": 0.8704616291976001,
-   "cap_max": 3076.33172,
-   "n": 504,
+   "cap_min": 1.09815156,
+   "cap_max": 1733.7231,
+   "n": 532,
    "spearman": 0.9999999999999998
   }
  ],
- "genere": "2026-07-31"
+ "genere": "2026-08-02"
 }
