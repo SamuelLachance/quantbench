@@ -384,6 +384,24 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         if marge_fin <= 0:
             marge_fin = 0.02
     tx = tax_rate(pays_exploitation(fund))      # impot du pays d'EXPLOITATION
+    # LE TAUX DE DEPART EST L'EFFECTIF MESURE, le taux d'arrivee le marginal — et
+    # jamais en dessous du statutaire en perpetuite (Damodaran, Investment
+    # Valuation ch. 10 : « the effective tax rate... adjust the tax rate towards
+    # the marginal tax rate over time »). Les deux bouts recevaient le taux
+    # statutaire du pays : Equinor, taxee a ~78 % sur son amont petrolier
+    # norvegien (effectif publie 2025 : 79,8 %), etait projetee a 22 % et
+    # ressortait a +621 % d'upside pour 95 Md$ de capitalisation.
+    # Quand l'effectif DEPASSE le statutaire, l'ecart est STRUCTUREL (taxe
+    # petroliere, prelevements sectoriels) : il ne converge pas vers le bas, on le
+    # garde en terminal. Quand il est en dessous, on converge vers le statutaire —
+    # aucun avantage fiscal n'est eternel. Bornes [0 ; 0,85] contre une donnee
+    # aberrante.
+    eff = fund.get("taux_effectif")
+    if eff is not None:
+        tx_depart = _clamp(eff, 0.0, 0.85)
+        tx_terminal = max(tx, tx_depart)
+    else:
+        tx_depart, tx_terminal = tx, tx
 
     debt = fund.get("total_debt") or 0.0
     cash = fund.get("cash") or 0.0
@@ -521,7 +539,8 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
         current_operating_margin=op_margin,
         terminal_operating_margin=marge_fin,
         margin_converge_start=3,
-        current_tax_rate=tx, marginal_tax_rate=tx, tax_converge_start=5,
+        current_tax_rate=tx_depart, marginal_tax_rate=tx_terminal,
+        tax_converge_start=5,
         current_sales_to_capital=s2c, terminal_sales_to_capital=s2c, s2c_converge_start=3,
         # La prime de taille est passee TELLE QUELLE au moteur, qui l'ajoute au cout
         # des fonds propres. Elle etait auparavant divisee par le beta puis injectee

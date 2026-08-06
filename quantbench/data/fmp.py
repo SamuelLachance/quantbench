@@ -923,6 +923,19 @@ def fundamentals_from_fmp(symbol, sr, entry, desc, reference=None):
         # EBIT / charge d'interets. Mediane et non dernier exercice, pour qu'un
         # cyclique en creux ne perde pas trois crans une annee et les reprenne la
         # suivante — la meme discipline que la dimension de solvabilite D1.
+        # TAUX D'IMPOT EFFECTIF, mediane pluriannuelle mesuree sur les comptes.
+        # Le DCF prenait le taux STATUTAIRE du pays pour toute la projection : 22 %
+        # pour Equinor, dont l'amont petrolier norvegien est taxe a 78 % (taux
+        # effectif publie 2025 : 79,8 %) — l'equite ressortait a 687 Md$ pour une
+        # capitalisation de 95, upside +621 %. Damodaran : partir de l'EFFECTIF,
+        # converger vers le marginal, jamais en dessous. Seuls les exercices a
+        # resultat avant impot POSITIF entrent dans la mesure — un taux sur une
+        # perte n'a pas de sens.
+        "taux_effectif": (lambda ts: sorted(ts)[len(ts) // 2] if ts else None)(
+            [_num(inc[yy].get("incomeTaxExpense")) / _num(inc[yy].get("incomeBeforeTax"))
+             for yy in inc
+             if _num(inc[yy].get("incomeBeforeTax")) and _num(inc[yy].get("incomeBeforeTax")) > 0
+             and _num(inc[yy].get("incomeTaxExpense")) is not None]),
         "couverture_interets": (lambda cs: sorted(cs)[len(cs) // 2] if cs else None)(
             [_num(inc[yy].get("operatingIncome")) / abs(_num(inc[yy].get("interestExpense")))
              for yy in inc

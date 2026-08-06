@@ -4920,3 +4920,45 @@ def test_la_cadence_espace_les_departs_de_requetes(monkeypatch):
     i_boucle = code.index("for attempt in range(retries):")
     assert "_attendre_son_tour()" in code[i_boucle:], (
         "le regulateur n'est plus dans la boucle de reessai")
+
+
+def test_l_impot_part_de_l_effectif_mesure_et_ne_descend_jamais_sous_le_statutaire():
+    """Damodaran (Investment Valuation ch. 10) : le DCF part du taux EFFECTIF et
+    converge vers le marginal — jamais en dessous en perpetuite. Les deux bouts
+    recevaient le taux statutaire du pays : Equinor, taxee a ~78 % sur son amont
+    petrolier norvegien (effectif publie 2025 : 79,8 %), etait projetee a 22 % et
+    ressortait a +596 % d'upside pour 95 Md$ de capitalisation. Mesure apres
+    correction sur les memes chiffres : +231 %.
+
+    Quand l'effectif DEPASSE le statutaire, l'ecart est STRUCTUREL (taxe
+    petroliere, prelevements sectoriels) : il tient en terminal. Quand il est en
+    dessous, il converge vers le statutaire — aucun avantage fiscal n'est eternel.
+    """
+    from quantbench.valuation.build_universal import build_dcf_from_fundamentals
+
+    base = {"revenue": 100.0, "ebit": 25.0, "net_income": 15.0, "book_equity": 40.0,
+            "total_assets": 130.0, "total_debt": 30.0, "cash": 18.0,
+            "market_cap": 95.0, "shares": 2000.0, "price": 40.0, "beta": 0.8,
+            "country": "NO", "sector": "Energy", "industry": "Oil & Gas Integrated",
+            "operating_margin": 0.25, "tax_rate": 0.22, "dep_amort": 9.0,
+            "capex": -10.0, "cfo": 20.0,
+            "revenue_history": [80.0, 85.0, 90.0, 94.0, 97.0, 100.0]}
+
+    def taux(eff):
+        f = dict(base)
+        if eff is not None:
+            f["taux_effectif"] = eff
+        x, _ = build_dcf_from_fundamentals(f, erp=0.045, rf=0.042)
+        return x.current_tax_rate, x.marginal_tax_rate
+
+    # Effectif AU-DESSUS du statutaire norvegien (22 %) : il tient en terminal.
+    assert taux(0.706) == (pytest.approx(0.706), pytest.approx(0.706))
+    # Effectif EN DESSOUS : depart mesure, arrivee statutaire — convergence vers
+    # le haut, jamais l'inverse.
+    cur, term = taux(0.12)
+    assert cur == pytest.approx(0.12) and term == pytest.approx(0.22)
+    # Sans mesure : le statutaire aux deux bouts, comme avant.
+    assert taux(None) == (pytest.approx(0.22), pytest.approx(0.22))
+    # Une donnee aberrante est bornee, pas projetee.
+    cur, _ = taux(1.40)
+    assert cur == pytest.approx(0.85)
