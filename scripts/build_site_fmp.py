@@ -252,6 +252,9 @@ def _methodologie(fund, val, F):
     pays = pays_exploitation(fund)
     h = {"beta": fund.get("beta"),
          "prime_risque_actions_pct": round(country_erp(pays) * 100, 2),
+         # Le taux statutaire du pays sert de valeur d'attente ; des que le DCF a
+         # tourne, les taux REELLEMENT utilises (effectif mesure -> terminal)
+         # l'ecrasent plus bas — la fiche doit dire ce que le moteur a fait.
          "taux_impot_pct": round(tax_rate(pays) * 100, 1),
          "pays_exploitation": pays, "pays_declare": fund.get("country"),
          "secteur": fund.get("sector"), "industrie": fund.get("industry")}
@@ -263,6 +266,9 @@ def _methodologie(fund, val, F):
         try:
             _, meta = build_dcf_from_fundamentals(
                 fund, **_route_forme(fund, cat, F))
+            if meta.get("taux_impot_depart") is not None:
+                h["taux_impot_pct"] = round(meta["taux_impot_depart"] * 100, 1)
+                h["taux_impot_terminal_pct"] = round(meta["taux_impot_terminal"] * 100, 1)
             h.update({"croissance_initiale_pct": round(meta["g_start"] * 100, 2),
                       "marge_operationnelle_pct": round(meta["op_margin"] * 100, 2),
                       "roic_courant_pct": round(meta["cur_roic"] * 100, 2),

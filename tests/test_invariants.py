@@ -4962,3 +4962,24 @@ def test_l_impot_part_de_l_effectif_mesure_et_ne_descend_jamais_sous_le_statutai
     # Une donnee aberrante est bornee, pas projetee.
     cur, _ = taux(1.40)
     assert cur == pytest.approx(0.85)
+
+
+def test_la_fiche_affiche_les_taux_d_impot_reellement_passes_au_moteur():
+    """Equinor etait valorisee a ~70 % d'impot effectif avec « 22,0 % » affiche en
+    hypothese : la ligne lisait la table pays au lieu des taux du DCF. La fiche
+    doit dire ce que le moteur a fait — les taux transitent par le meta du
+    constructeur, source unique, jamais par une recopie de la regle.
+    """
+    from quantbench.valuation.build_universal import build_dcf_from_fundamentals
+
+    f = {"revenue": 100.0, "ebit": 25.0, "net_income": 6.0, "book_equity": 40.0,
+         "total_assets": 130.0, "total_debt": 30.0, "cash": 18.0,
+         "market_cap": 95.0, "shares": 2000.0, "price": 40.0, "beta": 0.8,
+         "country": "NO", "sector": "Energy", "industry": "Oil & Gas Integrated",
+         "operating_margin": 0.25, "tax_rate": 0.22, "dep_amort": 9.0,
+         "capex": -10.0, "cfo": 20.0, "taux_effectif": 0.706,
+         "revenue_history": [80.0, 85.0, 90.0, 94.0, 97.0, 100.0]}
+    x, meta = build_dcf_from_fundamentals(f, erp=0.045, rf=0.042)
+    assert meta["taux_impot_depart"] == pytest.approx(x.current_tax_rate)
+    assert meta["taux_impot_terminal"] == pytest.approx(x.marginal_tax_rate)
+    assert meta["taux_impot_depart"] == pytest.approx(0.706)

@@ -560,7 +560,11 @@ def build_dcf_from_fundamentals(fund: dict, *, margin_override: float | None = N
     )
     meta = {"g_start": g_start, "g_financable": round(g_financable, 4), "op_margin": op_margin, "s2c": s2c,
             "cur_roic": cur_roic, "term_roic": term_roic, "rf": rf,
-            "beta": lev_beta, "erp": erp}
+            "beta": lev_beta, "erp": erp,
+            # Les taux REELLEMENT passes au moteur — la fiche publiee doit
+            # afficher ce que le DCF fait, pas la table pays : Equinor etait
+            # valorisee a ~70 % d'impot effectif avec « 22,0 % » en hypothese.
+            "taux_impot_depart": tx_depart, "taux_impot_terminal": tx_terminal}
     return x, meta
 
 
