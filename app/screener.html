@@ -35,6 +35,13 @@
       <div class="field"><label>Signaux forensiques</label>
         <select id="flags"><option value="">tous</option><option value="none">aucun</option>
         <option value="any">≥ 1 alerte</option><option value="beneish">M-Score alerté</option></select></div>
+      <div class="field"><label>Place</label><select id="exchange"></select></div>
+      <div class="field"><label>Grade de risque</label>
+        <select id="riskeq"><option value="">tous</option>
+        <option>A+</option><option>A</option><option>A-</option>
+        <option>B+</option><option>B</option><option>B-</option>
+        <option>C+</option><option>C</option><option>C-</option>
+        <option>D+</option><option>D</option><option>D-</option><option>F</option></select></div>
       <div class="field"><label>Risque au plus</label>
         <select id="riskmax"><option value="">tous</option>
         <option value="A-">A− ou mieux</option><option value="B">B ou mieux</option>
@@ -47,6 +54,11 @@
     </div>
     <div class="tableScroll">
       <table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table>
+    </div>
+    <div style="display:flex;justify-content:center;gap:10px;align-items:center;margin-top:10px">
+      <button class="toggle" id="pgPrev" type="button">&#9664; pr&eacute;c&eacute;dent</button>
+      <span id="pgInfo" class="mono" style="font-size:13px;color:var(--muted)"></span>
+      <button class="toggle" id="pgNext" type="button">suivant &#9654;</button>
     </div>
   </div>
   <p class="disclaimer" id="disc"></p>
@@ -75,16 +87,26 @@ function upCell(u){if(u==null)return'—';const cls=u>=0?'pos':'neg';const w=Mat
   const bar=u>=0?`<i style="left:50%;width:${w}px;background:var(--pos)"></i>`:`<i style="right:50%;width:${w}px;background:var(--neg)"></i>`;
   return `<span class="mono ${cls}" style="font-weight:600">${QB.pct(u)}</span> <span class="ubar"><span class="mid"></span>${bar}</span>`;}
 
+/* PAGINATION. Le tableau injectait les 15 000 lignes filtrees d'un coup dans le
+   DOM — environ 300 000 noeuds — a CHAQUE frappe : la page gelait. Le filtre et
+   le tri continuent de porter sur toutes les lignes (des operations de tableau,
+   rapides) ; seul le RENDU est pagine. */
+const PAGE=100;
+let FILTREES=[], PG=0;
 function apply(){
   const q=(document.getElementById('q').value||'').toUpperCase();
   const sec=document.getElementById('sector').value, cat=document.getElementById('category').value;
+  const exch=document.getElementById('exchange').value;
+  const geq=document.getElementById('riskeq').value;
   const upmin=parseFloat(document.getElementById('upmin').value), upmax=parseFloat(document.getElementById('upmax').value);
   const fmin=parseFloat(document.getElementById('fmin').value), capmin=parseFloat(document.getElementById('capmin').value);
   const fl=document.getElementById('flags').value;
-  let out=ROWS.filter(r=>{
+  FILTREES=ROWS.filter(r=>{
     if(q && !((r.ticker||'').includes(q)||(r.name||'').toUpperCase().includes(q)))return false;
     if(sec && r.sector!==sec)return false;
     if(cat && r.category!==cat)return false;
+    if(exch && r.exchange!==exch)return false;
+    if(geq && r.note_risque!==geq)return false;
     if(!isNaN(upmin)&&(r.upside==null||r.upside*100<upmin))return false;
     if(!isNaN(upmax)&&(r.upside==null||r.upside*100>upmax))return false;
     if(!isNaN(fmin)&&(r.piotroski==null||r.piotroski<fmin))return false;
@@ -100,10 +122,19 @@ function apply(){
     }
     return true;
   });
-  out.sort((a,b)=>{const x=a[SORT.key],y=b[SORT.key];
+  FILTREES.sort((a,b)=>{const x=a[SORT.key],y=b[SORT.key];
     if(x==null)return 1; if(y==null)return -1; return (x>y?1:x<y?-1:0)*SORT.dir;});
-  document.getElementById('count').textContent=`${out.length} titres`;
-  document.getElementById('body').innerHTML=out.map(r=>
+  PG=0; rendPage();
+}
+function rendPage(){
+  const n=FILTREES.length, pages=Math.max(1, Math.ceil(n/PAGE));
+  PG=Math.min(Math.max(PG,0), pages-1);
+  const tranche=FILTREES.slice(PG*PAGE, (PG+1)*PAGE);
+  document.getElementById('count').textContent=`${n} titres`;
+  document.getElementById('pgInfo').textContent=`page ${PG+1} / ${pages}`;
+  document.getElementById('pgPrev').disabled=(PG<=0);
+  document.getElementById('pgNext').disabled=(PG>=pages-1);
+  document.getElementById('body').innerHTML=tranche.map(r=>
     `<tr onclick="location.href='stock.html?t=${r.ticker}'">`+COLS.map(c=>`<td class="${c.num?'num':''}">${c.fmt(r)}</td>`).join('')+`</tr>`).join('');
 }
 function renderHead(){
@@ -123,7 +154,16 @@ function renderHead(){
   const cats=[...new Set(ROWS.map(r=>r.category).filter(Boolean))].sort();
   document.getElementById('sector').innerHTML='<option value="">tous</option>'+sectors.map(s=>`<option>${s}</option>`).join('');
   document.getElementById('category').innerHTML='<option value="">toutes</option>'+cats.map(s=>`<option>${s}</option>`).join('');
-  document.querySelectorAll('.filters input,.filters select').forEach(el=>el.addEventListener('input',apply));
+  const exchs=[...new Set(ROWS.map(r=>r.exchange).filter(Boolean))].sort();
+  document.getElementById('exchange').innerHTML='<option value="">toutes</option>'+exchs.map(s=>`<option>${s}</option>`).join('');
+  /* DEBOUNCE : chaque frappe refiltrait et retriait 15 000 lignes. 150 ms de
+     silence rendent la saisie fluide sans se faire sentir. */
+  let _t=null;
+  const differe=()=>{clearTimeout(_t);_t=setTimeout(apply,150);};
+  document.querySelectorAll('.filters input').forEach(el=>el.addEventListener('input',differe));
+  document.querySelectorAll('.filters select').forEach(el=>el.addEventListener('input',apply));
+  document.getElementById('pgPrev').onclick=()=>{PG--;rendPage();};
+  document.getElementById('pgNext').onclick=()=>{PG++;rendPage();};
   document.getElementById('reset').onclick=()=>{document.querySelectorAll('.filters input,.filters select').forEach(el=>el.value='');apply();};
   /* COUVERTURE REELLE. Cette ligne affichait « 0 écartés » parce que le producteur
      écrivait n_suspect=0 en dur, alors que 30 % de l'univers ne produisait aucune

@@ -42,7 +42,25 @@ const QB = {
     if (!inp) return;
     const uni = await this.universe();
     const dl = document.getElementById('tickerList');
-    if (dl) dl.innerHTML = uni.map(r => `<option value="${r.ticker}">${r.name || ''}</option>`).join('');
+    /* DATALIST PARESSEUSE : 15 000 <option> montes d'un coup gelaient chaque page.
+       On ne materialise que les 30 meilleures correspondances, a la frappe. */
+    if (dl) {
+      const remplir = () => {
+        const q = (inp.value || '').trim().toUpperCase();
+        if (q.length < 1) { dl.innerHTML = ''; return; }
+        const hits = [];
+        for (const r of uni) {
+          if ((r.ticker || '').startsWith(q)
+              || (r.name || '').toUpperCase().includes(q)) {
+            hits.push(r);
+            if (hits.length >= 30) break;
+          }
+        }
+        dl.innerHTML = hits.map(r =>
+          `<option value="${r.ticker}">${r.name || ''}</option>`).join('');
+      };
+      inp.addEventListener('input', remplir);
+    }
     const go = () => {
       const t = (inp.value || '').trim().toUpperCase().split(/\s|—/)[0];
       if (t) location.href = 'stock.html?t=' + encodeURIComponent(t);
